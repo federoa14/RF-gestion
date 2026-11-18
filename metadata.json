@@ -1,0 +1,6 @@
+{
+  "name": "Cobranzas Distribuidora - Control de Boletas Fiadas y Vencimientos",
+  "description": "Sistema integral para distribuidora de gestión de boletas firmadas en cuenta corriente, alertas automáticas a vendedores y administradores por WhatsApp y correo, vencimientos configurables y archivo histórico de pagos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

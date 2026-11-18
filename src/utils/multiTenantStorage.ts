@@ -1,0 +1,1052 @@
+import {
+  Tenant,
+  PlatformUser,
+  DistributorConfig,
+  Client,
+  Salesperson,
+  Administrator,
+  Boleta,
+  BroadcastMessage,
+  AutoDispatchLog,
+  PlatformBillingConfig,
+  PlatformSupportConfig,
+  PlatformAnnouncement,
+  SalespersonRendicion,
+  BusinessRubro,
+} from '../types';
+import { applyRubroProfileToConfig, getRubroProfile } from './businessMode';
+import {
+  DEFAULT_CONFIG,
+  loadClients,
+  saveClients,
+  loadSalespeople,
+  loadAdministrators,
+  loadBoletas,
+  saveBoletas,
+  loadPaidBoletas,
+  savePaidBoletas,
+  loadBroadcastMessages,
+  loadAutoDispatchLogs,
+  loadRendiciones,
+} from './storage';
+import { purgeExpiredBoletas } from './retentionPurge';
+import { dbGetItem, dbSetItem, dbRemoveItem } from './localInternalDb';
+
+const STORAGE_KEYS = {
+  TENANTS: 'saas_distribuidoras_tenants_v2_zero',
+  USERS: 'saas_distribuidoras_users_v2_zero',
+  CURRENT_USER: 'saas_distribuidoras_session_user_v2_zero',
+  ACTIVE_TENANT_ID: 'saas_distribuidoras_active_tenant_id_v2_zero',
+  TENANT_DATA_PREFIX: 'saas_distribuidora_data_v2_',
+  PLATFORM_BILLING: 'saas_platform_billing_config_v1',
+  PLATFORM_SUPPORT: 'saas_platform_support_config_v1',
+  PLATFORM_ANNOUNCEMENTS: 'saas_platform_announcements_v1',
+  DISMISSED_ANNOUNCEMENTS: 'saas_dismissed_announcements_v1',
+};
+
+export const DEFAULT_PLATFORM_BILLING_CONFIG: PlatformBillingConfig = {
+  alias: 'cobranzas.gestion.mp',
+  cvu: '',
+  accountHolderName: 'Federico Roa',
+  bankOrWalletName: 'Mercado Pago',
+  defaultMonthlyFee: 25000,
+  annualDiscountPercent: 0,
+  mpCheckoutLink: '',
+  mpPublicKey: '',
+  hasMpAccessToken: false,
+};
+
+export const DEFAULT_PLATFORM_SUPPORT_CONFIG: PlatformSupportConfig = {
+  contactName: 'Federico Roa · Asistencia Técnica',
+  whatsappPhone: '',
+  email: 'federoa14@gmail.com',
+  attentionHours: 'Lunes a Viernes de 9:00 a 19:00 hs',
+  welcomeMessage:
+    'Comunicate de forma directa por WhatsApp o correo electrónico para evacuar dudas, recibir asistencia técnica o consultar sobre tu cuenta.',
+};
+
+// Purge old mock/demo keys
+function purgeLegacyTenantKeys() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const keys = [
+        'saas_distribuidoras_tenants_v1',
+        'saas_distribuidoras_users_v1',
+        'saas_distribuidoras_session_user_v1',
+        'saas_distribuidoras_active_tenant_id_v1',
+        'saas_distribuidora_data_dist-bebidas',
+        'saas_distribuidora_data_dist-lacteos',
+      ];
+      for (const k of keys) {
+        dbRemoveItem(k);
+      }
+    }
+  } catch (e) {}
+}
+purgeLegacyTenantKeys();
+
+// INITIAL SEED TENANTS - ONLY 1 SINGLE WORKING DISTRIBUTOR (DIST-001)
+export const INITIAL_TENANTS: Tenant[] = [
+  {
+    id: 'dist-central',
+    tenantCode: 'DIST-001',
+    name: 'Distribuidora Central & Logística',
+    businessCategory: 'Distribución y Cobranzas',
+    phone: '+54 9 11 3290-8811',
+    email: 'federoa14@gmail.com',
+    address: 'Av. Juan B. Justo 4500',
+    city: 'CABA',
+    province: 'Ciudad Autónoma de Buenos Aires',
+    cuit: '30-71234567-8',
+    status: 'active',
+    icon: 'building',
+    createdAt: new Date().toISOString().split('T')[0],
+    notes: 'Distribuidora principal limpia lista para operar.',
+    config: {
+      ...DEFAULT_CONFIG,
+      distributorName: 'Distribuidora Central & Logística',
+      distributorPhone: '+54 9 11 3290-8811',
+      distributorEmail: 'federoa14@gmail.com',
+      tenantId: 'dist-central',
+      tenantCode: 'DIST-001',
+    },
+  },
+];
+
+// INITIAL SEED USERS - SUPER ADMINS AND OWNER OF DIST-001
+export const INITIAL_USERS: PlatformUser[] = [
+  {
+    id: 'usr-superadmin',
+    username: 'admin',
+    password: 'admin123',
+    fullName: 'Federico Roa',
+    email: 'federoa14@gmail.com',
+    phone: '+54 9 11 3290-8811',
+    role: 'superadmin',
+    tenantId: 'all',
+    tenantCode: 'MASTER',
+    createdAt: new Date().toISOString().split('T')[0],
+    active: true,
+  },
+  {
+    id: 'usr-federoa',
+    username: 'federoa',
+    password: '123456',
+    fullName: 'Federico Roa (Maestro)',
+    email: 'federoa14@gmail.com',
+    phone: '+54 9 11 3290-8811',
+    role: 'superadmin',
+    tenantId: 'all',
+    tenantCode: 'MASTER',
+    createdAt: new Date().toISOString().split('T')[0],
+    active: true,
+  },
+  {
+    id: 'usr-dueno-central',
+    username: 'dueno1',
+    password: '1234',
+    fullName: 'Roberto Gómez (Dueño Central)',
+    email: 'roberto@distribuidoracentral.com',
+    phone: '+54 9 11 3290-8811',
+    role: 'dueño',
+    tenantId: 'dist-central',
+    tenantCode: 'DIST-001',
+    createdAt: new Date().toISOString().split('T')[0],
+    active: true,
+  },
+];
+
+// Complete Tenant Data structure for isolation
+export interface TenantData {
+  config: DistributorConfig;
+  clients: Client[];
+  salespeople: Salesperson[];
+  admins: Administrator[];
+  boletas: Boleta[];
+  paidBoletas: Boleta[];
+  broadcasts: BroadcastMessage[];
+  autoLogs: AutoDispatchLog[];
+  rendiciones?: SalespersonRendicion[];
+}
+
+// TENANTS STORAGE
+export function loadTenants(): Tenant[] {
+  try {
+    const raw = dbGetItem(STORAGE_KEYS.TENANTS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.warn('Error reading tenants from internal db', e);
+  }
+  saveTenants(INITIAL_TENANTS);
+  return INITIAL_TENANTS;
+}
+
+export function saveTenants(tenants: Tenant[]): void {
+  try {
+    dbSetItem(STORAGE_KEYS.TENANTS, JSON.stringify(tenants));
+  } catch (e) {
+    console.error('Error saving tenants', e);
+  }
+}
+
+// PLATFORM BILLING CONFIG (ALIAS + MERCADO PAGO - CONFIGURED BY SUPERADMIN)
+export function loadPlatformBillingConfig(): PlatformBillingConfig {
+  try {
+    const raw = dbGetItem(STORAGE_KEYS.PLATFORM_BILLING);
+    if (raw) {
+      return {
+        ...DEFAULT_PLATFORM_BILLING_CONFIG,
+        ...JSON.parse(raw),
+      };
+    }
+  } catch (e) {
+    console.warn('Error reading platform billing config', e);
+  }
+  return DEFAULT_PLATFORM_BILLING_CONFIG;
+}
+
+export function savePlatformBillingConfig(config: PlatformBillingConfig): void {
+  try {
+    dbSetItem(
+      STORAGE_KEYS.PLATFORM_BILLING,
+      JSON.stringify({
+        ...config,
+        updatedAt: new Date().toISOString(),
+      })
+    );
+  } catch (e) {
+    console.error('Error saving platform billing config', e);
+  }
+}
+
+export async function fetchPlatformBillingConfigFromServer(): Promise<PlatformBillingConfig> {
+  try {
+    const res = await fetch('/api/platform/billing-config');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.billingConfig) {
+        const merged = {
+          ...loadPlatformBillingConfig(),
+          ...data.billingConfig,
+        };
+        savePlatformBillingConfig(merged);
+        return merged;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch platform billing config from server', e);
+  }
+  return loadPlatformBillingConfig();
+}
+
+export async function persistPlatformBillingConfigToServer(
+  config: PlatformBillingConfig & { mpAccessToken?: string }
+): Promise<PlatformBillingConfig> {
+  savePlatformBillingConfig(config);
+  try {
+    const res = await fetch('/api/platform/billing-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.billingConfig) {
+        savePlatformBillingConfig(data.billingConfig);
+        return data.billingConfig;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not persist platform billing config to server', e);
+  }
+  return loadPlatformBillingConfig();
+}
+
+// PLATFORM SUPPORT / CONTACT CHANNELS CONFIG (CONFIGURED BY SUPERADMIN)
+export function loadPlatformSupportConfig(): PlatformSupportConfig {
+  try {
+    const raw = dbGetItem(STORAGE_KEYS.PLATFORM_SUPPORT);
+    if (raw) {
+      return {
+        ...DEFAULT_PLATFORM_SUPPORT_CONFIG,
+        ...JSON.parse(raw),
+      };
+    }
+  } catch (e) {
+    console.warn('Error reading platform support config', e);
+  }
+  return DEFAULT_PLATFORM_SUPPORT_CONFIG;
+}
+
+export function savePlatformSupportConfig(config: PlatformSupportConfig): void {
+  try {
+    dbSetItem(
+      STORAGE_KEYS.PLATFORM_SUPPORT,
+      JSON.stringify({
+        ...config,
+        updatedAt: new Date().toISOString(),
+      })
+    );
+  } catch (e) {
+    console.error('Error saving platform support config', e);
+  }
+}
+
+export async function fetchPlatformSupportConfigFromServer(): Promise<PlatformSupportConfig> {
+  try {
+    const res = await fetch('/api/platform/support-config');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.supportConfig) {
+        const merged = {
+          ...loadPlatformSupportConfig(),
+          ...data.supportConfig,
+        };
+        savePlatformSupportConfig(merged);
+        return merged;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch platform support config from server', e);
+  }
+  return loadPlatformSupportConfig();
+}
+
+export async function persistPlatformSupportConfigToServer(
+  config: PlatformSupportConfig
+): Promise<PlatformSupportConfig> {
+  savePlatformSupportConfig(config);
+  try {
+    const res = await fetch('/api/platform/support-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.supportConfig) {
+        savePlatformSupportConfig(data.supportConfig);
+        return data.supportConfig;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not persist platform support config to server', e);
+  }
+  return loadPlatformSupportConfig();
+}
+
+// PLATFORM ANNOUNCEMENTS (COMUNICADOS Y NOVEDADES DEL SUPERADMINISTRADOR)
+export function loadPlatformAnnouncements(): PlatformAnnouncement[] {
+  try {
+    const raw = dbGetItem(STORAGE_KEYS.PLATFORM_ANNOUNCEMENTS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('Error reading platform announcements', e);
+  }
+  return [];
+}
+
+export function savePlatformAnnouncements(list: PlatformAnnouncement[]): void {
+  try {
+    dbSetItem(STORAGE_KEYS.PLATFORM_ANNOUNCEMENTS, JSON.stringify(list));
+  } catch (e) {
+    console.error('Error saving platform announcements', e);
+  }
+}
+
+export async function fetchPlatformAnnouncementsFromServer(params?: {
+  onlyActive?: boolean;
+  audience?: string;
+}): Promise<PlatformAnnouncement[]> {
+  try {
+    const query = new URLSearchParams();
+    if (params?.onlyActive) query.set('onlyActive', 'true');
+    if (params?.audience) query.set('audience', params.audience);
+    const qs = query.toString();
+    const res = await fetch(`/api/platform/announcements${qs ? `?${qs}` : ''}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.announcements)) {
+        if (!params?.onlyActive && !params?.audience) {
+          savePlatformAnnouncements(data.announcements);
+        }
+        return data.announcements;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not fetch platform announcements from server', e);
+  }
+  const local = loadPlatformAnnouncements();
+  if (!params?.onlyActive && !params?.audience) return local;
+  const today = new Date().toISOString().split('T')[0];
+  return local.filter((a) => {
+    if (params?.onlyActive && (!a.active || (a.expiresAt && a.expiresAt < today))) return false;
+    if (params?.audience && params.audience !== 'all' && a.audience !== 'all' && a.audience !== params.audience) {
+      return false;
+    }
+    return true;
+  });
+}
+
+export async function savePlatformAnnouncementToServer(
+  announcement: Omit<PlatformAnnouncement, 'id' | 'createdAt'> & { id?: string; createdAt?: string }
+): Promise<PlatformAnnouncement[]> {
+  try {
+    const res = await fetch('/api/platform/announcements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(announcement),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.announcements)) {
+        savePlatformAnnouncements(data.announcements);
+        return data.announcements;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not save announcement to server', e);
+  }
+  const current = loadPlatformAnnouncements();
+  const newItem: PlatformAnnouncement = {
+    ...announcement,
+    id: announcement.id || `ann-${Date.now()}`,
+    createdAt: announcement.createdAt || new Date().toISOString(),
+  };
+  const updated = current.some((x) => x.id === newItem.id)
+    ? current.map((x) => (x.id === newItem.id ? newItem : x))
+    : [newItem, ...current];
+  savePlatformAnnouncements(updated);
+  return updated;
+}
+
+export async function togglePlatformAnnouncementOnServer(
+  id: string,
+  active: boolean
+): Promise<PlatformAnnouncement[]> {
+  try {
+    const res = await fetch(`/api/platform/announcements/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.announcements)) {
+        savePlatformAnnouncements(data.announcements);
+        return data.announcements;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not toggle announcement on server', e);
+  }
+  const updated = loadPlatformAnnouncements().map((x) => (x.id === id ? { ...x, active } : x));
+  savePlatformAnnouncements(updated);
+  return updated;
+}
+
+export async function deletePlatformAnnouncementFromServer(id: string): Promise<PlatformAnnouncement[]> {
+  try {
+    const res = await fetch(`/api/platform/announcements/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && Array.isArray(data.announcements)) {
+        savePlatformAnnouncements(data.announcements);
+        return data.announcements;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not delete announcement on server', e);
+  }
+  const updated = loadPlatformAnnouncements().filter((x) => x.id !== id);
+  savePlatformAnnouncements(updated);
+  return updated;
+}
+
+export function loadDismissedAnnouncementIds(tenantId?: string): string[] {
+  try {
+    const key = tenantId
+      ? `${STORAGE_KEYS.DISMISSED_ANNOUNCEMENTS}_${tenantId}`
+      : STORAGE_KEYS.DISMISSED_ANNOUNCEMENTS;
+    const raw = dbGetItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function dismissAnnouncementId(id: string, tenantId?: string): string[] {
+  const existing = loadDismissedAnnouncementIds(tenantId);
+  if (existing.includes(id)) return existing;
+  const next = [...existing, id];
+  try {
+    const key = tenantId
+      ? `${STORAGE_KEYS.DISMISSED_ANNOUNCEMENTS}_${tenantId}`
+      : STORAGE_KEYS.DISMISSED_ANNOUNCEMENTS;
+    dbSetItem(key, JSON.stringify(next));
+  } catch {
+    // ignore
+  }
+  return next;
+}
+
+// PLATFORM USERS STORAGE
+export function loadPlatformUsers(): PlatformUser[] {
+  try {
+    const raw = dbGetItem(STORAGE_KEYS.USERS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.warn('Error reading users from internal db', e);
+  }
+  savePlatformUsers(INITIAL_USERS);
+  return INITIAL_USERS;
+}
+
+export function savePlatformUsers(users: PlatformUser[]): void {
+  try {
+    dbSetItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+  } catch (e) {
+    console.error('Error saving users', e);
+  }
+}
+
+// SESSION USER STORAGE
+export function getCurrentSessionUser(): PlatformUser | null {
+  try {
+    const raw = dbGetItem(STORAGE_KEYS.CURRENT_USER);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.warn('Error reading current session user', e);
+  }
+  return null;
+}
+
+export function setCurrentSessionUser(user: PlatformUser | null): void {
+  try {
+    if (user) {
+      dbSetItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+    } else {
+      dbRemoveItem(STORAGE_KEYS.CURRENT_USER);
+    }
+  } catch (e) {
+    console.error('Error saving session user', e);
+  }
+}
+
+// ACTIVE TENANT ID STORAGE
+export function getActiveTenantId(): string {
+  try {
+    const raw = dbGetItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
+    if (raw) return raw;
+  } catch (e) {}
+  return 'dist-central';
+}
+
+export function setActiveTenantId(tenantId: string): void {
+  try {
+    dbSetItem(STORAGE_KEYS.ACTIVE_TENANT_ID, tenantId);
+  } catch (e) {}
+}
+
+// PARTITIONED TENANT DATA
+export function loadTenantData(tenantId: string): TenantData {
+  const key = `${STORAGE_KEYS.TENANT_DATA_PREFIX}${tenantId}`;
+  let data: TenantData | null = null;
+
+  try {
+    const raw = dbGetItem(key);
+    if (raw) {
+      data = JSON.parse(raw);
+    }
+  } catch (e) {
+    console.warn(`Error reading data for tenant ${tenantId}`, e);
+  }
+
+  if (!data) {
+    // For dist-central, pull clean zero arrays from storage
+    if (tenantId === 'dist-central') {
+      data = {
+        config: {
+          ...DEFAULT_CONFIG,
+          distributorName: 'Distribuidora Central & Logística',
+          tenantId: 'dist-central',
+          tenantCode: 'DIST-001',
+        },
+        clients: loadClients(),
+        salespeople: loadSalespeople(),
+        admins: loadAdministrators(),
+        boletas: loadBoletas(),
+        paidBoletas: loadPaidBoletas(),
+        broadcasts: loadBroadcastMessages(),
+        autoLogs: loadAutoDispatchLogs(),
+        rendiciones: loadRendiciones(),
+      };
+    } else {
+      const tenants = loadTenants();
+      const currentTenant = tenants.find((t) => t.id === tenantId);
+
+      data = {
+        config: currentTenant?.config || {
+          ...DEFAULT_CONFIG,
+          distributorName: currentTenant?.name || 'Distribuidora',
+          tenantId,
+          tenantCode: currentTenant?.tenantCode || 'DIST-NEW',
+        },
+        clients: [],
+        salespeople: [],
+        admins: [],
+        boletas: [],
+        paidBoletas: [],
+        broadcasts: [],
+        autoLogs: [],
+        rendiciones: [],
+      };
+    }
+  }
+
+  // REGLA DE RETENCIÓN DE 30 DÍAS:
+  // Purgar boletas mayores a 30 días y preservar el perfil crediticio permanente de los clientes
+  if (data) {
+    const purgeResult = purgeExpiredBoletas(data.boletas || [], data.paidBoletas || [], data.clients || []);
+    if (purgeResult.totalPurged > 0) {
+      data.boletas = purgeResult.survivingBoletas;
+      data.paidBoletas = purgeResult.survivingPaidBoletas;
+      data.clients = purgeResult.updatedClients;
+      data.config = {
+        ...data.config,
+        totalPurgedBoletasCount: (data.config.totalPurgedBoletasCount || 0) + purgeResult.totalPurged,
+        lastRetentionPurgeDate: new Date().toISOString().split('T')[0],
+      };
+      saveTenantData(tenantId, data);
+      if (tenantId === 'dist-central') {
+        saveBoletas(data.boletas);
+        savePaidBoletas(data.paidBoletas);
+        saveClients(data.clients);
+      }
+      console.log(`[RETENCIÓN 30 DÍAS] Purgadas ${purgeResult.totalPurged} boletas (>30 días) para distribuidora ${tenantId}. Clientes problemáticos actualizados.`);
+    }
+  }
+
+  return data;
+}
+
+export function saveTenantData(tenantId: string, data: TenantData): void {
+  const key = `${STORAGE_KEYS.TENANT_DATA_PREFIX}${tenantId}`;
+  try {
+    dbSetItem(key, JSON.stringify(data));
+  } catch (e) {
+    console.error(`Error saving data for tenant ${tenantId}`, e);
+  }
+}
+
+// USER AUTHENTICATION & MULTI-TENANT RESOLVER
+export function authenticateUser(
+  usernameOrEmail: string,
+  pass: string,
+  tenantCodeInput?: string
+): { success: boolean; user?: PlatformUser; tenant?: Tenant; error?: string } {
+  const users = loadPlatformUsers();
+  const tenants = loadTenants();
+
+  const cleanUser = usernameOrEmail.trim().toLowerCase();
+  const cleanPass = pass.trim();
+  const cleanCode = tenantCodeInput?.trim().toUpperCase();
+
+  const matchedUser = users.find(
+    (u) =>
+      u.active &&
+      (u.username.toLowerCase() === cleanUser || u.email.toLowerCase() === cleanUser) &&
+      u.password === cleanPass
+  );
+
+  if (!matchedUser) {
+    return { success: false, error: 'Usuario o contraseña incorrectos.' };
+  }
+
+  // Superadmin doesn't need tenant code
+  if (matchedUser.role === 'superadmin') {
+    return { success: true, user: matchedUser };
+  }
+
+  // Find tenant by user's assigned tenantId or tenantCode
+  let tenant = tenants.find((t) => t.id === matchedUser.tenantId || t.tenantCode === matchedUser.tenantCode);
+
+  // If user provided a specific tenant code, verify it matches
+  if (cleanCode && tenant && tenant.tenantCode !== cleanCode) {
+    return { success: false, error: `El usuario no pertenece a la distribuidora ${cleanCode}.` };
+  }
+
+  if (!tenant && cleanCode) {
+    tenant = tenants.find((t) => t.tenantCode === cleanCode);
+  }
+
+  if (!tenant) {
+    return { success: false, error: 'Distribuidora no encontrada o inactiva.' };
+  }
+
+  // Permitimos iniciar sesión aunque esté pausada para que App.tsx muestre la pantalla de Cuenta Pausada con botón de Pago/Reactivación
+  return { success: true, user: matchedUser, tenant };
+}
+
+export interface SelfTrialRegistrationInput {
+  companyName: string;
+  ownerName: string;
+  username: string;
+  password: string;
+  email: string;
+  phone: string;
+  city?: string;
+  province?: string;
+  businessCategory?: string;
+  businessRubro?: BusinessRubro;
+  optionalTenantCode?: string;
+}
+
+/**
+ * Autoregistro público de una nueva distribuidora con prueba gratuita de 30 días.
+ * Se incorpora instantáneamente a la gestión del SuperAdmin en la pestaña "A Prueba".
+ */
+export function registerSelfServiceTrialTenant(
+  input: SelfTrialRegistrationInput
+): { success: boolean; user?: PlatformUser; tenant?: Tenant; error?: string } {
+  const companyName = input.companyName.trim();
+  const ownerName = input.ownerName.trim();
+  const cleanUsername = input.username.trim().toLowerCase();
+  const cleanPassword = input.password.trim();
+  const cleanEmail = input.email.trim().toLowerCase();
+  const cleanPhone = input.phone.trim();
+
+  if (!companyName || !ownerName || !cleanUsername || !cleanPassword || !cleanEmail || !cleanPhone) {
+    return {
+      success: false,
+      error: 'Completá nombre de distribuidora, titular, teléfono, correo, usuario y contraseña.',
+    };
+  }
+
+  if (cleanPassword.length < 4) {
+    return {
+      success: false,
+      error: 'La contraseña debe tener al menos 4 caracteres.',
+    };
+  }
+
+  const users = loadPlatformUsers();
+  const tenants = loadTenants();
+
+  if (users.some((u) => u.username.toLowerCase() === cleanUsername)) {
+    return {
+      success: false,
+      error: `El usuario "${cleanUsername}" ya está registrado. Elegí otro nombre de usuario.`,
+    };
+  }
+
+  if (users.some((u) => u.email.toLowerCase() === cleanEmail)) {
+    return {
+      success: false,
+      error: `El correo "${cleanEmail}" ya tiene una cuenta asociada. Probá iniciar sesión o recuperar tu clave.`,
+    };
+  }
+
+  let tenantCode = (input.optionalTenantCode || '').trim().toUpperCase();
+  if (!tenantCode) {
+    // Generar próximo código secuencial DIST-00X disponible
+    let seq = tenants.length + 1;
+    do {
+      tenantCode = `DIST-${String(seq).padStart(3, '0')}`;
+      seq++;
+    } while (tenants.some((t) => t.tenantCode.toUpperCase() === tenantCode));
+  } else if (tenants.some((t) => t.tenantCode.toUpperCase() === tenantCode)) {
+    return {
+      success: false,
+      error: `El código de empresa "${tenantCode}" ya está en uso.`,
+    };
+  }
+
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const trialEndDate = new Date(now.getTime());
+  trialEndDate.setDate(trialEndDate.getDate() + 30);
+  const trialEndsStr = trialEndDate.toISOString().split('T')[0];
+
+  const billingCfg = loadPlatformBillingConfig();
+  const profile = getRubroProfile(input.businessRubro);
+  const newTenantId = `dist-trial-${Date.now()}`;
+  const newUserId = `usr-${Date.now()}`;
+  const newAdminId = `adm-${Date.now()}`;
+
+  const newConfig: DistributorConfig = applyRubroProfileToConfig(
+    {
+      ...DEFAULT_CONFIG,
+      distributorName: companyName,
+      distributorPhone: cleanPhone,
+      distributorEmail: cleanEmail,
+      senderPhone: cleanPhone,
+      senderEmail: cleanEmail,
+      activeAdminId: newAdminId,
+      tenantId: newTenantId,
+      tenantCode,
+      distributorIcon:
+        profile.id === 'indumentaria' || profile.id === 'ecommerce_kiosco'
+          ? 'shopping-bag'
+          : 'building',
+      dailyClosingEnabled: true,
+      dailyClosingTime: '19:00',
+      lateSurchargeEnabled: false,
+      lateSurchargePercent: 5,
+      lateSurchargeAfterDays: 5,
+    },
+    profile.id
+  );
+
+  const newTenant: Tenant = {
+    id: newTenantId,
+    tenantCode,
+    name: companyName,
+    businessCategory: input.businessCategory?.trim() || profile.label,
+    businessRubro: profile.id,
+    phone: cleanPhone,
+    email: cleanEmail,
+    city: input.city?.trim() || '',
+    province: input.province?.trim() || 'Buenos Aires',
+    status: 'trial',
+    icon:
+      profile.id === 'indumentaria' || profile.id === 'ecommerce_kiosco'
+        ? 'shopping-bag'
+        : 'building',
+    createdAt: todayStr,
+    notes: `Registro autónomo (${profile.shortLabel}) con prueba gratuita de 30 días (vence el ${trialEndsStr}).`,
+    config: newConfig,
+    subscription: {
+      monthlyFee: billingCfg.defaultMonthlyFee || 25000,
+      currency: '$',
+      paymentWindowStartDay: 1,
+      paymentWindowEndDay: 5,
+      isPaused: false,
+      trialStartedAt: todayStr,
+      trialEndsAt: trialEndsStr,
+      trialDays: 30,
+      selfRegistered: true,
+      paymentHistory: [],
+    },
+  };
+
+  const newUser: PlatformUser = {
+    id: newUserId,
+    username: cleanUsername,
+    password: cleanPassword,
+    fullName: ownerName,
+    email: cleanEmail,
+    phone: cleanPhone,
+    role: 'dueño',
+    tenantId: newTenantId,
+    tenantCode,
+    createdAt: todayStr,
+    active: true,
+  };
+
+  const initialSalespeople: Salesperson[] =
+    profile.id !== 'distribuidora'
+      ? [
+          {
+            id: `sal-mostrador-${Date.now()}`,
+            name: 'Caja / Mostrador',
+            phone: cleanPhone,
+            email: cleanEmail,
+            address: companyName,
+            birthDate: '1990-01-01',
+            zone: 'Local Principal',
+            active: true,
+          },
+        ]
+      : [];
+
+  // Inicializar espacio privado limpio con el dueño cargado para cierres del día y alertas
+  saveTenantData(newTenantId, {
+    config: newConfig,
+    clients: [],
+    salespeople: initialSalespeople,
+    admins: [
+      {
+        id: newAdminId,
+        name: ownerName,
+        phone: cleanPhone,
+        email: cleanEmail,
+        role: 'dueño',
+        receiveAdminAlerts: true,
+        isGeneralAdmin: true,
+      },
+    ],
+    boletas: [],
+    paidBoletas: [],
+    broadcasts: [],
+    autoLogs: [],
+  });
+
+  saveTenants([...tenants, newTenant]);
+  savePlatformUsers([...users, newUser]);
+
+  return { success: true, user: newUser, tenant: newTenant };
+}
+
+// UPDATE USER PROFILE & CREDENTIALS
+export function updatePlatformUser(
+  userId: string,
+  updates: Partial<Omit<PlatformUser, 'id'>>
+): PlatformUser | null {
+  const users = loadPlatformUsers();
+  const index = users.findIndex((u) => u.id === userId);
+  if (index === -1) return null;
+
+  const updatedUser: PlatformUser = {
+    ...users[index],
+    ...updates,
+  };
+  users[index] = updatedUser;
+  savePlatformUsers(users);
+
+  // If this is the current active session user, update session
+  const current = getCurrentSessionUser();
+  if (current && current.id === userId) {
+    setCurrentSessionUser(updatedUser);
+  }
+
+  // Also sync with the tenant's admin profile so WhatsApp alert signatures match
+  if (updatedUser.tenantId && updatedUser.tenantId !== 'all') {
+    syncUserProfileWithTenantAdmins(updatedUser);
+  }
+
+  return updatedUser;
+}
+
+// SYNC WITH TENANT ADMIN PROFILE
+export function syncUserProfileWithTenantAdmins(user: PlatformUser): void {
+  try {
+    const tenantData = loadTenantData(user.tenantId || 'dist-central');
+    let modified = false;
+
+    // Check if an admin with the same email or id exists
+    const adminIdx = tenantData.admins.findIndex(
+      (a) => a.id === user.id || a.email.toLowerCase() === user.email.toLowerCase()
+    );
+
+    if (adminIdx !== -1) {
+      tenantData.admins[adminIdx] = {
+        ...tenantData.admins[adminIdx],
+        name: user.fullName,
+        email: user.email,
+        phone: user.phone,
+      };
+      modified = true;
+    } else if (user.role === 'dueño' || user.role === 'administrador') {
+      // Add or update admin
+      tenantData.admins.push({
+        id: user.id,
+        name: user.fullName,
+        email: user.email,
+        phone: user.phone,
+        role: user.role === 'dueño' ? 'dueño' : 'administrador',
+        receiveAdminAlerts: true,
+        isGeneralAdmin: true,
+      });
+      modified = true;
+    }
+
+    if (modified) {
+      saveTenantData(user.tenantId || 'dist-central', tenantData);
+    }
+  } catch (e) {
+    console.error('Error syncing user with tenant admins:', e);
+  }
+}
+
+// FIND USER BY EMAIL (FOR PASSWORD RECOVERY)
+export function findUserByEmail(email: string): PlatformUser | undefined {
+  const users = loadPlatformUsers();
+  const cleanEmail = email.trim().toLowerCase();
+  return users.find((u) => u.email.toLowerCase() === cleanEmail && u.active);
+}
+
+// RESET PASSWORD BY EMAIL
+export function resetUserPasswordByEmail(email: string, newPassword: string): boolean {
+  const users = loadPlatformUsers();
+  const cleanEmail = email.trim().toLowerCase();
+  const user = users.find((u) => u.email.toLowerCase() === cleanEmail && u.active);
+  if (!user) return false;
+
+  user.password = newPassword.trim();
+  savePlatformUsers(users);
+
+  // If currently logged in, update session too
+  const current = getCurrentSessionUser();
+  if (current && current.id === user.id) {
+    setCurrentSessionUser(user);
+  }
+
+  return true;
+}
+
+/**
+ * Cambia el rubro completo de una empresa sobre la marcha, transformando su perfil operativo
+ * en el registro Tenant y en su partición privada de configuración.
+ */
+export function updateTenantBusinessRubro(
+  tenantId: string,
+  nextRubro: BusinessRubro
+): { tenant?: Tenant; config: DistributorConfig } {
+  const profile = getRubroProfile(nextRubro);
+  const tenantData = loadTenantData(tenantId);
+  const nextConfig = applyRubroProfileToConfig(tenantData.config, profile.id);
+
+  // Si pasa a un rubro sin preventista obligatorio y no hay vendedores cargados, aseguramos Mostrador
+  if (!profile.requireSalesperson && tenantData.salespeople.length === 0) {
+    tenantData.salespeople = [
+      {
+        id: `sal-mostrador-${Date.now()}`,
+        name: 'Caja / Mostrador',
+        phone: tenantData.config.distributorPhone || '',
+        email: tenantData.config.distributorEmail || '',
+        address: tenantData.config.distributorName || '',
+        birthDate: '',
+        zone: 'Local Comercial',
+        active: true,
+      },
+    ];
+  }
+
+  tenantData.config = nextConfig;
+  saveTenantData(tenantId, tenantData);
+
+  const tenants = loadTenants();
+  let updatedTenant: Tenant | undefined;
+  const nextTenants = tenants.map((t) => {
+    if (t.id !== tenantId) return t;
+    updatedTenant = {
+      ...t,
+      businessRubro: profile.id,
+      businessCategory: profile.label,
+      config: nextConfig,
+    };
+    return updatedTenant;
+  });
+  saveTenants(nextTenants);
+
+  return { tenant: updatedTenant, config: nextConfig };
+}
+
