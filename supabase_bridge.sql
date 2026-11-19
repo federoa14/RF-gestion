@@ -1,7 +1,7 @@
 -- ============================================================================
--- TABLA DE SINCRONIZACIÓN EN LA NUBE (app_cloud_store) PARA SUPABASE
--- Ejecutar una sola vez en el SQL Editor de tu proyecto Supabase.
--- Compatible con los despliegues en Vercel (SPA) y con el servidor Express.
+-- SCRIPT SQL PARA SUPABASE - CONEXIÓN DIRECTA Y SINCRONIZACIÓN INMEDIATA
+-- Ejecutá este bloque completo en el SQL Editor de tu proyecto Supabase.
+-- Es idempotente: se puede correr aunque ya existan otras tablas en tu proyecto.
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS public.app_cloud_store (
@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS public.app_cloud_store (
   value JSONB NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_updated_at
+  ON public.app_cloud_store (updated_at DESC);
 
 CREATE OR REPLACE FUNCTION public.touch_app_cloud_store_updated_at()
 RETURNS TRIGGER
@@ -35,6 +38,9 @@ CREATE POLICY "app_cloud_store_rw_policy"
   TO anon, authenticated
   USING (true)
   WITH CHECK (true);
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.app_cloud_store TO anon, authenticated, service_role;
 
 DO $$
 BEGIN

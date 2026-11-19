@@ -186,7 +186,6 @@ export function loadTenants(): Tenant[] {
   } catch (e) {
     console.warn('Error reading tenants from internal db', e);
   }
-  saveTenants(INITIAL_TENANTS);
   return INITIAL_TENANTS;
 }
 

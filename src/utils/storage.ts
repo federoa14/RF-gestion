@@ -104,7 +104,6 @@ export function loadConfig(): DistributorConfig {
   } catch (e) {
     console.warn('Error reading config from internal db', e);
   }
-  saveConfig(DEFAULT_CONFIG);
   return DEFAULT_CONFIG;
 }
 
@@ -126,7 +125,6 @@ export function loadClients(): Client[] {
   } catch (e) {
     console.warn('Error reading clients from internal db', e);
   }
-  saveClients(INITIAL_CLIENTS);
   return INITIAL_CLIENTS;
 }
 
@@ -148,7 +146,6 @@ export function loadSalespeople(): Salesperson[] {
   } catch (e) {
     console.warn('Error reading salespeople', e);
   }
-  saveSalespeople(INITIAL_SALESPEOPLE);
   return INITIAL_SALESPEOPLE;
 }
 
@@ -167,7 +164,6 @@ export function loadAdministrators(): Administrator[] {
   } catch (e) {
     console.warn('Error reading administrators', e);
   }
-  saveAdministrators(INITIAL_ADMINS);
   return INITIAL_ADMINS;
 }
 
@@ -189,7 +185,6 @@ export function loadBoletas(): Boleta[] {
   } catch (e) {
     console.warn('Error reading boletas', e);
   }
-  saveBoletas(INITIAL_BOLETAS);
   return INITIAL_BOLETAS;
 }
 
@@ -211,7 +206,6 @@ export function loadPaidBoletas(): Boleta[] {
   } catch (e) {
     console.warn('Error reading paid boletas', e);
   }
-  savePaidBoletas(INITIAL_PAID_BOLETAS);
   return INITIAL_PAID_BOLETAS;
 }
 
@@ -255,7 +249,6 @@ export function loadBroadcastMessages() {
     const raw = dbGetItem(STORAGE_KEYS.BROADCASTS);
     if (raw) return JSON.parse(raw);
   } catch (e) {}
-  saveBroadcastMessages(INITIAL_BROADCASTS);
   return INITIAL_BROADCASTS;
 }
 

@@ -145,8 +145,19 @@ export function queueSupabaseUpsert(key: string, rawValue: string): void {
       pendingUpserts.delete(key);
       void executeUpsertBatch([[key, val]]);
     }
-  }, 180);
+  }, 50);
   debounceTimers.set(key, timer);
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    void flushSupabaseSync();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      void flushSupabaseSync();
+    }
+  });
 }
 
 export function queueSupabaseDelete(key: string): void {
@@ -221,20 +232,32 @@ export async function hydrateFromSupabase(
     syncInfo.lastSyncedAt = new Date().toISOString();
     syncInfo.lastError = null;
 
+    const localSnapshot = new Map(localEntries);
     const remoteMap = new Map<string, string>();
     for (const row of data || []) {
       if (!row || typeof row.key !== 'string' || !isCloudSyncedKey(row.key)) continue;
       const serialized = serializeValueSafely(row.value);
       remoteMap.set(row.key, serialized);
+
+      const localVal = localSnapshot.get(row.key);
+      const localHasData = localVal !== undefined && isNonEmptyBusinessValue(localVal);
+      const remoteHasData = isNonEmptyBusinessValue(serialized);
+
+      // Never overwrite real existing local data with an empty remote array/object
+      if (localHasData && !remoteHasData) {
+        continue;
+      }
+
       markRecentlyAppliedRemote(row.key);
       applyRemoteEntry(row.key, serialized);
     }
 
-    // Migrate local non-empty cloud-synced keys that do not exist yet in Supabase
+    // Push all existing local data that is missing or empty in Supabase immediately
     const toPush: Array<[string, string]> = [];
-    localEntries.forEach((rawVal, key) => {
-      if (!isCloudSyncedKey(key)) return;
-      if (!remoteMap.has(key) && isNonEmptyBusinessValue(rawVal)) {
+    localSnapshot.forEach((rawVal, key) => {
+      if (!isCloudSyncedKey(key) || !isNonEmptyBusinessValue(rawVal)) return;
+      const remoteVal = remoteMap.get(key);
+      if (remoteVal === undefined || !isNonEmptyBusinessValue(remoteVal)) {
         toPush.push([key, rawVal]);
       }
     });
