@@ -45,17 +45,17 @@ function purgeLegacyDemoKeys() {
 }
 purgeLegacyDemoKeys();
 
-// Default initial config with user's specific requested 2 days and 6 days rules
+// Default initial clean config
 export const DEFAULT_CONFIG: DistributorConfig = {
-  distributorName: 'Distribuidora Central & Logística',
-  distributorPhone: '+54 9 11 3290-8811',
-  distributorEmail: 'administracion@distribuidoracentral.com',
-  defaultTermDays: 7, // 7 días habitual
-  vendedorReminderDays: 2, // A los 2 días a los vendedores (regla solicitada)
-  adminAlertDays: 6, // A los 6 días a los dueños (regla solicitada)
-  overdueAlertDays: 7, // A los 7 días vence y debe salir a la calle a cobrar
+  distributorName: 'Mi Empresa',
+  distributorPhone: '',
+  distributorEmail: '',
+  defaultTermDays: 7,
+  vendedorReminderDays: 2,
+  adminAlertDays: 6,
+  overdueAlertDays: 7,
   currencySymbol: '$',
-  activeAdminId: 'adm-1',
+  activeAdminId: '',
   customCobranzaTemplate: 'Hola {vendedor}, soy {adminActual} y necesito que vayas a cobrarle a {cliente} la boleta #{boleta} por un monto de {monto}. La venta fue el {fechaVenta} ({dias} días) y vence el {vencimiento}. Por favor confirmame en cuanto pases por el local.',
   customOverdueTemplate: '🚨 URGENTE {vendedor}: Soy {adminActual}. Hoy tenés que salir a la calle sí o sí a cobrarle a {cliente} la boleta #{boleta} por {monto} que ya está vencida.',
   autoDispatchEnabled: true,
@@ -63,10 +63,10 @@ export const DEFAULT_CONFIG: DistributorConfig = {
   autoDispatchTime: '08:00',
   dailyClosingEnabled: true,
   dailyClosingTime: '19:00',
-  senderPhone: '+54 9 11 3290-8811',
-  senderEmail: 'cobranzas@distribuidoracentral.com',
-  tenantId: 'dist-central',
-  tenantCode: 'DIST-001',
+  senderPhone: '',
+  senderEmail: '',
+  tenantId: '',
+  tenantCode: '',
   whatsappProvider: 'server_daemon',
   notifyOwnerOnlyIfPertinent: true,
   boletaRetentionDays: 30,
@@ -88,18 +88,8 @@ export const DEFAULT_CONFIG: DistributorConfig = {
   defaultInstallmentInterestPercent: 10,
 };
 
-// Initial Seed Data - ZERO CLIENTS, ZERO SALESPEOPLE, ZERO BOLETAS (Clean Slate)
-const INITIAL_ADMINS: Administrator[] = [
-  {
-    id: 'adm-1',
-    name: 'Federico Roa',
-    phone: '+54 9 11 3290-8811',
-    email: 'federoa14@gmail.com',
-    role: 'dueño',
-    receiveAdminAlerts: true,
-    isGeneralAdmin: true,
-  },
-];
+// Initial Seed Data - Clean Slate
+const INITIAL_ADMINS: Administrator[] = [];
 
 const INITIAL_SALESPEOPLE: Salesperson[] = [];
 const INITIAL_CLIENTS: Client[] = [];
@@ -306,11 +296,9 @@ export function saveRendiciones(rendiciones: SalespersonRendicion[]): void {
   } catch (e) {}
 }
 
-export function resetToDemoData(): void {
-  saveConfig(DEFAULT_CONFIG);
+export function resetOperationalData(): void {
   saveClients([]);
   saveSalespeople([]);
-  saveAdministrators(INITIAL_ADMINS);
   saveBoletas([]);
   savePaidBoletas([]);
   saveBroadcastMessages([]);

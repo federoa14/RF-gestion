@@ -507,7 +507,7 @@ async function evaluateAndDispatchDailyAlerts(
   const now = new Date();
   const nowIso = now.toISOString();
   const channels = config.autoDispatchChannels || 'both';
-  const distributorName = config.distributorName || 'Distribuidora Central';
+  const distributorName = config.distributorName || 'Mi Empresa';
 
   const generalAdmin = admins.find((a: any) => a.isGeneralAdmin || a.role === 'dueño') || admins[0] || {
     name: 'Federico Roa',
@@ -905,7 +905,7 @@ async function evaluateAndDispatchDailyClosing(
 ): Promise<{ logs: any[]; summaryText: string; metrics: any }> {
   const now = new Date();
   const nowIso = now.toISOString();
-  const distributorName = config.distributorName || 'Distribuidora Central';
+  const distributorName = config.distributorName || 'Mi Empresa';
   const sym = config.currencySymbol || '$';
   const fmtMoney = (n: number) => `${sym} ${Number(n || 0).toLocaleString('es-AR')}`;
   const fmtDate = (iso: string) => {
@@ -1220,7 +1220,7 @@ app.post('/api/notify-blocked-charge', async (req: Request, res: Response) => {
     const { client, existingBoleta, config = {}, admins = [] } = req.body;
     const nowIso = new Date().toISOString();
     const channels = config.autoDispatchChannels || 'both';
-    const distributorName = config.distributorName || 'Distribuidora Central';
+    const distributorName = config.distributorName || 'Mi Empresa';
 
     const ownerRecipients = admins.filter((a: any) => a.role === 'dueño' || a.receiveAdminAlerts);
     const targetOwners = ownerRecipients.length > 0 ? ownerRecipients : [

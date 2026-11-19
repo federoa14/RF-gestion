@@ -18,7 +18,6 @@ import {
   Download,
   Receipt,
   MessageCircle,
-  SlidersHorizontal,
   Pause,
   Snowflake,
   Megaphone,
@@ -64,7 +63,7 @@ import {
   saveAutoDispatchLogs,
   loadRendiciones,
   saveRendiciones,
-  resetToDemoData,
+  resetOperationalData,
 } from './utils/storage';
 import { purgeExpiredBoletas, ensureClientCreditHistory, getDaysElapsed } from './utils/retentionPurge';
 import { calculateAlertStatus, formatCurrency, addDaysToDate, formatDateEs, getBoletaBalance } from './utils/alerts';
@@ -185,7 +184,7 @@ export default function App() {
     if (user.role === 'superadmin') {
       return null;
     }
-    return tenantsList.find((t) => t.id === user.tenantId) || tenantsList[0];
+    return tenantsList.find((t) => t.id === user.tenantId) || tenantsList[0] || null;
   });
 
   // Global State (Tenant-partitioned data)
@@ -274,10 +273,6 @@ export default function App() {
   const [selectedSalespersonFilter, setSelectedSalespersonFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'days_desc' | 'due_asc' | 'amount_desc'>('days_desc');
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
-  const [showAuditSimBar, setShowAuditSimBar] = useState(false);
-
-  // Simulated date offset (days) to test alerts in real-time
-  const [simulatedDaysOffset, setSimulatedDaysOffset] = useState<number>(0);
 
   // Confirmation UI for voluntary pause during trial
   const [confirmTrialPauseInline, setConfirmTrialPauseInline] = useState(false);
@@ -659,7 +654,13 @@ export default function App() {
       // Super Admin manages the accounts only; does not enter client workspaces
       setSelectedTenant(null);
     } else {
-      const targetTenant = tenant || freshTenants.find((t) => t.id === user.tenantId) || freshTenants[0];
+      const targetTenant = tenant || freshTenants.find((t) => t.id === user.tenantId) || freshTenants[0] || null;
+      if (!targetTenant) {
+        setCurrentUser(null);
+        setCurrentSessionUser(null);
+        showToast('No encontramos una empresa activa asignada a tu usuario.');
+        return;
+      }
       setSelectedTenant(targetTenant);
       setActiveTenantId(targetTenant.id);
       loadDataForTenant(targetTenant.id);
@@ -1925,29 +1926,33 @@ export default function App() {
     showToast(`🚫 Carga anulada: Se notificó automáticamente a los dueños la boleta #${existingBoleta.boletaNumber} de ${client.name}.`);
   };
 
-  // Reset to initial demo
-  const handleResetDemo = () => {
-    resetToDemoData();
-    setConfig(loadConfig());
-    setClients(loadClients());
-    setSalespeople(loadSalespeople());
-    setAdmins(loadAdministrators());
-    setBoletas(loadBoletas());
-    setPaidBoletas(loadPaidBoletas());
-    setBroadcasts(loadBroadcastMessages());
+  // Clear operational records for active company while keeping config and admins
+  const handleResetOperationalData = () => {
+    resetOperationalData();
+    setClients([]);
+    setSalespeople([]);
+    setBoletas([]);
+    setPaidBoletas([]);
+    setBroadcasts([]);
     setAutoLogs([]);
-    setSimulatedDaysOffset(0);
-    showToast('Datos de demostración restablecidos.');
+    setRendiciones([]);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      saveTenantData(selectedTenant.id, {
+        ...cur,
+        clients: [],
+        salespeople: [],
+        boletas: [],
+        paidBoletas: [],
+        broadcasts: [],
+        autoLogs: [],
+        rendiciones: [],
+      });
+    }
+    showToast('Registros operativos vaciados correctamente.');
   };
 
-  // Compute reference date with simulation offset
-  const getSimulatedDateStr = (): string => {
-    const d = new Date();
-    d.setDate(d.getDate() + simulatedDaysOffset);
-    return d.toISOString().split('T')[0];
-  };
-
-  const currentDateRef = getSimulatedDateStr();
+  const currentDateRef = new Date().toISOString().split('T')[0];
 
   // Filter pending boletas
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
@@ -3016,74 +3021,8 @@ export default function App() {
                       <Download className="w-3.5 h-3.5" />
                       <span className="hidden xl:inline">CSV</span>
                     </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowAuditSimBar((prev) => !prev)}
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                        simulatedDaysOffset !== 0 || showAuditSimBar
-                          ? 'bg-[#162E59] text-white border-[#B6C2D2]/40'
-                          : 'bg-white dark:bg-[#091428] text-slate-500 dark:text-[#94A3B8] border-[#CBD5E1] dark:border-[#B6C2D2]/25 hover:text-[#0B1933] dark:hover:text-white'
-                      }`}
-                      title="Probar alertas simulando el avance de días"
-                    >
-                      <SlidersHorizontal className="w-3.5 h-3.5" />
-                      <span className="hidden xl:inline">Simular días</span>
-                    </button>
                   </div>
                 </div>
-
-                {/* Collapsible Day-Advance Simulation Strip */}
-                {(showAuditSimBar || simulatedDaysOffset !== 0) && (
-                  <div className="p-2.5 rounded-lg bg-[#F4F6F9] dark:bg-[#091428] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-[#162E59] dark:text-[#CBD5E1]" />
-                      <span className="font-semibold text-[#0B1933] dark:text-white">
-                        Fecha de prueba:
-                      </span>
-                      <span className="font-mono tabular-nums bg-white dark:bg-[#0B1933] text-[#0B1933] dark:text-[#E2E8F0] font-bold px-2 py-0.5 rounded border border-[#CBD5E1] dark:border-[#B6C2D2]/25">
-                        {currentDateRef} {simulatedDaysOffset !== 0 ? `(+${simulatedDaysOffset}d simulados)` : '(Hoy real)'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => setSimulatedDaysOffset(0)}
-                        className={`px-2.5 py-1 rounded text-[11px] font-semibold border cursor-pointer ${
-                          simulatedDaysOffset === 0
-                            ? 'bg-[#0B1933] text-white border-[#0B1933]'
-                            : 'bg-white dark:bg-[#0B1933] text-slate-600 dark:text-[#CBD5E1] border-[#CBD5E1] dark:border-[#B6C2D2]/25'
-                        }`}
-                      >
-                        Hoy real
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSimulatedDaysOffset((prev) => prev + 2)}
-                        className="px-2.5 py-1 rounded text-[11px] font-semibold bg-white hover:bg-slate-100 dark:bg-[#0B1933] dark:hover:bg-[#13264A] text-[#0B1933] dark:text-[#E2E8F0] border border-[#CBD5E1] dark:border-[#B6C2D2]/25 cursor-pointer"
-                      >
-                        +2 días
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSimulatedDaysOffset((prev) => prev + 5)}
-                        className="px-2.5 py-1 rounded text-[11px] font-semibold bg-white hover:bg-slate-100 dark:bg-[#0B1933] dark:hover:bg-[#13264A] text-[#0B1933] dark:text-[#E2E8F0] border border-[#CBD5E1] dark:border-[#B6C2D2]/25 cursor-pointer"
-                      >
-                        +5 días
-                      </button>
-                      {simulatedDaysOffset !== 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setSimulatedDaysOffset(0)}
-                          className="p-1 text-slate-500 hover:text-[#0B1933] dark:hover:text-white cursor-pointer"
-                          title="Restablecer a fecha real"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
 
                 {/* Status Filter Bar */}
                 <div className="flex gap-2 overflow-x-auto pt-1 no-scrollbar tabular-nums">
@@ -3651,7 +3590,7 @@ export default function App() {
                 showToast('Administrador eliminado.');
               }}
               onSaveConfig={handleSaveConfig}
-              onResetDemoData={handleResetDemo}
+              onResetOperationalData={handleResetOperationalData}
               onExecuteRetentionPurge={handleExecuteRetentionPurge}
             />
           </Suspense>

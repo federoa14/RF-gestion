@@ -6,7 +6,6 @@ import {
   Eye,
   EyeOff,
   Building2,
-  ShieldCheck,
   ArrowRight,
   CheckCircle2,
   AlertCircle,
@@ -177,20 +176,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
       onLoginSuccess(res.user, res.tenant);
     }, 200);
-  };
-
-  const handleQuickDemoLogin = (userLogin: string, pass: string, code?: string) => {
-    setUsername(userLogin);
-    setPassword(pass);
-    setTenantCode(code || '');
-    setErrorMsg(null);
-
-    setTimeout(() => {
-      const result = authenticateUser(userLogin, pass, code);
-      if (result.success && result.user) {
-        onLoginSuccess(result.user, result.tenant);
-      }
-    }, 100);
   };
 
   // Step 1: Request recovery code by email
@@ -370,7 +355,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="ej. dueno1 o micorreo@gmail.com"
+                  placeholder="Usuario o correo electrónico"
                   required
                   className="w-full pl-10 pr-3.5 py-2.5 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-sm text-white placeholder-[#64748B] focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60 focus:border-[#CBD5E1] transition-all"
                 />
@@ -435,7 +420,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={tenantCode}
                   onChange={(e) => setTenantCode(e.target.value.toUpperCase())}
-                  placeholder="ej. DIST-001 (o automático)"
+                  placeholder="Código de empresa (opcional)"
                   className="w-full pl-10 pr-3.5 py-2.5 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-sm text-white placeholder-[#64748B] uppercase tracking-wider focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60 focus:border-[#CBD5E1] transition-all font-mono"
                 />
               </div>
@@ -454,61 +439,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
-
-          {/* Quick Access Buttons */}
-          <div className="mt-6 pt-5 border-t border-[#B6C2D2]/15 space-y-2.5">
-            <div className="text-xs font-semibold text-[#94A3B8]">
-              Accesos Rápidos de Demostración
-            </div>
-
-            <div className="grid grid-cols-1 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickDemoLogin('admin', 'admin123')}
-                className="w-full text-left p-3 rounded-xl bg-[#0F2142] hover:bg-[#162E59] border border-[#B6C2D2]/20 flex items-center justify-between group transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#1A3563] text-[#E2E8F0] border border-[#B6C2D2]/30 flex items-center justify-center">
-                    <ShieldCheck className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">
-                      Gestor General (Empresas & Alias)
-                    </div>
-                    <div className="text-[11px] text-[#94A3B8] font-mono tabular-nums">
-                      Usuario: <strong className="text-[#E2E8F0]">admin</strong> · Clave: <strong className="text-[#E2E8F0]">admin123</strong>
-                    </div>
-                  </div>
-                </div>
-                <span className="text-[10px] font-bold text-[#CBD5E1] bg-[#091428] border border-[#B6C2D2]/25 px-2 py-0.5 rounded font-mono">
-                  GESTIÓN
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickDemoLogin('dueno1', '1234', 'DIST-001')}
-                className="w-full text-left p-3 rounded-xl bg-[#0F2142] hover:bg-[#162E59] border border-[#B6C2D2]/20 flex items-center justify-between group transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-[#1A3563] text-[#E2E8F0] border border-[#B6C2D2]/30 flex items-center justify-center">
-                    <Building2 className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white">
-                      Distribuidora Central (Panel Operativo)
-                    </div>
-                    <div className="text-[11px] text-[#94A3B8] font-mono tabular-nums">
-                      Usuario: <strong className="text-[#E2E8F0]">dueno1</strong> · Clave: <strong className="text-[#E2E8F0]">1234</strong>
-                    </div>
-                  </div>
-                </div>
-                <span className="text-[10px] font-bold text-[#CBD5E1] bg-[#091428] border border-[#B6C2D2]/25 px-2 py-0.5 rounded font-mono">
-                  DIST-001
-                </span>
-              </button>
-            </div>
-          </div>
             </>
           ) : (
             <>
@@ -598,17 +528,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         type="text"
                         value={regCompanyName}
                         onChange={(e) => setRegCompanyName(e.target.value)}
-                        placeholder={
-                          regBusinessRubro === 'indumentaria'
-                            ? 'ej. Tienda Urbana / Moda Sur'
-                            : regBusinessRubro === 'ecommerce_kiosco'
-                            ? 'ej. Tienda Online / Despensa Central'
-                            : regBusinessRubro === 'comercio_fiado'
-                            ? 'ej. Almacén Don Luis'
-                            : regBusinessRubro === 'cuenta_corriente'
-                            ? 'ej. Corralón del Centro'
-                            : 'ej. Distribuidora Norte'
-                        }
+                        placeholder="Nombre comercial de tu empresa"
                         required
                         className="w-full pl-9 pr-3 py-2 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-xs text-white placeholder-[#64748B] focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60"
                       />
@@ -627,7 +547,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         type="text"
                         value={regOwnerName}
                         onChange={(e) => setRegOwnerName(e.target.value)}
-                        placeholder="ej. Martín Gómez"
+                        placeholder="Nombre y apellido del titular"
                         required
                         className="w-full pl-9 pr-3 py-2 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-xs text-white placeholder-[#64748B] focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60"
                       />
@@ -648,7 +568,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         type="text"
                         value={regPhone}
                         onChange={(e) => setRegPhone(e.target.value)}
-                        placeholder="+54 9 11 5566-7788"
+                        placeholder="+54 9 ..."
                         className="w-full pl-9 pr-3 py-2 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-xs text-white placeholder-[#64748B] focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60"
                       />
                     </div>
@@ -666,7 +586,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         type="email"
                         value={regEmail}
                         onChange={(e) => setRegEmail(e.target.value)}
-                        placeholder="dueno@distribuidora.com"
+                        placeholder="correo@tuempresa.com"
                         className="w-full pl-9 pr-3 py-2 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-xs text-white placeholder-[#64748B] focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60"
                       />
                     </div>
@@ -686,7 +606,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         type="text"
                         value={regCity}
                         onChange={(e) => setRegCity(e.target.value)}
-                        placeholder="ej. Rosario"
+                        placeholder="Ciudad o localidad"
                         className="w-full pl-9 pr-3 py-2 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-xs text-white placeholder-[#64748B] focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60"
                       />
                     </div>
@@ -723,7 +643,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         type="text"
                         value={regUsername}
                         onChange={(e) => setRegUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
-                        placeholder="ej. distnorte"
+                        placeholder="Nombre de usuario"
                         required
                         className="w-full px-3 py-2 bg-[#0B1933] border border-[#B6C2D2]/25 rounded-xl text-xs text-white font-mono placeholder-[#64748B] focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60"
                       />

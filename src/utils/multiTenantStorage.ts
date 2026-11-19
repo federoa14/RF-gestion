@@ -65,55 +65,71 @@ export const DEFAULT_PLATFORM_SUPPORT_CONFIG: PlatformSupportConfig = {
     'Comunicate de forma directa por WhatsApp o correo electrónico para evacuar dudas, recibir asistencia técnica o consultar sobre tu cuenta.',
 };
 
-// Purge old mock/demo keys
+// Purge old mock/demo keys and previously seeded demo records
 function purgeLegacyTenantKeys() {
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const keys = [
-        'saas_distribuidoras_tenants_v1',
-        'saas_distribuidoras_users_v1',
-        'saas_distribuidoras_session_user_v1',
-        'saas_distribuidoras_active_tenant_id_v1',
-        'saas_distribuidora_data_dist-bebidas',
-        'saas_distribuidora_data_dist-lacteos',
-      ];
-      for (const k of keys) {
-        dbRemoveItem(k);
+    const keys = [
+      'saas_distribuidoras_tenants_v1',
+      'saas_distribuidoras_users_v1',
+      'saas_distribuidoras_session_user_v1',
+      'saas_distribuidoras_active_tenant_id_v1',
+      'saas_distribuidora_data_dist-bebidas',
+      'saas_distribuidora_data_dist-lacteos',
+      'saas_distribuidora_data_v2_dist-central',
+    ];
+    for (const k of keys) {
+      dbRemoveItem(k);
+    }
+
+    const demoPurgedFlag = 'saas_demo_seeds_purged_v1';
+    if (!dbGetItem(demoPurgedFlag)) {
+      const rawTenants = dbGetItem(STORAGE_KEYS.TENANTS);
+      if (rawTenants) {
+        try {
+          const parsedTenants = JSON.parse(rawTenants);
+          if (Array.isArray(parsedTenants)) {
+            const filteredTenants = parsedTenants.filter(
+              (t) => !(t?.id === 'dist-central' && t?.name === 'Distribuidora Central & Logística')
+            );
+            dbSetItem(STORAGE_KEYS.TENANTS, JSON.stringify(filteredTenants));
+          }
+        } catch {}
       }
+
+      const rawUsers = dbGetItem(STORAGE_KEYS.USERS);
+      if (rawUsers) {
+        try {
+          const parsedUsers = JSON.parse(rawUsers);
+          if (Array.isArray(parsedUsers)) {
+            const filteredUsers = parsedUsers.filter(
+              (u) => !(u?.id === 'usr-dueno-central' && u?.username === 'dueno1')
+            );
+            dbSetItem(STORAGE_KEYS.USERS, JSON.stringify(filteredUsers));
+          }
+        } catch {}
+      }
+
+      const rawSession = dbGetItem(STORAGE_KEYS.CURRENT_USER);
+      if (rawSession) {
+        try {
+          const sessionUser = JSON.parse(rawSession);
+          if (sessionUser?.id === 'usr-dueno-central' && sessionUser?.username === 'dueno1') {
+            dbRemoveItem(STORAGE_KEYS.CURRENT_USER);
+            dbRemoveItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
+          }
+        } catch {}
+      }
+
+      dbSetItem(demoPurgedFlag, '1');
     }
   } catch (e) {}
 }
 purgeLegacyTenantKeys();
 
-// INITIAL SEED TENANTS - ONLY 1 SINGLE WORKING DISTRIBUTOR (DIST-001)
-export const INITIAL_TENANTS: Tenant[] = [
-  {
-    id: 'dist-central',
-    tenantCode: 'DIST-001',
-    name: 'Distribuidora Central & Logística',
-    businessCategory: 'Distribución y Cobranzas',
-    phone: '+54 9 11 3290-8811',
-    email: 'federoa14@gmail.com',
-    address: 'Av. Juan B. Justo 4500',
-    city: 'CABA',
-    province: 'Ciudad Autónoma de Buenos Aires',
-    cuit: '30-71234567-8',
-    status: 'active',
-    icon: 'building',
-    createdAt: new Date().toISOString().split('T')[0],
-    notes: 'Distribuidora principal limpia lista para operar.',
-    config: {
-      ...DEFAULT_CONFIG,
-      distributorName: 'Distribuidora Central & Logística',
-      distributorPhone: '+54 9 11 3290-8811',
-      distributorEmail: 'federoa14@gmail.com',
-      tenantId: 'dist-central',
-      tenantCode: 'DIST-001',
-    },
-  },
-];
+// INITIAL TENANTS - CLEAN EMPTY LIST (NO DEMO COMPANIES)
+export const INITIAL_TENANTS: Tenant[] = [];
 
-// INITIAL SEED USERS - SUPER ADMINS AND OWNER OF DIST-001
+// INITIAL USERS - ONLY SYSTEM SUPERADMINS (NO DEMO TENANT USERS)
 export const INITIAL_USERS: PlatformUser[] = [
   {
     id: 'usr-superadmin',
@@ -141,19 +157,6 @@ export const INITIAL_USERS: PlatformUser[] = [
     createdAt: new Date().toISOString().split('T')[0],
     active: true,
   },
-  {
-    id: 'usr-dueno-central',
-    username: 'dueno1',
-    password: '1234',
-    fullName: 'Roberto Gómez (Dueño Central)',
-    email: 'roberto@distribuidoracentral.com',
-    phone: '+54 9 11 3290-8811',
-    role: 'dueño',
-    tenantId: 'dist-central',
-    tenantCode: 'DIST-001',
-    createdAt: new Date().toISOString().split('T')[0],
-    active: true,
-  },
 ];
 
 // Complete Tenant Data structure for isolation
@@ -175,7 +178,7 @@ export function loadTenants(): Tenant[] {
     const raw = dbGetItem(STORAGE_KEYS.TENANTS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch (e) {
     console.warn('Error reading tenants from internal db', e);
@@ -556,7 +559,7 @@ export function getActiveTenantId(): string {
     const raw = dbGetItem(STORAGE_KEYS.ACTIVE_TENANT_ID);
     if (raw) return raw;
   } catch (e) {}
-  return 'dist-central';
+  return '';
 }
 
 export function setActiveTenantId(tenantId: string): void {
@@ -580,45 +583,25 @@ export function loadTenantData(tenantId: string): TenantData {
   }
 
   if (!data) {
-    // For dist-central, pull clean zero arrays from storage
-    if (tenantId === 'dist-central') {
-      data = {
-        config: {
-          ...DEFAULT_CONFIG,
-          distributorName: 'Distribuidora Central & Logística',
-          tenantId: 'dist-central',
-          tenantCode: 'DIST-001',
-        },
-        clients: loadClients(),
-        salespeople: loadSalespeople(),
-        admins: loadAdministrators(),
-        boletas: loadBoletas(),
-        paidBoletas: loadPaidBoletas(),
-        broadcasts: loadBroadcastMessages(),
-        autoLogs: loadAutoDispatchLogs(),
-        rendiciones: loadRendiciones(),
-      };
-    } else {
-      const tenants = loadTenants();
-      const currentTenant = tenants.find((t) => t.id === tenantId);
+    const tenants = loadTenants();
+    const currentTenant = tenants.find((t) => t.id === tenantId);
 
-      data = {
-        config: currentTenant?.config || {
-          ...DEFAULT_CONFIG,
-          distributorName: currentTenant?.name || 'Distribuidora',
-          tenantId,
-          tenantCode: currentTenant?.tenantCode || 'DIST-NEW',
-        },
-        clients: [],
-        salespeople: [],
-        admins: [],
-        boletas: [],
-        paidBoletas: [],
-        broadcasts: [],
-        autoLogs: [],
-        rendiciones: [],
-      };
-    }
+    data = {
+      config: currentTenant?.config || {
+        ...DEFAULT_CONFIG,
+        distributorName: currentTenant?.name || 'Mi Empresa',
+        tenantId,
+        tenantCode: currentTenant?.tenantCode || '',
+      },
+      clients: [],
+      salespeople: [],
+      admins: [],
+      boletas: [],
+      paidBoletas: [],
+      broadcasts: [],
+      autoLogs: [],
+      rendiciones: [],
+    };
   }
 
   // REGLA DE RETENCIÓN DE 30 DÍAS:
@@ -635,11 +618,6 @@ export function loadTenantData(tenantId: string): TenantData {
         lastRetentionPurgeDate: new Date().toISOString().split('T')[0],
       };
       saveTenantData(tenantId, data);
-      if (tenantId === 'dist-central') {
-        saveBoletas(data.boletas);
-        savePaidBoletas(data.paidBoletas);
-        saveClients(data.clients);
-      }
       console.log(`[RETENCIÓN 30 DÍAS] Purgadas ${purgeResult.totalPurged} boletas (>30 días) para distribuidora ${tenantId}. Clientes problemáticos actualizados.`);
     }
   }
@@ -937,8 +915,9 @@ export function updatePlatformUser(
 
 // SYNC WITH TENANT ADMIN PROFILE
 export function syncUserProfileWithTenantAdmins(user: PlatformUser): void {
+  if (!user.tenantId || user.tenantId === 'all') return;
   try {
-    const tenantData = loadTenantData(user.tenantId || 'dist-central');
+    const tenantData = loadTenantData(user.tenantId);
     let modified = false;
 
     // Check if an admin with the same email or id exists
@@ -969,7 +948,7 @@ export function syncUserProfileWithTenantAdmins(user: PlatformUser): void {
     }
 
     if (modified) {
-      saveTenantData(user.tenantId || 'dist-central', tenantData);
+      saveTenantData(user.tenantId, tenantData);
     }
   } catch (e) {
     console.error('Error syncing user with tenant admins:', e);

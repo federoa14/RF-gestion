@@ -1,87 +1,11 @@
 {
-  "boletas": [
-    {
-      "id": "b1",
-      "boletaNumber": "F-101",
-      "clientId": "c1",
-      "clientName": "Kiosco Sol",
-      "salespersonId": "s1",
-      "salespersonName": "Juan",
-      "amount": 50000,
-      "issueDate": "2026-11-10",
-      "dueDate": "2026-11-15",
-      "status": "pending",
-      "remindersLog": [],
-      "createdAt": "2026-11-10",
-      "partialPayments": [
-        {
-          "id": "p1",
-          "date": "2026-11-13",
-          "amount": 15000,
-          "paymentMethod": "efectivo",
-          "recordedBy": "Admin"
-        }
-      ]
-    }
-  ],
-  "paidBoletas": [
-    {
-      "id": "b2",
-      "boletaNumber": "F-102",
-      "clientId": "c2",
-      "clientName": "Almacen Luna",
-      "salespersonId": "s1",
-      "salespersonName": "Juan",
-      "amount": 40000,
-      "issueDate": "2026-11-08",
-      "dueDate": "2026-11-12",
-      "status": "paid",
-      "paidAt": "2026-11-13",
-      "paymentMethod": "transferencia",
-      "remindersLog": [],
-      "createdAt": "2026-11-08"
-    }
-  ],
+  "boletas": [],
+  "paidBoletas": [],
   "clients": [],
   "salespeople": [],
-  "admins": [
-    {
-      "id": "a1",
-      "name": "Titular Prueba",
-      "phone": "+5491155551234",
-      "email": "dueno@test.com",
-      "role": "dueño",
-      "receiveAdminAlerts": true
-    }
-  ],
-  "config": {
-    "distributorName": "Dist Prueba",
-    "currencySymbol": "$",
-    "dailyClosingEnabled": true,
-    "dailyClosingTime": "19:00"
-  },
-  "lastDailyClosingDate": "2026-11-13",
-  "logs": [
-    {
-      "id": "auto-1794607034952-closing-a1",
-      "timestamp": "2026-11-13T21:57:14.924Z",
-      "channel": "whatsapp",
-      "recipientName": "Titular Prueba",
-      "recipientRole": "dueño",
-      "recipientContact": "+5491155551234 / dueno@test.com",
-      "recipientPhone": "+5491155551234",
-      "recipientEmail": "dueno@test.com",
-      "boletasCount": 2,
-      "totalAmount": 55000,
-      "messageSnippet": "🌙 CIERRE DEL DÍA (13/11/2026): 2 cobro(s) por $ 55.000 (Efectivo: $ 15.000 • Transf: $ 40.000) | 1 impagas.",
-      "fullMessage": "🌙 *RESUMEN DE CIERRE DEL DÍA* 🌙\n🏢 *Dist Prueba*\n📅 Fecha: *13/11/2026*\n\nHola Titular Prueba, este es el balance automático del cierre de hoy:\n\n✅ *BOLETAS COBRADAS HOY (2 ingresos):*\n  1. *Kiosco Sol* (Boleta #F-101) — Entrega a cuenta [Efectivo]: *$ 15.000*\n  2. *Almacen Luna* (Boleta #F-102) — Pago total [Transferencia]: *$ 40.000*\n\n⏳ *BOLETAS IMPAGAS / PENDIENTES AL CIERRE (1 total • Saldo: $ 35.000):*\n  _Sin boletas vencidas. Quedan 1 boleta(s) vigentes dentro del plazo._\n\n━━━━━━━━━━━━━━━━━━━━\n💰 *TOTAL INGRESADO HOY (CAJA Y BANCOS):*\n💵 *Efectivo:* $ 15.000\n🏦 *Transferencia / MP:* $ 40.000\n━━━━━━━━━━━━━━━━━━━━\n✅ *MONTO FINAL TOTAL COBRADO:* *$ 55.000*",
-      "whatsappUrl": "https://api.whatsapp.com/send?phone=5491155551234&text=%F0%9F%8C%99%20*RESUMEN%20DE%20CIERRE%20DEL%20D%C3%8DA*%20%F0%9F%8C%99%0A%F0%9F%8F%A2%20*Dist%20Prueba*%0A%F0%9F%93%85%20Fecha%3A%20*13%2F11%2F2026*%0A%0AHola%20Titular%20Prueba%2C%20este%20es%20el%20balance%20autom%C3%A1tico%20del%20cierre%20de%20hoy%3A%0A%0A%E2%9C%85%20*BOLETAS%20COBRADAS%20HOY%20(2%20ingresos)%3A*%0A%20%201.%20*Kiosco%20Sol*%20(Boleta%20%23F-101)%20%E2%80%94%20Entrega%20a%20cuenta%20%5BEfectivo%5D%3A%20*%24%2015.000*%0A%20%202.%20*Almacen%20Luna*%20(Boleta%20%23F-102)%20%E2%80%94%20Pago%20total%20%5BTransferencia%5D%3A%20*%24%2040.000*%0A%0A%E2%8F%B3%20*BOLETAS%20IMPAGAS%20%2F%20PENDIENTES%20AL%20CIERRE%20(1%20total%20%E2%80%A2%20Saldo%3A%20%24%2035.000)%3A*%0A%20%20_Sin%20boletas%20vencidas.%20Quedan%201%20boleta(s)%20vigentes%20dentro%20del%20plazo._%0A%0A%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%0A%F0%9F%92%B0%20*TOTAL%20INGRESADO%20HOY%20(CAJA%20Y%20BANCOS)%3A*%0A%F0%9F%92%B5%20*Efectivo%3A*%20%24%2015.000%0A%F0%9F%8F%A6%20*Transferencia%20%2F%20MP%3A*%20%24%2040.000%0A%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%E2%94%81%0A%E2%9C%85%20*MONTO%20FINAL%20TOTAL%20COBRADO%3A*%20*%24%2055.000*",
-      "ruleMilestone": "daily_closing",
-      "status": "sent",
-      "deliveryStatus": "delivered",
-      "gatewayResponse": "Despachado directamente por el servidor a la línea de WhatsApp"
-    }
-  ],
+  "admins": [],
+  "config": {},
+  "logs": [],
   "platformBilling": {
     "alias": "cobranzas.gestion.mp",
     "cvu": "",
@@ -91,31 +15,17 @@
     "annualDiscountPercent": 0,
     "mpCheckoutLink": "",
     "mpPublicKey": "",
-    "mpAccessToken": "",
-    "updatedAt": "2026-11-13T21:11:56.840Z"
+    "mpAccessToken": ""
   },
   "platformSupport": {
     "contactName": "Federico Roa · Asistencia Técnica",
     "whatsappPhone": "",
     "email": "federoa14@gmail.com",
     "attentionHours": "Lunes a Viernes de 9:00 a 19:00 hs",
-    "welcomeMessage": "Comunicate de forma directa por WhatsApp o correo electrónico para evacuar dudas, recibir asistencia técnica o consultar sobre tu cuenta.",
-    "updatedAt": "2026-11-16T17:49:35.055Z"
+    "welcomeMessage": "Comunicate de forma directa por WhatsApp o correo electrónico para evacuar dudas, recibir asistencia técnica o consultar sobre tu cuenta."
   },
   "platformAnnouncements": [],
-  "verifiedTenantPayments": {
-    "dist-central::2026-11": {
-      "tenantId": "dist-central",
-      "monthKey": "2026-11",
-      "amount": 25000,
-      "status": "approved",
-      "paymentMethod": "transferencia",
-      "mpPaymentId": "MP-04076018",
-      "mpPreferenceId": "local-pref-1794604072261",
-      "paidAt": "2026-11-13",
-      "aliasUsed": "cobranzas.gestion.mp"
-    }
-  },
+  "verifiedTenantPayments": {},
   "clientPaymentOrders": {},
   "merchantMpTokensByTenantId": {}
 }

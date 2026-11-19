@@ -54,7 +54,7 @@ interface AdminSettingsViewProps {
   onSaveAdmin: (admin: Administrator) => void;
   onDeleteAdmin: (adminId: string) => void;
   onSaveConfig: (config: DistributorConfig) => void;
-  onResetDemoData: () => void;
+  onResetOperationalData: () => void;
   onExecuteRetentionPurge?: () => void;
 }
 
@@ -64,14 +64,14 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   onSaveAdmin,
   onDeleteAdmin,
   onSaveConfig,
-  onResetDemoData,
+  onResetOperationalData,
   onExecuteRetentionPurge,
 }) => {
   const [currentConfig, setCurrentConfig] = useState<DistributorConfig>({ ...config });
   const [configSaved, setConfigSaved] = useState(false);
   const [merchantMpTokenInput, setMerchantMpTokenInput] = useState('');
   const [confirmDeleteAdminId, setConfirmDeleteAdminId] = useState<string | null>(null);
-  const [confirmResetDemo, setConfirmResetDemo] = useState(false);
+  const [confirmResetData, setConfirmResetData] = useState(false);
   const [internalDbStatus, setInternalDbStatus] = useState<InternalDbStatus | null>(null);
   const [backupFeedback, setBackupFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const backupInputRef = React.useRef<HTMLInputElement>(null);
@@ -1309,30 +1309,30 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
       </div>
 
       {/* Danger Zone */}
-      <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/30 dark:bg-rose-950/20 flex items-center justify-between">
+      <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/30 dark:bg-rose-950/20 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h4 className="text-xs font-bold text-rose-900 dark:text-rose-300">
-            Restablecer Datos de Demostración
+            Vaciar Registros Operativos
           </h4>
           <p className="text-[11px] text-slate-500">
-            Recarga las boletas y clientes iniciales para pruebas
+            Elimina boletas, clientes, vendedores e historial de esta empresa manteniendo tu configuración
           </p>
         </div>
-        {confirmResetDemo ? (
+        {confirmResetData ? (
           <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => {
-                onResetDemoData();
-                setConfirmResetDemo(false);
+                onResetOperationalData();
+                setConfirmResetData(false);
               }}
               className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer"
             >
-              Confirmar Restablecer
+              Confirmar Vaciado
             </button>
             <button
               type="button"
-              onClick={() => setConfirmResetDemo(false)}
+              onClick={() => setConfirmResetData(false)}
               className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 cursor-pointer"
             >
               Cancelar
@@ -1341,11 +1341,11 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         ) : (
           <button
             type="button"
-            onClick={() => setConfirmResetDemo(true)}
+            onClick={() => setConfirmResetData(true)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-rose-700 hover:bg-rose-100 border border-rose-300 dark:text-rose-300 dark:border-rose-800 cursor-pointer"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Restablecer Demo</span>
+            <span>Vaciar Registros</span>
           </button>
         )}
       </div>

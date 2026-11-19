@@ -228,7 +228,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
               {config.distributorName}
             </p>
             <p className="text-[11px] font-mono text-[#94A3B8] truncate">
-              {labels.shortLabel} · {config.tenantCode || 'DIST-001'} · {config.defaultTermDays}d
+              {labels.shortLabel} · {config.tenantCode || 'ACTIVA'} · {config.defaultTermDays}d
             </p>
           </div>
         </button>

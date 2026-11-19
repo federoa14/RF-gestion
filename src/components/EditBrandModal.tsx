@@ -29,7 +29,7 @@ const ICON_PRESETS = [
   { id: 'truck', label: 'Camión / Reparto', icon: Truck, color: 'from-emerald-700 to-teal-800' },
   { id: 'package', label: 'Bultos / Logística', icon: Package, color: 'from-slate-600 to-slate-800' },
   { id: 'store', label: 'Comercio / Mayorista', icon: Store, color: 'from-[#162E59] to-slate-800' },
-  { id: 'building', label: 'Distribuidora Central', icon: Building2, color: 'from-slate-700 to-slate-900' },
+  { id: 'building', label: 'Edificio / Empresa', icon: Building2, color: 'from-slate-700 to-slate-900' },
   { id: 'shopping-bag', label: 'Ventas y Reparto', icon: ShoppingBag, color: 'from-[#1E3A6D] to-[#0F2142]' },
 ];
 
@@ -170,7 +170,7 @@ export const EditBrandModal: React.FC<EditBrandModalProps> = ({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ej. Distribuidora Central & Logística"
+              placeholder="Nombre de tu distribuidora o comercio"
               className="w-full text-sm p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
               required
             />
