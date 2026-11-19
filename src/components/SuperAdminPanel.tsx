@@ -88,6 +88,7 @@ import {
   calculateAnnualFee,
   formatMonthKeyEs,
 } from '../utils/tenantSubscription';
+import { fetchVerifiedTenantPaymentsMapFromSupabase } from '../utils/supabaseServices';
 
 interface SuperAdminPanelProps {
   currentUser: PlatformUser;
@@ -224,28 +225,15 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       setAnnouncements(list);
     });
 
-    // Sincronizar pagos acreditados automáticamente en el servidor (Checkout Pro / Comprobante IA)
+    // Sincronizar pagos acreditados directamente desde Supabase
     const currentMonth = getCurrentMonthInfo().monthKey;
     const currentTenants = loadTenants();
-    Promise.all(
-      currentTenants.map(async (t) => {
-        try {
-          const r = await fetch(
-            `/api/mercadopago/payment-status?tenantId=${encodeURIComponent(t.id)}&monthKey=${encodeURIComponent(currentMonth)}`
-          );
-          const data = await r.json();
-          return { tenantId: t.id, data };
-        } catch {
-          return null;
-        }
-      })
-    ).then((results) => {
+    fetchVerifiedTenantPaymentsMapFromSupabase().then((paymentsMap) => {
       let changed = false;
       const updated = currentTenants.map((t) => {
-        const match = results.find((res) => res?.tenantId === t.id && res.data?.approved && res.data?.payment);
-        if (!match) return t;
+        const p = paymentsMap[`${t.id}::${currentMonth}`];
+        if (!p || p.status !== 'approved') return t;
         const alreadyPaid = getTenantSubscriptionStatus(t).isPaidForCurrentMonth;
-        const p = match.data.payment;
         if (alreadyPaid && !p.receiptImageUrl) return t;
         const existingRec = (t.subscription?.paymentHistory || []).find((h) => h.monthKey === currentMonth);
         if (alreadyPaid && existingRec?.receiptImageUrl) return t;
@@ -255,7 +243,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
           currentMonth,
           true,
           p.amount || t.subscription?.monthlyFee,
-          p.verificationSummary || 'Pago verificado automáticamente desde el servidor',
+          p.verificationSummary || 'Pago verificado automáticamente en Supabase',
           p.verifiedViaReceipt ? 'Sistema Verificador de Comprobantes' : 'Sistema Automático Mercado Pago',
           {
             paymentMethod: p.paymentMethod || 'mercadopago',

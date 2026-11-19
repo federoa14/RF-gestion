@@ -18,9 +18,10 @@ import {
 import { ClientPaymentOrder } from '../types';
 import { formatCurrency } from '../utils/alerts';
 import {
-  fetchClientPaymentOrderFromSupabase,
-  saveClientPaymentOrderToSupabase,
-} from '../utils/supabaseSync';
+  getClientPaymentOrderFromCloud,
+  verifyClientPaymentOrderInSupabase,
+  verifyClientReceiptImageInSupabase,
+} from '../utils/supabaseServices';
 
 interface PublicClientPayViewProps {
   token: string;
@@ -84,22 +85,7 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
     const loadOrderAndCheckReturn = async () => {
       try {
         setLoading(true);
-        let currentOrder: ClientPaymentOrder | null = null;
-        try {
-          const res = await fetch(`/api/client-payments/order/${encodeURIComponent(token)}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.success && data.order) {
-              currentOrder = data.order;
-            }
-          }
-        } catch {
-          // Try Supabase fallback below
-        }
-
-        if (!currentOrder) {
-          currentOrder = await fetchClientPaymentOrderFromSupabase(token);
-        }
+        let currentOrder: ClientPaymentOrder | null = await getClientPaymentOrderFromCloud(token);
 
         if (!currentOrder) {
           if (active) {
@@ -118,23 +104,17 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
 
         if (currentOrder.status !== 'approved' && mpStatus === 'approved') {
           try {
-            const vRes = await fetch('/api/client-payments/verify', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                token,
-                paymentId: mpPaymentId,
-                collectionStatus: 'approved',
-                paymentMethod: 'mercadopago',
-              }),
+            const vData = await verifyClientPaymentOrderInSupabase({
+              token,
+              paymentId: mpPaymentId,
+              collectionStatus: 'approved',
+              paymentMethod: 'mercadopago',
             });
-            const vData = await vRes.json();
             if (vData.approved && vData.order) {
               currentOrder = vData.order;
-              await saveClientPaymentOrderToSupabase(vData.order);
               if (active) {
                 setSuccessNote(
-                  'Tu pago fue acreditado automáticamente por Mercado Pago. Tu cuenta ya figura PAGADA.'
+                  'Tu pago fue acreditado automáticamente y guardado en Supabase. Tu cuenta ya figura PAGADA.'
                 );
               }
             }
@@ -181,31 +161,23 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
     setIsProcessing(true);
     setErrorMsg(null);
     try {
-      const res = await fetch('/api/client-payments/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: order.token,
-          paymentId: operationIdInput.trim() || undefined,
-          collectionStatus: confirmTransfer ? 'approved' : undefined,
-          paymentMethod: confirmTransfer && !order.mpInitPoint ? 'transferencia' : 'mercadopago',
-          confirmInstant: confirmTransfer,
-        }),
+      const data = await verifyClientPaymentOrderInSupabase({
+        token: order.token,
+        paymentId: operationIdInput.trim() || undefined,
+        collectionStatus: confirmTransfer ? 'approved' : undefined,
+        paymentMethod: confirmTransfer && !order.mpInitPoint ? 'transferencia' : 'mercadopago',
+        confirmInstant: confirmTransfer,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo comprobar el pago.');
-      }
+
       if (data.approved && data.order) {
-        await saveClientPaymentOrderToSupabase(data.order);
         setOrder(data.order);
         setSuccessNote(
-          'Pago acreditado. El comercio recibió la confirmación automática y tu cuenta figura PAGADA.'
+          'Pago acreditado y guardado en Supabase. El comercio recibió la confirmación automática y tu cuenta figura PAGADA.'
         );
       } else {
         setErrorMsg(
           data.message ||
-            'Aún no recibimos confirmación automática de Mercado Pago. Podés adjuntar la captura del comprobante abajo para acreditarlo al instante.'
+            'Aún no recibimos confirmación automática de pago. Podés adjuntar la captura del comprobante abajo para acreditarlo al instante.'
         );
       }
     } catch (err: any) {
@@ -225,30 +197,22 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
       const { dataUrl, mimeType } = await compressReceiptImage(file);
       setReceiptPreview(dataUrl);
 
-      const res = await fetch('/api/client-payments/verify-receipt-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: order.token,
-          imageBase64: dataUrl,
-          mimeType,
-        }),
+      const data = await verifyClientReceiptImageInSupabase({
+        token: order.token,
+        imageBase64: dataUrl,
+        mimeType,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Error verificando comprobante.');
-      }
+
       if (data.approved && data.order) {
-        await saveClientPaymentOrderToSupabase(data.order);
         setOrder(data.order);
         setSuccessNote(
           data.message ||
-            'Comprobante validado al instante. Tu saldo quedó cancelado automáticamente.'
+            'Comprobante registrado en Supabase. Tu saldo quedó cancelado automáticamente.'
         );
       } else {
         setErrorMsg(
           data.message ||
-            'No pudimos confirmar el pago en la imagen. Verificá que el monto y Alias coincidan.'
+            'No pudimos registrar el comprobante. Intentá nuevamente con una imagen válida.'
         );
       }
     } catch (err: any) {

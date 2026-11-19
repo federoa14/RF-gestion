@@ -125,22 +125,11 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
     e.preventDefault();
     let updatedCfg = { ...currentConfig };
     if (merchantMpTokenInput.trim()) {
-      try {
-        const res = await fetch('/api/merchant/mp-token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tenantId: currentConfig.tenantId || 'default-tenant',
-            mpAccessToken: merchantMpTokenInput.trim(),
-          }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          updatedCfg = { ...updatedCfg, hasMerchantMpAccessToken: Boolean(data.hasMerchantMpAccessToken) };
-        }
-      } catch {
-        // ignore network glitch gracefully
-      }
+      updatedCfg = {
+        ...updatedCfg,
+        merchantMpAccessToken: merchantMpTokenInput.trim(),
+        hasMerchantMpAccessToken: true,
+      };
       setMerchantMpTokenInput('');
     }
     onSaveConfig(updatedCfg);

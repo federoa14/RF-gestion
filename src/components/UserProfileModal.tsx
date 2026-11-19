@@ -149,25 +149,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     const updated = updatePlatformUser(currentUser.id, updates);
 
     if (canEditMerchantBanking && onUpdatePaymentConfig) {
-      let hasToken = Boolean(config?.hasMerchantMpAccessToken);
-      if (merchantMpTokenInput.trim()) {
-        try {
-          const tokRes = await fetch('/api/merchant/mp-token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              tenantId: config?.tenantId || currentUser.tenantId || 'default-tenant',
-              mpAccessToken: merchantMpTokenInput.trim(),
-            }),
-          });
-          const tokData = await tokRes.json();
-          if (tokData.success) {
-            hasToken = Boolean(tokData.hasMerchantMpAccessToken);
-          }
-        } catch {
-          // ignore network error gracefully
-        }
-      }
+      const trimmedToken = merchantMpTokenInput.trim();
+      const hasToken = Boolean(trimmedToken || config?.hasMerchantMpAccessToken);
 
       onUpdatePaymentConfig({
         merchantPaymentAlias: merchantAlias.trim(),
@@ -175,6 +158,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         merchantPaymentBank: merchantBank.trim() || 'Mercado Pago',
         merchantPaymentHolder: merchantHolder.trim() || fullName.trim(),
         merchantMpCheckoutLink: merchantMpCheckoutLink.trim(),
+        ...(trimmedToken ? { merchantMpAccessToken: trimmedToken } : {}),
         hasMerchantMpAccessToken: hasToken,
       });
     }

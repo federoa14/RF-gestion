@@ -32,6 +32,13 @@ import {
 import { purgeExpiredBoletas } from './retentionPurge';
 import { dbGetItem, dbSetItem, dbRemoveItem, syncKeysFromCloud } from './localInternalDb';
 import { flushSupabaseSync } from './supabaseSync';
+import {
+  deletePlatformAnnouncementFromSupabaseTable,
+  mirrorPlatformAnnouncementToSupabaseTable,
+  mirrorPlatformBillingToSupabaseTable,
+  mirrorPlatformSupportToSupabaseTable,
+} from './supabaseServices';
+import { getSupabaseClient } from './supabaseClient';
 
 export { flushSupabaseSync };
 
@@ -247,25 +254,38 @@ export async function syncTenantDataFromSupabase(tenantId: string): Promise<bool
 export async function fetchPlatformBillingConfigFromServer(): Promise<PlatformBillingConfig> {
   await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_BILLING]);
   const current = loadPlatformBillingConfig();
-  try {
-    const res = await fetch('/api/platform/billing-config');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.billingConfig) {
-        const srvUpdated = data.billingConfig.updatedAt || '';
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from('platform_billing_config')
+        .select('*')
+        .eq('id', 'default')
+        .maybeSingle();
+      if (data) {
+        const srvUpdated = String(data.updated_at || '');
         const curUpdated = current.updatedAt || '';
         if (!curUpdated || (srvUpdated && srvUpdated > curUpdated)) {
-          const merged = {
+          const merged: PlatformBillingConfig = {
             ...current,
-            ...data.billingConfig,
+            alias: data.alias ?? current.alias,
+            cvu: data.cvu ?? current.cvu,
+            accountHolderName: data.account_holder_name ?? current.accountHolderName,
+            bankOrWalletName: data.bank_or_wallet_name ?? current.bankOrWalletName,
+            defaultMonthlyFee: Number(data.default_monthly_fee ?? current.defaultMonthlyFee),
+            annualDiscountPercent: Number(data.annual_discount_percent ?? current.annualDiscountPercent ?? 0),
+            mpCheckoutLink: data.mp_checkout_link ?? current.mpCheckoutLink,
+            mpPublicKey: data.mp_public_key ?? current.mpPublicKey,
+            hasMpAccessToken: Boolean(data.has_mp_access_token ?? current.hasMpAccessToken),
+            updatedAt: srvUpdated || current.updatedAt,
           };
           savePlatformBillingConfig(merged);
           return merged;
         }
       }
+    } catch {
+      // app_cloud_store remains authoritative
     }
-  } catch (e) {
-    console.warn('Could not fetch platform billing config from server', e);
   }
   return current;
 }
@@ -273,23 +293,15 @@ export async function fetchPlatformBillingConfigFromServer(): Promise<PlatformBi
 export async function persistPlatformBillingConfigToServer(
   config: PlatformBillingConfig & { mpAccessToken?: string }
 ): Promise<PlatformBillingConfig> {
-  savePlatformBillingConfig(config);
-  try {
-    const res = await fetch('/api/platform/billing-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.billingConfig) {
-        savePlatformBillingConfig(data.billingConfig);
-        return data.billingConfig;
-      }
-    }
-  } catch (e) {
-    console.warn('Could not persist platform billing config to server', e);
-  }
+  const { mpAccessToken, ...cleanConfig } = config;
+  const nextConfig: PlatformBillingConfig = {
+    ...cleanConfig,
+    hasMpAccessToken: Boolean(mpAccessToken?.trim() || cleanConfig.hasMpAccessToken),
+    updatedAt: new Date().toISOString(),
+  };
+  savePlatformBillingConfig(nextConfig);
+  await flushSupabaseSync();
+  await mirrorPlatformBillingToSupabaseTable(nextConfig);
   return loadPlatformBillingConfig();
 }
 
@@ -326,25 +338,34 @@ export function savePlatformSupportConfig(config: PlatformSupportConfig): void {
 export async function fetchPlatformSupportConfigFromServer(): Promise<PlatformSupportConfig> {
   await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_SUPPORT]);
   const current = loadPlatformSupportConfig();
-  try {
-    const res = await fetch('/api/platform/support-config');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.supportConfig) {
-        const srvUpdated = data.supportConfig.updatedAt || '';
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from('platform_support_config')
+        .select('*')
+        .eq('id', 'default')
+        .maybeSingle();
+      if (data) {
+        const srvUpdated = String(data.updated_at || '');
         const curUpdated = current.updatedAt || '';
         if (!curUpdated || (srvUpdated && srvUpdated > curUpdated)) {
-          const merged = {
+          const merged: PlatformSupportConfig = {
             ...current,
-            ...data.supportConfig,
+            contactName: data.contact_name ?? current.contactName,
+            whatsappPhone: data.whatsapp_phone ?? current.whatsappPhone,
+            email: data.email ?? current.email,
+            attentionHours: data.attention_hours ?? current.attentionHours,
+            welcomeMessage: data.welcome_message ?? current.welcomeMessage,
+            updatedAt: srvUpdated || current.updatedAt,
           };
           savePlatformSupportConfig(merged);
           return merged;
         }
       }
+    } catch {
+      // app_cloud_store remains authoritative
     }
-  } catch (e) {
-    console.warn('Could not fetch platform support config from server', e);
   }
   return current;
 }
@@ -353,22 +374,8 @@ export async function persistPlatformSupportConfigToServer(
   config: PlatformSupportConfig
 ): Promise<PlatformSupportConfig> {
   savePlatformSupportConfig(config);
-  try {
-    const res = await fetch('/api/platform/support-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.supportConfig) {
-        savePlatformSupportConfig(data.supportConfig);
-        return data.supportConfig;
-      }
-    }
-  } catch (e) {
-    console.warn('Could not persist platform support config to server', e);
-  }
+  await flushSupabaseSync();
+  await mirrorPlatformSupportToSupabaseTable(config);
   return loadPlatformSupportConfig();
 }
 
@@ -399,26 +406,37 @@ export async function fetchPlatformAnnouncementsFromServer(params?: {
   audience?: string;
 }): Promise<PlatformAnnouncement[]> {
   await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_ANNOUNCEMENTS]);
-  const cloudOrLocal = loadPlatformAnnouncements();
-  try {
-    const query = new URLSearchParams();
-    if (params?.onlyActive) query.set('onlyActive', 'true');
-    if (params?.audience) query.set('audience', params.audience);
-    const qs = query.toString();
-    const res = await fetch(`/api/platform/announcements${qs ? `?${qs}` : ''}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && Array.isArray(data.announcements) && data.announcements.length > 0) {
-        if (!params?.onlyActive && !params?.audience) {
-          savePlatformAnnouncements(data.announcements);
-        }
-        return data.announcements;
+  let local = loadPlatformAnnouncements();
+
+  const supabase = getSupabaseClient();
+  if (supabase && local.length === 0) {
+    try {
+      const { data } = await supabase
+        .from('platform_announcements')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (Array.isArray(data) && data.length > 0) {
+        local = data.map((row) => ({
+          id: String(row.id),
+          title: String(row.title || ''),
+          message: String(row.message || ''),
+          category: row.category || 'novedad',
+          audience: row.audience || 'all',
+          ctaType: row.cta_type || 'none',
+          ctaLabel: row.cta_label || '',
+          ctaUrl: row.cta_url || '',
+          active: Boolean(row.active),
+          createdAt: String(row.created_at || new Date().toISOString()),
+          expiresAt: row.expires_at || undefined,
+          authorName: row.author_name || undefined,
+        }));
+        savePlatformAnnouncements(local);
       }
+    } catch {
+      // app_cloud_store remains authoritative
     }
-  } catch (e) {
-    console.warn('Could not fetch platform announcements from server', e);
   }
-  const local = cloudOrLocal;
+
   if (!params?.onlyActive && !params?.audience) return local;
   const today = new Date().toISOString().split('T')[0];
   return local.filter((a) => {
@@ -444,16 +462,7 @@ export async function savePlatformAnnouncementToServer(
     : [newItem, ...current];
   savePlatformAnnouncements(updated);
   await flushSupabaseSync();
-
-  try {
-    await fetch('/api/platform/announcements', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newItem),
-    });
-  } catch (e) {
-    console.warn('Could not save announcement to server', e);
-  }
+  await mirrorPlatformAnnouncementToSupabaseTable(newItem);
   return updated;
 }
 
@@ -464,15 +473,9 @@ export async function togglePlatformAnnouncementOnServer(
   const updated = loadPlatformAnnouncements().map((x) => (x.id === id ? { ...x, active } : x));
   savePlatformAnnouncements(updated);
   await flushSupabaseSync();
-
-  try {
-    await fetch(`/api/platform/announcements/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active }),
-    });
-  } catch (e) {
-    console.warn('Could not toggle announcement on server', e);
+  const target = updated.find((x) => x.id === id);
+  if (target) {
+    await mirrorPlatformAnnouncementToSupabaseTable(target);
   }
   return updated;
 }
@@ -481,14 +484,7 @@ export async function deletePlatformAnnouncementFromServer(id: string): Promise<
   const updated = loadPlatformAnnouncements().filter((x) => x.id !== id);
   savePlatformAnnouncements(updated);
   await flushSupabaseSync();
-
-  try {
-    await fetch(`/api/platform/announcements/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    });
-  } catch (e) {
-    console.warn('Could not delete announcement on server', e);
-  }
+  await deletePlatformAnnouncementFromSupabaseTable(id);
   return updated;
 }
 

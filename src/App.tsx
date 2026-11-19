@@ -162,6 +162,17 @@ import {
 } from './utils/multiTenantStorage';
 import { SUPABASE_SYNC_EVENT } from './utils/supabaseSync';
 import {
+  fetchPendingReconciliationOrdersFromSupabase,
+  fetchVerifiedTenantPaymentStatusFromSupabase,
+  markClientPaymentOrderReconciledInSupabase,
+  verifyAndRecordTenantPaymentInSupabase,
+} from './utils/supabaseServices';
+import {
+  executeBlockedChargeAlertDirect,
+  executeDailyAlertsDirect,
+  executeDailyClosingDirect,
+} from './utils/clientDispatchEngine';
+import {
   getTenantSubscriptionStatus,
   getCurrentMonthInfo,
   toggleTenantMonthlyPayment,
@@ -406,23 +417,7 @@ export default function App() {
     showToast('Historial de despachos automáticos limpiado.');
   };
 
-  // Auto-sync with backend server state file for 24/7 background cron execution
-  useEffect(() => {
-    if (selectedTenant && currentUser?.role !== 'superadmin') {
-      fetch('/api/sync-state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          boletas,
-          paidBoletas,
-          clients,
-          salespeople,
-          admins,
-          config,
-        }),
-      }).catch((e) => console.warn('Sync server state error:', e));
-    }
-  }, [boletas, paidBoletas, clients, salespeople, admins, config, selectedTenant?.id, currentUser?.role]);
+  // Tenant state persistence is synced directly to Supabase via saveBoletas / saveTenantData.
 
   // Helper to apply approved SaaS subscription payment to tenant state (1 Mes o Plan Anual 12 Meses)
   const applyApprovedTenantPayment = (
@@ -498,22 +493,17 @@ export default function App() {
     }
 
     if (mpStatus === 'approved' && tenantIdParam && monthKeyParam) {
-      fetch('/api/mercadopago/verify-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: tenantIdParam,
-          monthKey: monthKeyParam,
-          amount: amountParam || undefined,
-          paymentId: mpPaymentId,
-          preferenceId: mpPreferenceId,
-          collectionStatus: 'approved',
-          paymentMethod: 'mercadopago',
-          planType: planTypeParam,
-          monthsCount: planTypeParam === 'annual' ? 12 : 1,
-        }),
+      verifyAndRecordTenantPaymentInSupabase({
+        tenantId: tenantIdParam,
+        monthKey: monthKeyParam,
+        amount: amountParam || undefined,
+        paymentId: mpPaymentId,
+        preferenceId: mpPreferenceId,
+        collectionStatus: 'approved',
+        paymentMethod: 'mercadopago',
+        planType: planTypeParam,
+        monthsCount: planTypeParam === 'annual' ? 12 : 1,
       })
-        .then((r) => r.json())
         .then((data) => {
           if (data.approved && data.payment) {
             const approvedPlanType: 'monthly' | 'annual' =
@@ -532,8 +522,8 @@ export default function App() {
             });
             showToast(
               approvedPlanType === 'annual'
-                ? '💳 ¡Plan Anual (12 meses) aprobado en Mercado Pago y acreditado automáticamente!'
-                : '💳 ¡Pago aprobado en Mercado Pago! El mes quedó marcado como PAGADO automáticamente.'
+                ? '💳 ¡Plan Anual (12 meses) aprobado en Mercado Pago y guardado en Supabase!'
+                : '💳 ¡Pago aprobado en Mercado Pago! El mes quedó marcado como PAGADO en Supabase.'
             );
           }
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -542,17 +532,14 @@ export default function App() {
       return;
     }
 
-    // Also poll server if the active tenant has a webhook-verified payment for current month
+    // Check Supabase if active tenant has a verified payment for current month
     if (selectedTenant && currentUser?.role !== 'superadmin') {
       const monthInfo = getCurrentMonthInfo();
       const subEval = getTenantSubscriptionStatus(selectedTenant);
       if (!subEval.isPaidForCurrentMonth) {
-        fetch(
-          `/api/mercadopago/payment-status?tenantId=${encodeURIComponent(selectedTenant.id)}&monthKey=${encodeURIComponent(monthInfo.monthKey)}`
-        )
-          .then((r) => r.json())
+        fetchVerifiedTenantPaymentStatusFromSupabase(selectedTenant.id, monthInfo.monthKey)
           .then((data) => {
-            if (data.success && data.approved && data.payment) {
+            if (data.approved && data.payment) {
               const pType: 'monthly' | 'annual' =
                 data.payment.planType === 'annual' ? 'annual' : 'monthly';
               applyApprovedTenantPayment(selectedTenant.id, {
@@ -569,8 +556,8 @@ export default function App() {
               });
               showToast(
                 pType === 'annual'
-                  ? '💳 ¡Plan Anual (12 meses) detectado y acreditado automáticamente!'
-                  : `💳 ¡Pago de ${monthInfo.monthName} detectado y acreditado automáticamente!`
+                  ? '💳 ¡Plan Anual (12 meses) detectado en Supabase y acreditado!'
+                  : `💳 ¡Pago de ${monthInfo.monthName} detectado en Supabase y acreditado!`
               );
             }
           })
@@ -579,48 +566,26 @@ export default function App() {
     }
   }, [selectedTenant?.id, currentUser?.role, clientPayToken]);
 
-  // Load server-side background logs on mount
-  useEffect(() => {
-    fetch('/api/dispatch-logs')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success && Array.isArray(data.logs) && data.logs.length > 0) {
-          const currentLogs = loadAutoDispatchLogs();
-          const mergedMap = new Map();
-          [...data.logs, ...currentLogs].forEach((l) => mergedMap.set(l.id, l));
-          const mergedLogs = Array.from(mergedMap.values());
-          setAutoLogs(mergedLogs);
-          saveAutoDispatchLogs(mergedLogs);
-        }
-      })
-      .catch((e) => console.warn('Could not fetch server logs:', e));
-  }, []);
-
-  // Background automated dispatch check on mount (zero-click execution)
+  // Background automated dispatch check on mount (client engine persisted to Supabase)
   useEffect(() => {
     const todayStr = new Date().toISOString().split('T')[0];
     if (config.autoDispatchEnabled && config.lastAutoDispatchDate !== todayStr && boletas.length > 0) {
-      fetch('/api/dispatch-daily-alerts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          boletas,
-          clients,
-          salespeople,
-          admins,
-          config,
-        }),
+      executeDailyAlertsDirect({
+        boletas,
+        clients,
+        salespeople,
+        admins,
+        config,
       })
-        .then((r) => r.json())
         .then((data) => {
-          if (data.success && data.logs?.length > 0) {
+          if (data.logs?.length > 0) {
             const updatedConfig = { ...config, lastAutoDispatchDate: todayStr };
             setConfig(updatedConfig);
             saveConfig(updatedConfig);
             const updated = [...data.logs, ...loadAutoDispatchLogs()];
             setAutoLogs(updated);
             saveAutoDispatchLogs(updated);
-            showToast(`🤖 Despacho automático matutino: ${data.logs.length} alertas enviadas automáticamente sin clics.`);
+            showToast(`🤖 Despacho automático matutino: ${data.logs.length} alertas generadas y guardadas en Supabase.`);
           }
         })
         .catch((err) => {
@@ -629,7 +594,7 @@ export default function App() {
     }
   }, []);
 
-  // Automatic End-of-Day Closing WhatsApp Summary to Owner
+  // Automatic End-of-Day Closing WhatsApp Summary to Owner (persisted to Supabase)
   useEffect(() => {
     if (!selectedTenant || currentUser?.role === 'superadmin') return;
     if (config.dailyClosingEnabled === false) return;
@@ -648,20 +613,15 @@ export default function App() {
         (boletas.length > 0 || paidBoletas.length > 0)
       ) {
         lastAutoClosingAttemptRef.current = attemptKey;
-        fetch('/api/dispatch-daily-closing', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            boletas,
-            paidBoletas,
-            admins,
-            config,
-            targetDate: todayStr,
-          }),
+        executeDailyClosingDirect({
+          boletas,
+          paidBoletas,
+          admins,
+          config,
+          targetDateStr: todayStr,
         })
-          .then((r) => r.json())
           .then((data) => {
-            if (data.success && Array.isArray(data.logs) && data.logs.length > 0) {
+            if (Array.isArray(data.logs) && data.logs.length > 0) {
               const updatedConfig = { ...config, lastDailyClosingDate: todayStr };
               setConfig(updatedConfig);
               saveConfig(updatedConfig);
@@ -672,11 +632,11 @@ export default function App() {
               const updatedLogs = [...data.logs, ...loadAutoDispatchLogs()];
               setAutoLogs(updatedLogs);
               saveAutoDispatchLogs(updatedLogs);
-              showToast(`📊 Cierre del día automático: resumen enviado al dueño (${data.logs.length} WhatsApp).`);
+              showToast(`📊 Cierre del día automático generado y guardado en Supabase (${data.logs.length} WhatsApp).`);
             }
           })
           .catch((err) => {
-            console.warn('Error verificando resumen de cierre diario:', err);
+            console.warn('Error generando resumen de cierre diario:', err);
           });
       }
     };
@@ -1964,29 +1924,24 @@ export default function App() {
 
   // Notificación automática a los dueños cuando se anula la carga de una boleta por tener deuda previa
   const handleNotifyOwnersBlockedAttempt = (client: Client, existingBoleta: Boleta) => {
-    fetch('/api/notify-blocked-charge', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client,
-        existingBoleta,
-        config,
-        admins,
-      }),
+    executeBlockedChargeAlertDirect({
+      client,
+      existingBoleta,
+      config,
+      admins,
     })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.logs?.length > 0) {
-          const updatedLogs = [...data.logs, ...loadAutoDispatchLogs()];
+      .then((logs) => {
+        if (logs.length > 0) {
+          const updatedLogs = [...logs, ...loadAutoDispatchLogs()];
           setAutoLogs(updatedLogs);
           saveAutoDispatchLogs(updatedLogs);
         }
       })
       .catch((err) => {
-        console.error('Error al emitir alerta a los dueños:', err);
+        console.error('Error al generar alerta a los dueños:', err);
       });
 
-    showToast(`🚫 Carga anulada: Se notificó automáticamente a los dueños la boleta #${existingBoleta.boletaNumber} de ${client.name}.`);
+    showToast(`🚫 Carga anulada: Se registró la alerta para los dueños sobre la boleta #${existingBoleta.boletaNumber} de ${client.name}.`);
   };
 
   // Clear operational records for active company while keeping config and admins
@@ -2192,7 +2147,7 @@ export default function App() {
   };
 
   // Zero-click Client Payment Auto-Reconciliation:
-  // Polls /api/client-payments/pending-reconciliation so when a client pays via WhatsApp link
+  // Polls Supabase (and listens to Realtime) so when a client pays via WhatsApp link
   // (Mercado Pago, credit/debit card, or verified transfer), their account is automatically settled FIFO.
   const latestBoletasRef = useRef<Boleta[]>(boletas);
   const latestPaidBoletasRef = useRef<Boleta[]>(paidBoletas);
@@ -2210,12 +2165,8 @@ export default function App() {
 
     const runAutoReconcile = async () => {
       try {
-        const res = await fetch(
-          `/api/client-payments/pending-reconciliation?tenantId=${encodeURIComponent(activeTenantId)}`
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        const orders: ClientPaymentOrder[] = Array.isArray(data?.orders) ? data.orders : [];
+        const orders: ClientPaymentOrder[] =
+          await fetchPendingReconciliationOrdersFromSupabase(activeTenantId);
         if (cancelled || orders.length === 0) return;
 
         let workingPending = [...latestBoletasRef.current];
@@ -2325,11 +2276,7 @@ export default function App() {
             }
           }
 
-          await fetch('/api/client-payments/mark-reconciled', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: order.token }),
-          }).catch(() => {});
+          await markClientPaymentOrderReconciledInSupabase(order.token).catch(() => {});
 
           if (!cancelled) {
             showToast(
@@ -2351,10 +2298,12 @@ export default function App() {
     runAutoReconcile();
     const intervalId = setInterval(runAutoReconcile, 10000);
     window.addEventListener('focus', runAutoReconcile);
+    window.addEventListener(SUPABASE_SYNC_EVENT, runAutoReconcile);
     return () => {
       cancelled = true;
       clearInterval(intervalId);
       window.removeEventListener('focus', runAutoReconcile);
+      window.removeEventListener(SUPABASE_SYNC_EVENT, runAutoReconcile);
     };
   }, [selectedTenant?.id, config.tenantId, currentUser?.role, clientPayToken]);
 

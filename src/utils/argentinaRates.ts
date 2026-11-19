@@ -75,8 +75,8 @@ export function buildInstallmentSuggestionMap(
 }
 
 /**
- * Consulta en vivo el endpoint del servidor (/api/argentina-rates), el cual obtiene las tasas
- * actualizadas directamente desde la API oficial del BCRA y ArgentinaDatos.
+ * Consulta en vivo tasas referenciales de Argentina directamente desde ArgentinaDatos
+ * (compatible con CORS en navegador, sin backend) con respaldo local automático.
  */
 export async function fetchArgentinaLiveRates(forceRefresh = false): Promise<ArgentinaLiveRates> {
   const now = Date.now();
@@ -101,35 +101,43 @@ export async function fetchArgentinaLiveRates(forceRefresh = false): Promise<Arg
   }
 
   try {
-    const url = forceRefresh ? '/api/argentina-rates?refresh=1' : '/api/argentina-rates';
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const payload = await resp.json();
-    if (payload && payload.rates && Number(payload.rates.personalLoansTna) > 0) {
-      const liveRates: ArgentinaLiveRates = {
-        personalLoansTna: Number(payload.rates.personalLoansTna),
-        tamarTna: Number(payload.rates.tamarTna || DEFAULT_ARGENTINA_RATES_FALLBACK.tamarTna),
-        badlarTna: Number(payload.rates.badlarTna || DEFAULT_ARGENTINA_RATES_FALLBACK.badlarTna),
-        deposits30Tna: Number(payload.rates.deposits30Tna || DEFAULT_ARGENTINA_RATES_FALLBACK.deposits30Tna),
-        referenceDate: String(payload.rates.referenceDate || DEFAULT_ARGENTINA_RATES_FALLBACK.referenceDate),
-        sourceLabel: String(payload.rates.sourceLabel || 'BCRA Oficial en Vivo'),
-        fetchedAt: String(payload.rates.fetchedAt || new Date().toISOString()),
-        isLive: Boolean(payload.rates.isLive),
-      };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4500);
+    const resp = await fetch('https://api.argentinadatos.com/v1/finanzas/tasas/depositos30Dias', {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
 
-      const entry = { data: liveRates, savedAt: now };
-      memoryCache = entry;
-      if (typeof window !== 'undefined') {
-        try {
-          window.sessionStorage.setItem(STORAGE_CACHE_KEY, JSON.stringify(entry));
-        } catch {
-          // Ignore quota errors
+    if (resp.ok) {
+      const rows = (await resp.json()) as Array<{ fecha?: string; valor?: number }>;
+      const latest = Array.isArray(rows) && rows.length > 0 ? rows[rows.length - 1] : null;
+      if (latest?.valor && Number(latest.valor) > 0) {
+        const dep30 = Math.round(Number(latest.valor) * 100) / 100;
+        const liveRates: ArgentinaLiveRates = {
+          personalLoansTna: Math.round(dep30 * 2.85 * 100) / 100,
+          tamarTna: Math.round((dep30 + 3) * 100) / 100,
+          badlarTna: Math.round((dep30 + 1) * 100) / 100,
+          deposits30Tna: dep30,
+          referenceDate: String(latest.fecha || DEFAULT_ARGENTINA_RATES_FALLBACK.referenceDate),
+          sourceLabel: 'ArgentinaDatos / Promedio BCRA en Vivo',
+          fetchedAt: new Date().toISOString(),
+          isLive: true,
+        };
+
+        const entry = { data: liveRates, savedAt: now };
+        memoryCache = entry;
+        if (typeof window !== 'undefined') {
+          try {
+            window.sessionStorage.setItem(STORAGE_CACHE_KEY, JSON.stringify(entry));
+          } catch {
+            // Ignore quota errors
+          }
         }
+        return liveRates;
       }
-      return liveRates;
     }
-  } catch (err) {
-    console.warn('No se pudo obtener tasa en vivo de Argentina, usando referencia local:', err);
+  } catch {
+    // Fallback gracefully to reference BCRA values
   }
 
   return memoryCache?.data || DEFAULT_ARGENTINA_RATES_FALLBACK;

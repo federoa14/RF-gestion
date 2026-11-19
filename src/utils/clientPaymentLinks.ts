@@ -1,7 +1,7 @@
 import { Boleta, Client, ClientPaymentOrder, DistributorConfig } from '../types';
 import { getBoletaBalance } from './alerts';
 import { createWhatsAppUrl, generateClientPaymentLinkWhatsAppMessage } from './whatsapp';
-import { saveClientPaymentOrderToSupabase } from './supabaseSync';
+import { saveClientPaymentOrderEverywhere } from './supabaseServices';
 import { isSupabaseConfigured } from './supabaseClient';
 
 export interface CreateClientPaymentLinkResult {
@@ -31,79 +31,42 @@ export async function createClientPaymentLink(params: {
     throw new Error('Este cliente no tiene saldo pendiente para generar un link de pago.');
   }
 
+  if (!isSupabaseConfigured()) {
+    throw new Error(
+      'Falta configurar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY para generar enlaces de pago en línea.'
+    );
+  }
+
   const originUrl = typeof window !== 'undefined' ? window.location.origin : '';
-  const payload = {
+  const token = `CPAY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+
+  const order: ClientPaymentOrder = {
+    token,
     tenantId: config.tenantId || 'default-tenant',
     distributorName: config.distributorName || 'Comercio',
     clientId: client.id,
     clientName: client.contactPerson || client.name,
     clientPhone: client.phone || '',
-    amount,
+    amount: Math.round(Number(amount) * 100) / 100,
     currencySymbol: config.currencySymbol || '$',
     boletaIds: sorted.map((b) => b.id),
     boletaNumbers: sorted.map((b) => b.boletaNumber),
-    alias: config.merchantPaymentAlias || '',
-    cvu: config.merchantPaymentCvu || '',
-    holderName: config.merchantPaymentHolder || config.distributorName || '',
-    bankName: config.merchantPaymentBank || 'Mercado Pago',
-    mpCheckoutLink: config.merchantMpCheckoutLink || '',
-    merchantMpAccessToken: config.merchantMpAccessToken || '',
-    originUrl,
-  };
-
-  try {
-    const res = await fetch('/api/client-payments/create-link', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && data.order) {
-        await saveClientPaymentOrderToSupabase(data.order);
-        return {
-          token: data.token,
-          payUrl: data.payUrl,
-          order: data.order,
-        };
-      }
-    }
-  } catch {
-    // Fallback to Supabase direct creation when backend route is unavailable
-  }
-
-  if (!isSupabaseConfigured()) {
-    throw new Error('No se pudo generar el link de pago.');
-  }
-
-  const fallbackToken = `cp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const fallbackOrder: ClientPaymentOrder = {
-    token: fallbackToken,
-    tenantId: payload.tenantId,
-    distributorName: payload.distributorName,
-    clientId: payload.clientId,
-    clientName: payload.clientName,
-    clientPhone: payload.clientPhone,
-    amount: payload.amount,
-    currencySymbol: payload.currencySymbol,
-    boletaIds: payload.boletaIds,
-    boletaNumbers: payload.boletaNumbers,
-    alias: payload.alias,
-    cvu: payload.cvu,
-    holderName: payload.holderName,
-    bankName: payload.bankName,
-    mpCheckoutLink: payload.mpCheckoutLink,
+    alias: String(config.merchantPaymentAlias || '').trim(),
+    cvu: String(config.merchantPaymentCvu || '').trim(),
+    holderName: String(config.merchantPaymentHolder || config.distributorName || '').trim(),
+    bankName: String(config.merchantPaymentBank || 'Mercado Pago').trim(),
+    mpCheckoutLink: String(config.merchantMpCheckoutLink || '').trim(),
     status: 'pending',
+    reconciledInApp: false,
     createdAt: new Date().toISOString(),
   };
 
-  await saveClientPaymentOrderToSupabase(fallbackOrder);
-  const payUrl = `${originUrl}/?pay_client=${encodeURIComponent(fallbackToken)}`;
+  await saveClientPaymentOrderEverywhere(order);
+  const payUrl = `${originUrl}/?pay_client=${encodeURIComponent(token)}`;
   return {
-    token: fallbackToken,
+    token,
     payUrl,
-    order: fallbackOrder,
+    order,
   };
 }
 

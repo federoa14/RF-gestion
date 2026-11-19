@@ -39,6 +39,10 @@ import {
   createMailtoUrl,
   generateDailyClosingOwnerSummary,
 } from '../utils/whatsapp';
+import {
+  executeDailyAlertsDirect,
+  executeDailyClosingDirect,
+} from '../utils/clientDispatchEngine';
 
 interface AutomatedDispatchManagerProps {
   boletas: Boleta[];
@@ -146,32 +150,28 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
     setIsRunningClosing(true);
     setLastRunSummary(null);
     try {
-      const res = await fetch('/api/dispatch-daily-closing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          boletas,
-          paidBoletas,
-          admins,
-          dateStr: todayStr,
-          config: {
-            ...config,
-            senderPhone,
-            senderEmail,
-            dailyClosingEnabled,
-            dailyClosingTime,
-            whatsappProvider,
-            whatsappApiToken,
-            whatsappPhoneNumberId,
-            twilioAccountSid,
-            twilioAuthToken,
-            twilioFromPhone,
-            webhookGatewayUrl,
-            webhookAuthKey,
-          },
-        }),
+      const mergedConfig: DistributorConfig = {
+        ...config,
+        senderPhone,
+        senderEmail,
+        dailyClosingEnabled,
+        dailyClosingTime,
+        whatsappProvider,
+        whatsappApiToken,
+        whatsappPhoneNumberId,
+        twilioAccountSid,
+        twilioAuthToken,
+        twilioFromPhone,
+        webhookGatewayUrl,
+        webhookAuthKey,
+      };
+      const data = await executeDailyClosingDirect({
+        boletas,
+        paidBoletas,
+        admins,
+        targetDateStr: todayStr,
+        config: mergedConfig,
       });
-      const data = await res.json();
       const generatedLogs: AutoDispatchLog[] = data.logs || [];
       if (generatedLogs.length > 0) {
         onAddLogs(generatedLogs);
@@ -183,53 +183,48 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
         lastDailyClosingDate: todayStr,
       });
       setLastRunSummary(
-        `Resumen de Cierre del Día despachado por WhatsApp al dueño (${generatedLogs.length} envío/s). Total cobrado hoy: ${formatCurrency(
+        `Resumen de Cierre del Día generado y guardado en Supabase (${generatedLogs.length} envío/s). Total cobrado hoy: ${formatCurrency(
           closingSummary.metrics.totalGeneralCobrado,
           config.currencySymbol
         )}.`
       );
     } catch (err) {
-      console.error('Error al despachar cierre del día:', err);
-      setLastRunSummary('Error al conectar con el servidor para despachar el cierre del día.');
+      console.error('Error al generar cierre del día:', err);
+      setLastRunSummary('No se pudo generar el resumen de cierre del día.');
     } finally {
       setIsRunningClosing(false);
     }
   };
 
-  // Run dispatch engine (calls backend endpoint)
+  // Run dispatch engine directly on client + persist logs to Supabase
   const handleExecuteDispatch = async () => {
     setIsRunning(true);
     setLastRunSummary(null);
 
     try {
-      const res = await fetch('/api/dispatch-daily-alerts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          boletas,
-          paidBoletas,
-          clients,
-          salespeople,
-          admins,
-          config: {
-            ...config,
-            senderPhone,
-            senderEmail,
-            autoDispatchChannels: channels,
-            whatsappProvider,
-            whatsappApiToken,
-            whatsappPhoneNumberId,
-            twilioAccountSid,
-            twilioAuthToken,
-            twilioFromPhone,
-            webhookGatewayUrl,
-            webhookAuthKey,
-            notifyOwnerOnlyIfPertinent,
-          },
-        }),
+      const mergedConfig: DistributorConfig = {
+        ...config,
+        senderPhone,
+        senderEmail,
+        autoDispatchChannels: channels,
+        whatsappProvider,
+        whatsappApiToken,
+        whatsappPhoneNumberId,
+        twilioAccountSid,
+        twilioAuthToken,
+        twilioFromPhone,
+        webhookGatewayUrl,
+        webhookAuthKey,
+        notifyOwnerOnlyIfPertinent,
+      };
+      const data = await executeDailyAlertsDirect({
+        boletas,
+        clients,
+        salespeople,
+        admins,
+        config: mergedConfig,
       });
 
-      const data = await res.json();
       const generatedLogs: AutoDispatchLog[] = data.logs || [];
 
       if (generatedLogs.length > 0) {
@@ -237,11 +232,11 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
       }
 
       setLastRunSummary(
-        `Despacho directo ejecutado: ${generatedLogs.length} mensajes enviados directamente desde el servidor a las líneas de WhatsApp sin intermediación.`
+        `Despacho ejecutado y guardado en Supabase: ${generatedLogs.length} alertas generadas con acceso directo a WhatsApp.`
       );
     } catch (err) {
       console.error('Error en despacho automático:', err);
-      setLastRunSummary('Error al conectar con el servidor de despacho.');
+      setLastRunSummary('Error al ejecutar el motor de despacho.');
     } finally {
       setIsRunning(false);
     }

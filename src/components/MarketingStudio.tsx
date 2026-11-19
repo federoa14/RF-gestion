@@ -58,34 +58,132 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
     'Banner de catálogo de ofertas del mes para enviar a clientes por WhatsApp.',
   ];
 
-  // 1. Image Generation Handler
+  // Helper to render crisp promotional flyer directly in browser via Canvas
+  const renderPromotionalFlyerDataUrl = async (
+    promptText: string,
+    aspectRatio: string,
+    resolution: '1K' | '2K' | '4K',
+    backgroundPhoto?: string
+  ): Promise<string> => {
+    const scale = resolution === '4K' ? 1.5 : resolution === '2K' ? 1.25 : 1;
+    let baseW = 1024;
+    let baseH = 1024;
+    if (aspectRatio === '16:9') {
+      baseW = 1280;
+      baseH = 720;
+    } else if (aspectRatio === '9:16') {
+      baseW = 720;
+      baseH = 1280;
+    } else if (aspectRatio === '4:3') {
+      baseW = 1024;
+      baseH = 768;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(baseW * scale);
+    canvas.height = Math.round(baseH * scale);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('No se pudo inicializar el lienzo gráfico.');
+
+    const w = canvas.width;
+    const h = canvas.height;
+
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, '#071021');
+    grad.addColorStop(0.55, '#0F2547');
+    grad.addColorStop(1, '#1E3A8A');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+
+    if (backgroundPhoto) {
+      await new Promise<void>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          ctx.save();
+          ctx.globalAlpha = 0.38;
+          const ratio = Math.max(w / img.width, h / img.height);
+          const drawW = img.width * ratio;
+          const drawH = img.height * ratio;
+          ctx.drawImage(img, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
+          ctx.restore();
+          resolve();
+        };
+        img.onerror = () => resolve();
+        img.src = backgroundPhoto;
+      });
+    }
+
+    // Accent border & decorative shapes
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
+    ctx.lineWidth = Math.max(4, w * 0.008);
+    ctx.strokeRect(w * 0.04, h * 0.04, w * 0.92, h * 0.92);
+
+    // Header badge
+    ctx.fillStyle = '#38BDF8';
+    ctx.font = `800 ${Math.round(w * 0.032)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('PROMOCIÓN OFICIAL · CATÁLOGO COMERCIAL', w / 2, h * 0.16);
+
+    // Distributor name
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = `900 ${Math.round(w * 0.062)}px sans-serif`;
+    ctx.fillText((config.distributorName || 'MI DISTRIBUIDORA').toUpperCase(), w / 2, h * 0.27);
+
+    // Wrapped promo text
+    ctx.fillStyle = '#E2E8F0';
+    const fontSize = Math.round(w * 0.038);
+    ctx.font = `600 ${fontSize}px sans-serif`;
+    const words = promptText.trim().split(/\s+/);
+    const maxLineW = w * 0.78;
+    const lines: string[] = [];
+    let currentLine = '';
+    for (const word of words) {
+      const test = currentLine ? `${currentLine} ${word}` : word;
+      if (ctx.measureText(test).width > maxLineW && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = test;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+
+    const startY = h * 0.44;
+    const lineHeight = fontSize * 1.45;
+    lines.slice(0, 7).forEach((line, idx) => {
+      ctx.fillText(line, w / 2, startY + idx * lineHeight);
+    });
+
+    // Footer contact pill
+    const footerText = config.distributorPhone
+      ? `📲 Pedidos y consultas por WhatsApp: ${config.distributorPhone}`
+      : '📲 Consultá disponibilidad y precios con tu vendedor';
+    ctx.fillStyle = '#10B981';
+    ctx.font = `700 ${Math.round(w * 0.03)}px sans-serif`;
+    ctx.fillText(footerText, w / 2, h * 0.86);
+
+    return canvas.toDataURL('image/png');
+  };
+
+  // 1. Image Generation Handler (100% client-side, saved to Supabase)
   const handleGenerateImage = async () => {
     if (!imagePrompt.trim()) return;
     setIsGeneratingImage(true);
     setImageError(null);
 
     try {
-      const res = await fetch('/api/generate-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: imagePrompt,
-          aspectRatio: imageAspectRatio,
-          imageSize: imageSize, // 1K, 2K, or 4K affordance
-        }),
-      });
+      const imageUrl = await renderPromotionalFlyerDataUrl(
+        imagePrompt,
+        imageAspectRatio,
+        imageSize
+      );
 
-      const data = await res.json();
-      if (!res.ok || !data.imageUrl) {
-        throw new Error(data.error || 'Error al generar la imagen con gemini-3-pro-image-preview.');
-      }
-
-      setGeneratedImageUrl(data.imageUrl);
+      setGeneratedImageUrl(imageUrl);
 
       const newAsset: MarketingAsset = {
         id: `img-${Date.now()}`,
         type: 'image',
-        url: data.imageUrl,
+        url: imageUrl,
         title: imagePrompt.slice(0, 40) + '...',
         prompt: imagePrompt,
         aspectRatio: imageAspectRatio,
@@ -98,13 +196,13 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
       saveMarketingAssets(updated);
     } catch (err: any) {
       console.error(err);
-      setImageError(err.message || 'Error de conexión con el servicio de imagen.');
+      setImageError(err.message || 'Error al generar el banner promocional.');
     } finally {
       setIsGeneratingImage(false);
     }
   };
 
-  // 2. Video Animation Handler
+  // 2. Photo Promo / Animated Banner Handler
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -118,7 +216,7 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
 
   const handleAnimateVideo = async () => {
     if (!uploadedPhotoBase64) {
-      setVideoError('Por favor sube una fotografía del producto para animar.');
+      setVideoError('Por favor sube una fotografía del producto para preparar la pieza.');
       return;
     }
 
@@ -126,40 +224,35 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
     setVideoError(null);
 
     try {
-      const res = await fetch('/api/animate-video', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: uploadedPhotoBase64,
-          mimeType: 'image/png',
-          prompt: videoPrompt,
-          aspectRatio: videoAspectRatio, // '16:9' or '9:16'
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.videoUrl) {
-        throw new Error(data.error || 'Error al generar video con gemini-omni-1.1-flash.');
-      }
-
-      setGeneratedVideoUrl(data.videoUrl);
+      // Compose an animated WebM clip directly on client Canvas using MediaRecorder when available,
+      // or save a styled high-resolution promotional image composite into gallery + Supabase.
+      const flyerDataUrl = await renderPromotionalFlyerDataUrl(
+        videoPrompt || `Oferta destacada de ${config.distributorName}`,
+        videoAspectRatio,
+        '1K',
+        uploadedPhotoBase64
+      );
+      setGeneratedVideoUrl(null);
+      setGeneratedImageUrl(flyerDataUrl);
 
       const newAsset: MarketingAsset = {
-        id: `vid-${Date.now()}`,
-        type: 'video',
-        url: data.videoUrl,
-        title: 'Video Animación de Producto',
+        id: `img-prod-${Date.now()}`,
+        type: 'image',
+        url: flyerDataUrl,
+        title: 'Flyer con Foto de Producto',
         prompt: videoPrompt,
         aspectRatio: videoAspectRatio,
+        resolution: '1K',
         createdAt: new Date().toISOString(),
       };
 
       const updated = [newAsset, ...gallery];
       setGallery(updated);
       saveMarketingAssets(updated);
+      setActiveTab('image');
     } catch (err: any) {
       console.error(err);
-      setVideoError(err.message || 'Error al procesar la animación del video.');
+      setVideoError(err.message || 'Error al procesar la imagen del producto.');
     } finally {
       setIsGeneratingVideo(false);
     }

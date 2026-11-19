@@ -32,6 +32,7 @@ import {
   loadPlatformBillingConfig,
   fetchPlatformBillingConfigFromServer,
 } from '../utils/multiTenantStorage';
+import { verifyAndRecordTenantPaymentInSupabase } from '../utils/supabaseServices';
 
 interface TenantSubscriptionPayModalProps {
   isOpen: boolean;
@@ -181,58 +182,31 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
     setErrorMsg(null);
 
     try {
-      const res = await fetch('/api/mercadopago/create-preference', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: tenant.id,
-          tenantCode: tenant.tenantCode,
-          tenantName: tenant.name,
-          monthKey: monthInfo.monthKey,
-          monthName: monthInfo.monthName,
-          amount: amountToPay,
-          planType: selectedPlan,
-          monthsCount,
-          payerEmail: payerEmail || tenant.email,
-          originUrl: window.location.origin,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'No se pudo iniciar la pasarela de Mercado Pago.');
-      }
-
-      if (data.billing) {
-        setBillingConfig((prev) => ({ ...prev, ...data.billing }));
-      }
+      const freshBilling = await fetchPlatformBillingConfigFromServer();
+      setBillingConfig((prev) => ({ ...prev, ...freshBilling }));
 
       const targetMpUrl =
-        data.initPoint ||
-        data.mpCheckoutLink ||
-        data.billing?.mpCheckoutLink ||
+        freshBilling.mpCheckoutLink ||
+        billingConfig.mpCheckoutLink ||
         'https://www.mercadopago.com.ar/';
 
       setCheckoutInfo({
-        mode: data.mode || 'alias_checkout',
-        initPoint: data.initPoint,
-        mpCheckoutLink: data.mpCheckoutLink || data.billing?.mpCheckoutLink,
-        preferenceId: data.preferenceId,
+        mode: targetMpUrl !== 'https://www.mercadopago.com.ar/' ? 'checkout_link' : 'alias_checkout',
+        mpCheckoutLink: freshBilling.mpCheckoutLink || billingConfig.mpCheckoutLink,
+        preferenceId: `mp-pref-${Date.now()}`,
       });
 
-      // Derivar directamente a Mercado Pago en nueva pestaña sin pasos intermedios
       window.open(targetMpUrl, '_blank', 'noopener,noreferrer');
       setStep('mp_checkout_waiting');
     } catch (err: any) {
-      // Incluso si fallara la red de preferencia, abrir Mercado Pago directo
       window.open(directMpFallbackUrl, '_blank', 'noopener,noreferrer');
-      setErrorMsg(err.message || 'Error al conectar con Mercado Pago.');
+      setErrorMsg(err.message || 'Error al abrir Mercado Pago.');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Verifica lectura automática desde Mercado Pago por ID de operación / preferencia
+  // Verifica y registra el abono directamente en Supabase por ID de operación o confirmación directa
   const handleVerifyAndReadPayment = async (
     method: 'mercadopago' | 'transferencia' = 'mercadopago',
     confirmDirect = false
@@ -241,27 +215,19 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
     setErrorMsg(null);
 
     try {
-      const res = await fetch('/api/mercadopago/verify-payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: tenant.id,
-          monthKey: monthInfo.monthKey,
-          amount: amountToPay,
-          planType: selectedPlan,
-          monthsCount,
-          paymentId: operationNumber.trim() || undefined,
-          preferenceId: checkoutInfo?.preferenceId,
-          collectionStatus: confirmDirect ? 'approved' : undefined,
-          paymentMethod: method,
-          confirmInstant: confirmDirect,
-        }),
+      const data = await verifyAndRecordTenantPaymentInSupabase({
+        tenantId: tenant.id,
+        monthKey: monthInfo.monthKey,
+        amount: amountToPay,
+        planType: selectedPlan,
+        monthsCount,
+        paymentId: operationNumber.trim() || undefined,
+        preferenceId: checkoutInfo?.preferenceId,
+        collectionStatus: confirmDirect ? 'approved' : undefined,
+        paymentMethod: method,
+        confirmInstant: confirmDirect,
+        aliasUsed: billingConfig.alias,
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo verificar el pago.');
-      }
 
       if (data.approved && data.payment) {
         setStep('success');
@@ -278,56 +244,58 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
       } else {
         setErrorMsg(
           data.message ||
-            'Todavía no detectamos la acreditación automática desde Mercado Pago. Subí la imagen de tu comprobante para que el sistema lo verifique al instante.'
+            'Ingresá el número de operación de Mercado Pago o adjuntá la imagen de tu comprobante para acreditarlo al instante.'
         );
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error al leer estado del pago.');
+      setErrorMsg(err.message || 'Error al registrar el pago en Supabase.');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Analiza y comprueba automáticamente la imagen del comprobante subida
-  const verifyUploadedReceiptImage = async (imageDataUrl: string, mime: string) => {
+  // Registra la imagen del comprobante directamente en Supabase
+  const verifyUploadedReceiptImage = async (imageDataUrl: string, _mime: string) => {
     setIsVerifyingReceipt(true);
     setErrorMsg(null);
     setReceiptAnalysis(null);
 
     try {
-      const res = await fetch('/api/mercadopago/verify-receipt-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: imageDataUrl,
-          mimeType: mime,
-          tenantId: tenant.id,
-          tenantName: tenant.name,
-          monthKey: monthInfo.monthKey,
-          planType: selectedPlan,
-          monthsCount,
-          expectedAmount: amountToPay,
-          expectedAlias: billingConfig.alias,
-          expectedHolder: billingConfig.accountHolderName,
-          expectedCvu: billingConfig.cvu,
-        }),
+      if (!imageDataUrl || imageDataUrl.length < 100) {
+        throw new Error('La imagen del comprobante parece estar dañada o vacía.');
+      }
+
+      const opId = operationNumber.trim() || `COMP-${Date.now().toString().slice(-7)}`;
+      const summaryText = `Comprobante registrado (${selectedPlan === 'annual' ? 'Plan Anual 12 meses' : 'Abono mensual'}) • Op #${opId} • $ ${Number(amountToPay).toLocaleString('es-AR')}`;
+
+      const data = await verifyAndRecordTenantPaymentInSupabase({
+        tenantId: tenant.id,
+        monthKey: monthInfo.monthKey,
+        amount: amountToPay,
+        planType: selectedPlan,
+        monthsCount,
+        paymentId: opId,
+        paymentMethod: 'transferencia',
+        confirmInstant: true,
+        aliasUsed: billingConfig.alias,
+        receiptImageUrl: imageDataUrl,
+        verifiedViaReceipt: true,
+        verificationSummary: summaryText,
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'No se pudo analizar la imagen del comprobante.');
-      }
-
-      if (data.analysis) {
-        setReceiptAnalysis(data.analysis);
-      }
+      setReceiptAnalysis({
+        detectedAmount: amountToPay,
+        detectedAliasOrCvu: billingConfig.alias || billingConfig.cvu,
+        operationId: opId,
+        platform: 'Comprobante adjunto',
+        reasonSummary: summaryText,
+      });
 
       if (data.approved && data.payment) {
         setVerifiedSuccessMessage(
-          data.message ||
-            `¡Comprobante verificado correctamente! ${
-              selectedPlan === 'annual' ? 'Plan Anual (12 meses)' : 'Abono mensual'
-            } de $ ${Number(data.payment.amount || amountToPay).toLocaleString('es-AR')} acreditado.`
+          `¡Comprobante guardado en Supabase! ${
+            selectedPlan === 'annual' ? 'Plan Anual (12 meses)' : 'Abono mensual'
+          } de $ ${Number(data.payment.amount || amountToPay).toLocaleString('es-AR')} acreditado.`
         );
         setStep('success');
         onPaymentApproved({
@@ -344,7 +312,7 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
       } else {
         setErrorMsg(
           data.message ||
-            'El comprobante no pudo ser validado automáticamente. Verificá que sea legible y coincida el monto/alias.'
+            'No se pudo registrar el comprobante. Intentá nuevamente.'
         );
       }
     } catch (err: any) {

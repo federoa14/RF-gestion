@@ -211,35 +211,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       return;
     }
 
-    try {
-      const res = await fetch('/api/send-recovery-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: cleanEmail,
-          phone: matchedUser.phone,
-          fullName: matchedUser.fullName,
-        }),
-      });
-
-      const data = await res.json();
-      if (data.success && data.code) {
-        setRecoveryCode(data.code);
-        setRecoveryStep(2);
-        setRecoverySuccess(
-          `Código de 6 dígitos generado para ${cleanEmail}${matchedUser.phone ? ` y WhatsApp (${matchedUser.phone})` : ''}.`
-        );
-      } else {
-        setRecoveryError(data.error || 'No se pudo enviar el código de recuperación.');
-      }
-    } catch {
-      const localCode = Math.floor(100000 + Math.random() * 900000).toString();
-      setRecoveryCode(localCode);
-      setRecoveryStep(2);
-      setRecoverySuccess(`Código de verificación generado: ${localCode}`);
-    } finally {
-      setIsSendingCode(false);
-    }
+    const localCode = Math.floor(100000 + Math.random() * 900000).toString();
+    setRecoveryCode(localCode);
+    setRecoveryStep(2);
+    setRecoverySuccess(
+      `Código de verificación de 6 dígitos generado para ${cleanEmail}: ${localCode}`
+    );
+    setIsSendingCode(false);
   };
 
   // Step 2: Validate code & set new password

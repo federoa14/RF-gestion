@@ -36,6 +36,8 @@ const CLOUD_SYNCED_PREFIXES = [
   'saas_platform_billing_config_v1',
   'saas_platform_support_config_v1',
   'saas_platform_announcements_v1',
+  'saas_verified_tenant_payments_v1',
+  'merchant_mp_token_',
   'client_payment_order_',
 ];
 
