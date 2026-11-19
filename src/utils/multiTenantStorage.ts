@@ -30,7 +30,10 @@ import {
   loadRendiciones,
 } from './storage';
 import { purgeExpiredBoletas } from './retentionPurge';
-import { dbGetItem, dbSetItem, dbRemoveItem } from './localInternalDb';
+import { dbGetItem, dbSetItem, dbRemoveItem, syncKeysFromCloud } from './localInternalDb';
+import { flushSupabaseSync } from './supabaseSync';
+
+export { flushSupabaseSync };
 
 const STORAGE_KEYS = {
   TENANTS: 'saas_distribuidoras_tenants_v2_zero',
@@ -225,24 +228,47 @@ export function savePlatformBillingConfig(config: PlatformBillingConfig): void {
   }
 }
 
+export async function syncAuthCatalogFromSupabase(): Promise<void> {
+  await syncKeysFromCloud([
+    STORAGE_KEYS.TENANTS,
+    STORAGE_KEYS.USERS,
+    STORAGE_KEYS.PLATFORM_BILLING,
+    STORAGE_KEYS.PLATFORM_SUPPORT,
+    STORAGE_KEYS.PLATFORM_ANNOUNCEMENTS,
+  ]);
+}
+
+export async function syncTenantDataFromSupabase(tenantId: string): Promise<boolean> {
+  if (!tenantId) return false;
+  const key = `${STORAGE_KEYS.TENANT_DATA_PREFIX}${tenantId}`;
+  const updated = await syncKeysFromCloud([key, STORAGE_KEYS.TENANTS]);
+  return updated.length > 0;
+}
+
 export async function fetchPlatformBillingConfigFromServer(): Promise<PlatformBillingConfig> {
+  await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_BILLING]);
+  const current = loadPlatformBillingConfig();
   try {
     const res = await fetch('/api/platform/billing-config');
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.billingConfig) {
-        const merged = {
-          ...loadPlatformBillingConfig(),
-          ...data.billingConfig,
-        };
-        savePlatformBillingConfig(merged);
-        return merged;
+        const srvUpdated = data.billingConfig.updatedAt || '';
+        const curUpdated = current.updatedAt || '';
+        if (!curUpdated || (srvUpdated && srvUpdated > curUpdated)) {
+          const merged = {
+            ...current,
+            ...data.billingConfig,
+          };
+          savePlatformBillingConfig(merged);
+          return merged;
+        }
       }
     }
   } catch (e) {
     console.warn('Could not fetch platform billing config from server', e);
   }
-  return loadPlatformBillingConfig();
+  return current;
 }
 
 export async function persistPlatformBillingConfigToServer(
@@ -299,23 +325,29 @@ export function savePlatformSupportConfig(config: PlatformSupportConfig): void {
 }
 
 export async function fetchPlatformSupportConfigFromServer(): Promise<PlatformSupportConfig> {
+  await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_SUPPORT]);
+  const current = loadPlatformSupportConfig();
   try {
     const res = await fetch('/api/platform/support-config');
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.supportConfig) {
-        const merged = {
-          ...loadPlatformSupportConfig(),
-          ...data.supportConfig,
-        };
-        savePlatformSupportConfig(merged);
-        return merged;
+        const srvUpdated = data.supportConfig.updatedAt || '';
+        const curUpdated = current.updatedAt || '';
+        if (!curUpdated || (srvUpdated && srvUpdated > curUpdated)) {
+          const merged = {
+            ...current,
+            ...data.supportConfig,
+          };
+          savePlatformSupportConfig(merged);
+          return merged;
+        }
       }
     }
   } catch (e) {
     console.warn('Could not fetch platform support config from server', e);
   }
-  return loadPlatformSupportConfig();
+  return current;
 }
 
 export async function persistPlatformSupportConfigToServer(
@@ -367,6 +399,8 @@ export async function fetchPlatformAnnouncementsFromServer(params?: {
   onlyActive?: boolean;
   audience?: string;
 }): Promise<PlatformAnnouncement[]> {
+  await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_ANNOUNCEMENTS]);
+  const cloudOrLocal = loadPlatformAnnouncements();
   try {
     const query = new URLSearchParams();
     if (params?.onlyActive) query.set('onlyActive', 'true');
@@ -375,7 +409,7 @@ export async function fetchPlatformAnnouncementsFromServer(params?: {
     const res = await fetch(`/api/platform/announcements${qs ? `?${qs}` : ''}`);
     if (res.ok) {
       const data = await res.json();
-      if (data.success && Array.isArray(data.announcements)) {
+      if (data.success && Array.isArray(data.announcements) && data.announcements.length > 0) {
         if (!params?.onlyActive && !params?.audience) {
           savePlatformAnnouncements(data.announcements);
         }
@@ -385,7 +419,7 @@ export async function fetchPlatformAnnouncementsFromServer(params?: {
   } catch (e) {
     console.warn('Could not fetch platform announcements from server', e);
   }
-  const local = loadPlatformAnnouncements();
+  const local = cloudOrLocal;
   if (!params?.onlyActive && !params?.audience) return local;
   const today = new Date().toISOString().split('T')[0];
   return local.filter((a) => {
@@ -400,22 +434,6 @@ export async function fetchPlatformAnnouncementsFromServer(params?: {
 export async function savePlatformAnnouncementToServer(
   announcement: Omit<PlatformAnnouncement, 'id' | 'createdAt'> & { id?: string; createdAt?: string }
 ): Promise<PlatformAnnouncement[]> {
-  try {
-    const res = await fetch('/api/platform/announcements', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(announcement),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && Array.isArray(data.announcements)) {
-        savePlatformAnnouncements(data.announcements);
-        return data.announcements;
-      }
-    }
-  } catch (e) {
-    console.warn('Could not save announcement to server', e);
-  }
   const current = loadPlatformAnnouncements();
   const newItem: PlatformAnnouncement = {
     ...announcement,
@@ -426,6 +444,17 @@ export async function savePlatformAnnouncementToServer(
     ? current.map((x) => (x.id === newItem.id ? newItem : x))
     : [newItem, ...current];
   savePlatformAnnouncements(updated);
+  await flushSupabaseSync();
+
+  try {
+    await fetch('/api/platform/announcements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newItem),
+    });
+  } catch (e) {
+    console.warn('Could not save announcement to server', e);
+  }
   return updated;
 }
 
@@ -433,44 +462,34 @@ export async function togglePlatformAnnouncementOnServer(
   id: string,
   active: boolean
 ): Promise<PlatformAnnouncement[]> {
+  const updated = loadPlatformAnnouncements().map((x) => (x.id === id ? { ...x, active } : x));
+  savePlatformAnnouncements(updated);
+  await flushSupabaseSync();
+
   try {
-    const res = await fetch(`/api/platform/announcements/${encodeURIComponent(id)}`, {
+    await fetch(`/api/platform/announcements/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && Array.isArray(data.announcements)) {
-        savePlatformAnnouncements(data.announcements);
-        return data.announcements;
-      }
-    }
   } catch (e) {
     console.warn('Could not toggle announcement on server', e);
   }
-  const updated = loadPlatformAnnouncements().map((x) => (x.id === id ? { ...x, active } : x));
-  savePlatformAnnouncements(updated);
   return updated;
 }
 
 export async function deletePlatformAnnouncementFromServer(id: string): Promise<PlatformAnnouncement[]> {
+  const updated = loadPlatformAnnouncements().filter((x) => x.id !== id);
+  savePlatformAnnouncements(updated);
+  await flushSupabaseSync();
+
   try {
-    const res = await fetch(`/api/platform/announcements/${encodeURIComponent(id)}`, {
+    await fetch(`/api/platform/announcements/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.success && Array.isArray(data.announcements)) {
-        savePlatformAnnouncements(data.announcements);
-        return data.announcements;
-      }
-    }
   } catch (e) {
     console.warn('Could not delete announcement on server', e);
   }
-  const updated = loadPlatformAnnouncements().filter((x) => x.id !== id);
-  savePlatformAnnouncements(updated);
   return updated;
 }
 

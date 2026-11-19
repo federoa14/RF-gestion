@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import os from 'os';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 dotenv.config({ quiet: true });
 
@@ -343,6 +344,43 @@ function getServerState(): ServerState {
   };
 }
 
+function getServerSupabaseClient(): SupabaseClient | null {
+  const url = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const key = (
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+  if (!url || !key || !/^https?:\/\//i.test(url)) return null;
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+const serverSupabase = getServerSupabaseClient();
+
+async function hydrateServerStateFromSupabase(): Promise<void> {
+  if (!serverSupabase) return;
+  try {
+    const { data, error } = await serverSupabase
+      .from('app_cloud_store')
+      .select('value')
+      .eq('key', 'server_state_v1')
+      .maybeSingle();
+
+    if (!error && data?.value && typeof data.value === 'object') {
+      const serialized = JSON.stringify(data.value, null, 2);
+      try {
+        fs.writeFileSync(activeStateFile, serialized, 'utf-8');
+      } catch {
+        activeStateFile = TMP_STATE_FILE;
+        fs.writeFileSync(activeStateFile, serialized, 'utf-8');
+      }
+      console.log('[Supabase] Estado del servidor sincronizado desde la nube.');
+    }
+  } catch (err) {
+    console.warn('[Supabase] No se pudo leer server_state_v1:', err);
+  }
+}
+
 function saveServerState(state: ServerState): void {
   const serialized = JSON.stringify(state, null, 2);
   try {
@@ -354,6 +392,23 @@ function saveServerState(state: ServerState): void {
     } catch (e) {
       console.error('Error al guardar server_state.json:', e);
     }
+  }
+  if (serverSupabase) {
+    void serverSupabase
+      .from('app_cloud_store')
+      .upsert(
+        {
+          key: 'server_state_v1',
+          value: state,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'key' }
+      )
+      .then(({ error }) => {
+        if (error) {
+          console.warn('[Supabase] Error guardando server_state_v1:', error.message);
+        }
+      });
   }
 }
 
@@ -2900,6 +2955,7 @@ setInterval(async () => {
 
 // Dev vs Prod Vite mounting
 async function startServer() {
+  await hydrateServerStateFromSupabase();
   app.all('/api/*', (_req: Request, res: Response) => {
     res.status(404).json({ error: 'API endpoint no encontrado.' });
   });

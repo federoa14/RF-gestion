@@ -17,6 +17,10 @@ import {
 } from 'lucide-react';
 import { ClientPaymentOrder } from '../types';
 import { formatCurrency } from '../utils/alerts';
+import {
+  fetchClientPaymentOrderFromSupabase,
+  saveClientPaymentOrderToSupabase,
+} from '../utils/supabaseSync';
 
 interface PublicClientPayViewProps {
   token: string;
@@ -80,17 +84,30 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
     const loadOrderAndCheckReturn = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/client-payments/order/${encodeURIComponent(token)}`);
-        const data = await res.json();
-        if (!res.ok || !data.success || !data.order) {
+        let currentOrder: ClientPaymentOrder | null = null;
+        try {
+          const res = await fetch(`/api/client-payments/order/${encodeURIComponent(token)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success && data.order) {
+              currentOrder = data.order;
+            }
+          }
+        } catch {
+          // Try Supabase fallback below
+        }
+
+        if (!currentOrder) {
+          currentOrder = await fetchClientPaymentOrderFromSupabase(token);
+        }
+
+        if (!currentOrder) {
           if (active) {
-            setErrorMsg(data.error || 'No se encontró el enlace de pago solicitado.');
+            setErrorMsg('No se encontró el enlace de pago solicitado.');
             setLoading(false);
           }
           return;
         }
-
-        let currentOrder: ClientPaymentOrder = data.order;
 
         // Verificar si regresó automáticamente desde Mercado Pago Checkout Pro con pago aprobado
         const params = new URLSearchParams(window.location.search);
@@ -100,24 +117,29 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
           params.get('payment_id') || params.get('collection_id') || undefined;
 
         if (currentOrder.status !== 'approved' && mpStatus === 'approved') {
-          const vRes = await fetch('/api/client-payments/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              token,
-              paymentId: mpPaymentId,
-              collectionStatus: 'approved',
-              paymentMethod: 'mercadopago',
-            }),
-          });
-          const vData = await vRes.json();
-          if (vData.approved && vData.order) {
-            currentOrder = vData.order;
-            if (active) {
-              setSuccessNote(
-                'Tu pago fue acreditado automáticamente por Mercado Pago. Tu cuenta ya figura PAGADA.'
-              );
+          try {
+            const vRes = await fetch('/api/client-payments/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token,
+                paymentId: mpPaymentId,
+                collectionStatus: 'approved',
+                paymentMethod: 'mercadopago',
+              }),
+            });
+            const vData = await vRes.json();
+            if (vData.approved && vData.order) {
+              currentOrder = vData.order;
+              await saveClientPaymentOrderToSupabase(vData.order);
+              if (active) {
+                setSuccessNote(
+                  'Tu pago fue acreditado automáticamente por Mercado Pago. Tu cuenta ya figura PAGADA.'
+                );
+              }
             }
+          } catch {
+            // Keep fetched order
           }
         }
 
@@ -175,6 +197,7 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
         throw new Error(data.error || 'No se pudo comprobar el pago.');
       }
       if (data.approved && data.order) {
+        await saveClientPaymentOrderToSupabase(data.order);
         setOrder(data.order);
         setSuccessNote(
           'Pago acreditado. El comercio recibió la confirmación automática y tu cuenta figura PAGADA.'
@@ -216,6 +239,7 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
         throw new Error(data.error || 'Error verificando comprobante.');
       }
       if (data.approved && data.order) {
+        await saveClientPaymentOrderToSupabase(data.order);
         setOrder(data.order);
         setSuccessNote(
           data.message ||

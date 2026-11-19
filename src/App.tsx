@@ -157,7 +157,10 @@ import {
   fetchPlatformAnnouncementsFromServer,
   loadDismissedAnnouncementIds,
   dismissAnnouncementId,
+  syncTenantDataFromSupabase,
+  syncAuthCatalogFromSupabase,
 } from './utils/multiTenantStorage';
+import { SUPABASE_SYNC_EVENT } from './utils/supabaseSync';
 import {
   getTenantSubscriptionStatus,
   getCurrentMonthInfo,
@@ -219,12 +222,72 @@ export default function App() {
     setRendiciones(data.rendiciones || []);
   };
 
-  // Sync data whenever selected tenant changes
+  // Sync data whenever selected tenant changes (local cache + Supabase cloud refresh)
   useEffect(() => {
-    if (selectedTenant) {
-      loadDataForTenant(selectedTenant.id);
-    }
+    if (!selectedTenant) return;
+    let active = true;
+    loadDataForTenant(selectedTenant.id);
+    syncTenantDataFromSupabase(selectedTenant.id).then((updated) => {
+      if (active && updated) {
+        loadDataForTenant(selectedTenant.id);
+        const freshList = loadTenants();
+        setAllTenants(freshList);
+        const updatedSelf = freshList.find((t) => t.id === selectedTenant.id);
+        if (updatedSelf) setSelectedTenant(updatedSelf);
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, [selectedTenant?.id]);
+
+  // Listen for Realtime Supabase changes and periodic window focus refreshes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let lastFocusSync = 0;
+
+    const handleCloudUpdate = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ keys?: string[] }>).detail;
+      const keys = detail?.keys || [];
+      const freshList = loadTenants();
+      setAllTenants(freshList);
+
+      if (selectedTenant) {
+        const tenantKey = `saas_distribuidora_data_v2_${selectedTenant.id}`;
+        if (keys.length === 0 || keys.includes(tenantKey)) {
+          loadDataForTenant(selectedTenant.id);
+        }
+        const updatedSelf = freshList.find((t) => t.id === selectedTenant.id);
+        if (updatedSelf) setSelectedTenant(updatedSelf);
+      }
+    };
+
+    const handleWindowFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusSync < 15000) return;
+      lastFocusSync = now;
+      if (selectedTenant) {
+        syncTenantDataFromSupabase(selectedTenant.id).then((updated) => {
+          if (updated) {
+            loadDataForTenant(selectedTenant.id);
+            const freshList = loadTenants();
+            setAllTenants(freshList);
+          }
+        });
+      } else if (currentUser?.role === 'superadmin') {
+        syncAuthCatalogFromSupabase().then(() => {
+          setAllTenants(loadTenants());
+        });
+      }
+    };
+
+    window.addEventListener(SUPABASE_SYNC_EVENT, handleCloudUpdate);
+    window.addEventListener('focus', handleWindowFocus);
+    return () => {
+      window.removeEventListener(SUPABASE_SYNC_EVENT, handleCloudUpdate);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [selectedTenant?.id, currentUser?.role]);
 
   // Active Navigation Tab
   const [activeTab, setActiveTab] = useState<string>('boletas');

@@ -1,10 +1,16 @@
 /**
- * Base de Datos Interna Local del Dispositivo (IndexedDB)
+ * Base de Datos Interna Local del Dispositivo (IndexedDB) + Sincronización Supabase
  * -----------------------------------------------------------------------------
- * Almacena todas las cuentas de usuario, empresas, clientes, boletas,
- * rendiciones y configuraciones directamente en el dispositivo del usuario
- * mediante IndexedDB (sin guardar datos de usuarios en la nube).
+ * Mantiene caché local rápida en IndexedDB y sincroniza automáticamente
+ * empresas, usuarios, clientes, boletas, rendiciones y configuraciones en Supabase.
  */
+import {
+  hydrateFromSupabase,
+  queueSupabaseUpsert,
+  queueSupabaseDelete,
+  refreshKeysFromSupabase,
+  startSupabaseRealtimeSubscription,
+} from './supabaseSync';
 
 const IDB_NAME = 'cobranzas_base_interna_v1';
 const IDB_VERSION = 1;
@@ -198,9 +204,41 @@ export async function initInternalDatabase(): Promise<void> {
     if (db && toMigrate.length > 0) {
       await writeBatchToIdb(db, toMigrate);
     }
+
+    // Hidratar y sincronizar con Supabase (si está configurado en variables de entorno)
+    await hydrateFromSupabase(memoryStore, applyExternalSyncedRecord);
+    startSupabaseRealtimeSubscription(applyExternalSyncedRecord, deleteExternalSyncedRecord);
   })();
 
   return initPromise;
+}
+
+export function applyExternalSyncedRecord(key: string, value: string): void {
+  memoryStore.set(key, value);
+  writeSingleToIdb(key, value);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, value);
+    }
+  } catch {
+    // IndexedDB guarda igual incluso si supera cuota de localStorage
+  }
+}
+
+export function deleteExternalSyncedRecord(key: string): void {
+  memoryStore.delete(key);
+  deleteSingleFromIdb(key);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export async function syncKeysFromCloud(keys: string[]): Promise<string[]> {
+  return refreshKeysFromSupabase(keys, applyExternalSyncedRecord);
 }
 
 export function dbGetItem(key: string): string | null {
@@ -234,6 +272,7 @@ export function dbSetItem(key: string, value: string): void {
   } catch {
     // Si localStorage excede su cuota de 5MB (por fotos/flyers), IndexedDB conserva todo sin fallar
   }
+  queueSupabaseUpsert(key, value);
 }
 
 export function dbRemoveItem(key: string): void {
@@ -246,6 +285,7 @@ export function dbRemoveItem(key: string): void {
   } catch {
     // ignore
   }
+  queueSupabaseDelete(key);
 }
 
 export interface InternalDbStatus {

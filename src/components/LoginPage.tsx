@@ -29,6 +29,8 @@ import {
   findUserByEmail,
   resetUserPasswordByEmail,
   registerSelfServiceTrialTenant,
+  syncAuthCatalogFromSupabase,
+  flushSupabaseSync,
 } from '../utils/multiTenantStorage';
 
 interface LoginPageProps {
@@ -106,7 +108,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   } | null>(null);
   const loginBackupInputRef = React.useRef<HTMLInputElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -121,7 +123,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
+    try {
+      await syncAuthCatalogFromSupabase();
       const result = authenticateUser(username, password, tenantCode);
       setIsSubmitting(false);
 
@@ -130,10 +133,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       } else {
         setErrorMsg(result.error || 'Credenciales inválidas.');
       }
-    }, 200);
+    } catch {
+      setIsSubmitting(false);
+      setErrorMsg('No se pudo verificar las credenciales. Intentá nuevamente.');
+    }
   };
 
-  const handleRegisterTrialSubmit = (e: React.FormEvent) => {
+  const handleRegisterTrialSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError(null);
 
@@ -155,7 +161,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
 
     setIsRegistering(true);
-    setTimeout(() => {
+    try {
+      await syncAuthCatalogFromSupabase();
       const res = registerSelfServiceTrialTenant({
         companyName: regCompanyName,
         ownerName: regOwnerName,
@@ -167,15 +174,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         province: regProvince,
         businessRubro: regBusinessRubro,
       });
-      setIsRegistering(false);
 
       if (!res.success || !res.user || !res.tenant) {
+        setIsRegistering(false);
         setRegError(res.error || 'No se pudo completar el alta de prueba.');
         return;
       }
 
+      await flushSupabaseSync();
+      setIsRegistering(false);
       onLoginSuccess(res.user, res.tenant);
-    }, 200);
+    } catch {
+      setIsRegistering(false);
+      setRegError('No se pudo completar el alta de prueba.');
+    }
   };
 
   // Step 1: Request recovery code by email
@@ -190,13 +202,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       return;
     }
 
+    setIsSendingCode(true);
+    await syncAuthCatalogFromSupabase();
     const matchedUser = findUserByEmail(cleanEmail);
     if (!matchedUser) {
+      setIsSendingCode(false);
       setRecoveryError('No encontramos ninguna cuenta asociada a este correo electrónico.');
       return;
     }
-
-    setIsSendingCode(true);
 
     try {
       const res = await fetch('/api/send-recovery-code', {
@@ -230,7 +243,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   };
 
   // Step 2: Validate code & set new password
-  const handleConfirmPasswordReset = (e: React.FormEvent) => {
+  const handleConfirmPasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setRecoveryError(null);
 
@@ -249,6 +262,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
     const resetSuccess = resetUserPasswordByEmail(recoveryEmail, newPassword);
     if (resetSuccess) {
+      await flushSupabaseSync();
       setRecoverySuccess('Contraseña restablecida con éxito. Ya podés iniciar sesión.');
       setPassword(newPassword);
       setTimeout(() => {
