@@ -31,7 +31,7 @@ import {
 } from './storage';
 import { purgeExpiredBoletas } from './retentionPurge';
 import { dbGetItem, dbSetItem, dbRemoveItem, syncKeysFromCloud } from './localInternalDb';
-import { flushSupabaseSync } from './supabaseSync';
+import { flushSupabaseSync, isCloudHydrated } from './supabaseSync';
 import {
   deletePlatformAnnouncementFromSupabaseTable,
   mirrorPlatformAnnouncementToSupabaseTable,
@@ -530,7 +530,6 @@ export function loadPlatformUsers(): PlatformUser[] {
   } catch (e) {
     console.warn('Error reading users from internal db', e);
   }
-  savePlatformUsers(INITIAL_USERS);
   return INITIAL_USERS;
 }
 
@@ -620,7 +619,7 @@ export function loadTenantData(tenantId: string): TenantData {
 
   // REGLA DE RETENCIÓN DE 30 DÍAS:
   // Purgar boletas mayores a 30 días y preservar el perfil crediticio permanente de los clientes
-  if (data) {
+  if (data && isCloudHydrated()) {
     const purgeResult = purgeExpiredBoletas(data.boletas || [], data.paidBoletas || [], data.clients || []);
     if (purgeResult.totalPurged > 0) {
       data.boletas = purgeResult.survivingBoletas;

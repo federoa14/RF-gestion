@@ -207,7 +207,7 @@ export async function initInternalDatabase(): Promise<void> {
 
     // Hidratar y sincronizar con Supabase (si está configurado en variables de entorno)
     await hydrateFromSupabase(memoryStore, applyExternalSyncedRecord);
-    startSupabaseRealtimeSubscription(applyExternalSyncedRecord, deleteExternalSyncedRecord);
+    startSupabaseRealtimeSubscription(applyExternalSyncedRecord, deleteExternalSyncedRecord, dbGetItem);
   })();
 
   return initPromise;
@@ -238,7 +238,7 @@ export function deleteExternalSyncedRecord(key: string): void {
 }
 
 export async function syncKeysFromCloud(keys: string[]): Promise<string[]> {
-  return refreshKeysFromSupabase(keys, applyExternalSyncedRecord);
+  return refreshKeysFromSupabase(keys, applyExternalSyncedRecord, dbGetItem);
 }
 
 export function dbGetItem(key: string): string | null {

@@ -51,26 +51,45 @@ export async function readCloudJsonRecord<T>(key: string): Promise<T | null> {
   }
 }
 
-export async function writeCloudJsonRecord<T>(key: string, value: T): Promise<boolean> {
+async function insertOrUpdateCloudStoreKey<T>(key: string, value: T): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase || !key) return false;
+  const now = new Date().toISOString();
   try {
-    const { error } = await supabase.from(CLOUD_TABLE).upsert(
-      {
-        key,
-        value,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'key' }
-    );
-    return !error;
+    const { data: updatedRows, error: updErr } = await supabase
+      .from(CLOUD_TABLE)
+      .update({ value, updated_at: now })
+      .eq('key', key)
+      .select('key');
+
+    if (updErr) return false;
+    if (updatedRows && updatedRows.length > 0) return true;
+
+    const { error: insErr } = await supabase.from(CLOUD_TABLE).insert({
+      key,
+      value,
+      updated_at: now,
+    });
+    if (!insErr) return true;
+    if (insErr.code === '23505') {
+      const { error: retryErr } = await supabase
+        .from(CLOUD_TABLE)
+        .update({ value, updated_at: now })
+        .eq('key', key);
+      return !retryErr;
+    }
+    return false;
   } catch {
     return false;
   }
 }
 
+export async function writeCloudJsonRecord<T>(key: string, value: T): Promise<boolean> {
+  return insertOrUpdateCloudStoreKey(key, value);
+}
+
 // ============================================================================
-// BEST-EFFORT MIRROR A TABLAS RELACIONALES DE SUPABASE
+// BEST-EFFORT MIRROR A TABLAS RELACIONALES DE SUPABASE (INSERT / UPDATE INDIVIDUAL)
 // ============================================================================
 
 export async function mirrorPlatformBillingToSupabaseTable(
@@ -78,23 +97,27 @@ export async function mirrorPlatformBillingToSupabaseTable(
 ): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
+  const payload = {
+    alias: cfg.alias || '',
+    cvu: cfg.cvu || '',
+    account_holder_name: cfg.accountHolderName || '',
+    bank_or_wallet_name: cfg.bankOrWalletName || 'Mercado Pago',
+    default_monthly_fee: Number(cfg.defaultMonthlyFee || 25000),
+    annual_discount_percent: Number(cfg.annualDiscountPercent || 0),
+    mp_checkout_link: cfg.mpCheckoutLink || '',
+    mp_public_key: cfg.mpPublicKey || '',
+    has_mp_access_token: Boolean(cfg.hasMpAccessToken),
+    updated_at: new Date().toISOString(),
+  };
   try {
-    await supabase.from('platform_billing_config').upsert(
-      {
-        id: 'default',
-        alias: cfg.alias || '',
-        cvu: cfg.cvu || '',
-        account_holder_name: cfg.accountHolderName || '',
-        bank_or_wallet_name: cfg.bankOrWalletName || 'Mercado Pago',
-        default_monthly_fee: Number(cfg.defaultMonthlyFee || 25000),
-        annual_discount_percent: Number(cfg.annualDiscountPercent || 0),
-        mp_checkout_link: cfg.mpCheckoutLink || '',
-        mp_public_key: cfg.mpPublicKey || '',
-        has_mp_access_token: Boolean(cfg.hasMpAccessToken),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    );
+    const { data: updatedRows } = await supabase
+      .from('platform_billing_config')
+      .update(payload)
+      .eq('id', 'default')
+      .select('id');
+    if (!updatedRows || updatedRows.length === 0) {
+      await supabase.from('platform_billing_config').insert({ id: 'default', ...payload });
+    }
   } catch {
     // app_cloud_store remains authoritative if RLS restricts anon writes
   }
@@ -105,19 +128,23 @@ export async function mirrorPlatformSupportToSupabaseTable(
 ): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) return;
+  const payload = {
+    contact_name: cfg.contactName || '',
+    whatsapp_phone: cfg.whatsappPhone || '',
+    email: cfg.email || '',
+    attention_hours: cfg.attentionHours || '',
+    welcome_message: cfg.welcomeMessage || '',
+    updated_at: new Date().toISOString(),
+  };
   try {
-    await supabase.from('platform_support_config').upsert(
-      {
-        id: 'default',
-        contact_name: cfg.contactName || '',
-        whatsapp_phone: cfg.whatsappPhone || '',
-        email: cfg.email || '',
-        attention_hours: cfg.attentionHours || '',
-        welcome_message: cfg.welcomeMessage || '',
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    );
+    const { data: updatedRows } = await supabase
+      .from('platform_support_config')
+      .update(payload)
+      .eq('id', 'default')
+      .select('id');
+    if (!updatedRows || updatedRows.length === 0) {
+      await supabase.from('platform_support_config').insert({ id: 'default', ...payload });
+    }
   } catch {
     // non-blocking
   }
@@ -127,25 +154,29 @@ export async function mirrorPlatformAnnouncementToSupabaseTable(
   item: PlatformAnnouncement
 ): Promise<void> {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase || !item?.id) return;
+  const payload = {
+    title: item.title,
+    message: item.message,
+    category: item.category,
+    audience: item.audience,
+    cta_type: item.ctaType || 'none',
+    cta_label: item.ctaLabel || '',
+    cta_url: item.ctaUrl || '',
+    active: Boolean(item.active),
+    expires_at: item.expiresAt || null,
+    author_name: item.authorName || '',
+    created_at: item.createdAt || new Date().toISOString(),
+  };
   try {
-    await supabase.from('platform_announcements').upsert(
-      {
-        id: item.id,
-        title: item.title,
-        message: item.message,
-        category: item.category,
-        audience: item.audience,
-        cta_type: item.ctaType || 'none',
-        cta_label: item.ctaLabel || '',
-        cta_url: item.ctaUrl || '',
-        active: Boolean(item.active),
-        expires_at: item.expiresAt || null,
-        author_name: item.authorName || '',
-        created_at: item.createdAt || new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    );
+    const { data: updatedRows } = await supabase
+      .from('platform_announcements')
+      .update(payload)
+      .eq('id', item.id)
+      .select('id');
+    if (!updatedRows || updatedRows.length === 0) {
+      await supabase.from('platform_announcements').insert({ id: item.id, ...payload });
+    }
   } catch {
     // non-blocking
   }
@@ -167,38 +198,42 @@ export async function mirrorClientPaymentOrderToSupabaseTable(
   const supabase = getSupabaseClient();
   if (!supabase || !order?.token) return;
   if (!isUuid(order.tenantId) || !isUuid(order.clientId)) return;
+  const payload = {
+    tenant_id: order.tenantId,
+    distributor_name: order.distributorName,
+    client_id: order.clientId,
+    client_name: order.clientName,
+    client_phone: order.clientPhone || null,
+    amount: Number(order.amount || 0),
+    currency_symbol: order.currencySymbol || '$',
+    boleta_ids: order.boletaIds || [],
+    boleta_numbers: order.boletaNumbers || [],
+    alias: order.alias || null,
+    cvu: order.cvu || null,
+    holder_name: order.holderName || null,
+    bank_name: order.bankName || null,
+    mp_checkout_link: order.mpCheckoutLink || null,
+    mp_init_point: order.mpInitPoint || null,
+    mp_preference_id: order.mpPreferenceId || null,
+    status: order.status,
+    payment_method: order.paymentMethod || null,
+    mp_payment_id: order.mpPaymentId || null,
+    paid_at: order.paidAt || null,
+    reconciled_in_app: Boolean(order.reconciledInApp),
+    reconciled_at: order.reconciledAt || null,
+    verification_summary: order.verificationSummary || null,
+    receipt_image_url: order.receiptImageUrl || null,
+    created_at: order.createdAt || new Date().toISOString(),
+  };
   try {
-    await supabase.from('client_payment_orders').upsert(
-      {
-        token: order.token,
-        tenant_id: order.tenantId,
-        distributor_name: order.distributorName,
-        client_id: order.clientId,
-        client_name: order.clientName,
-        client_phone: order.clientPhone || null,
-        amount: Number(order.amount || 0),
-        currency_symbol: order.currencySymbol || '$',
-        boleta_ids: order.boletaIds || [],
-        boleta_numbers: order.boletaNumbers || [],
-        alias: order.alias || null,
-        cvu: order.cvu || null,
-        holder_name: order.holderName || null,
-        bank_name: order.bankName || null,
-        mp_checkout_link: order.mpCheckoutLink || null,
-        mp_init_point: order.mpInitPoint || null,
-        mp_preference_id: order.mpPreferenceId || null,
-        status: order.status,
-        payment_method: order.paymentMethod || null,
-        mp_payment_id: order.mpPaymentId || null,
-        paid_at: order.paidAt || null,
-        reconciled_in_app: Boolean(order.reconciledInApp),
-        reconciled_at: order.reconciledAt || null,
-        verification_summary: order.verificationSummary || null,
-        receipt_image_url: order.receiptImageUrl || null,
-        created_at: order.createdAt || new Date().toISOString(),
-      },
-      { onConflict: 'token' }
-    );
+    const { data: updatedRows } = await supabase
+      .from('client_payment_orders')
+      .update(payload)
+      .eq('token', order.token)
+      .select('token');
+    if (!updatedRows || updatedRows.length === 0) {
+      await supabase.from('client_payment_orders').insert({ token: order.token, ...payload });
+    }
   } catch {
     // non-blocking
   }
@@ -402,13 +437,38 @@ export async function markClientPaymentOrderReconciledInSupabase(token: string):
 // PAGOS DE SUSCRIPCIÓN SAAS DE EMPRESAS (EN SUPABASE)
 // ============================================================================
 
+const VERIFIED_PAYMENT_ENTITY_PREFIX = 'rec:platform:verified_payments:';
+
 export async function fetchVerifiedTenantPaymentsMapFromSupabase(): Promise<
   Record<string, VerifiedTenantPaymentRecord>
 > {
   const stored = await readCloudJsonRecord<Record<string, VerifiedTenantPaymentRecord>>(
     VERIFIED_TENANT_PAYMENTS_KEY
   );
-  return stored && typeof stored === 'object' ? stored : {};
+  const result: Record<string, VerifiedTenantPaymentRecord> =
+    stored && typeof stored === 'object' ? { ...stored } : {};
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data } = await supabase
+        .from(CLOUD_TABLE)
+        .select('key, value')
+        .like('key', `${VERIFIED_PAYMENT_ENTITY_PREFIX}%`);
+      if (Array.isArray(data)) {
+        for (const row of data) {
+          if (!row?.key || !row?.value) continue;
+          const mapKey = String(row.key).slice(VERIFIED_PAYMENT_ENTITY_PREFIX.length);
+          if (mapKey) {
+            result[mapKey] = row.value as VerifiedTenantPaymentRecord;
+          }
+        }
+      }
+    } catch {
+      // Fallback to aggregate map
+    }
+  }
+  return result;
 }
 
 export async function fetchVerifiedTenantPaymentStatusFromSupabase(
@@ -416,8 +476,11 @@ export async function fetchVerifiedTenantPaymentStatusFromSupabase(
   monthKey: string
 ): Promise<{ approved: boolean; payment: VerifiedTenantPaymentRecord | null }> {
   if (!tenantId || !monthKey) return { approved: false, payment: null };
-  const map = await fetchVerifiedTenantPaymentsMapFromSupabase();
-  const record = map[`${tenantId}::${monthKey}`] || null;
+  const mapKey = `${tenantId}::${monthKey}`;
+  const individual = await readCloudJsonRecord<VerifiedTenantPaymentRecord>(
+    `${VERIFIED_PAYMENT_ENTITY_PREFIX}${mapKey}`
+  );
+  const record = individual || (await fetchVerifiedTenantPaymentsMapFromSupabase())[mapKey] || null;
   return {
     approved: Boolean(record && record.status === 'approved'),
     payment: record,
@@ -445,6 +508,7 @@ export async function verifyAndRecordTenantPaymentInSupabase(params: {
   }
 
   const key = `${params.tenantId}::${params.monthKey}`;
+  const entityKey = `${VERIFIED_PAYMENT_ENTITY_PREFIX}${key}`;
   const map = await fetchVerifiedTenantPaymentsMapFromSupabase();
   const existing = map[key];
   if (existing && existing.status === 'approved' && !params.receiptImageUrl) {
@@ -487,8 +551,15 @@ export async function verifyAndRecordTenantPaymentInSupabase(params: {
     verificationSummary: params.verificationSummary,
   };
 
-  map[key] = record;
-  await writeCloudJsonRecord(VERIFIED_TENANT_PAYMENTS_KEY, map);
+  // 1. Insertar o actualizar el registro individual del pago sin tocar los demás
+  await insertOrUpdateCloudStoreKey(entityKey, record);
+
+  // 2. Re-leer mapa remoto fresco y fusionar antes de escribir el mapa agregado
+  const latestMap = await fetchVerifiedTenantPaymentsMapFromSupabase();
+  await insertOrUpdateCloudStoreKey(VERIFIED_TENANT_PAYMENTS_KEY, {
+    ...latestMap,
+    [key]: record,
+  });
 
   return { approved: true, payment: record };
 }

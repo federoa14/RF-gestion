@@ -408,11 +408,21 @@ export default function App() {
   const handleAddAutoLogs = (newLogs: AutoDispatchLog[]) => {
     const updated = [...newLogs, ...autoLogs];
     setAutoLogs(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.autoLogs = updated;
+      saveTenantData(selectedTenant.id, cur);
+    }
     saveAutoDispatchLogs(updated);
   };
 
   const handleClearAutoLogs = () => {
     setAutoLogs([]);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.autoLogs = [];
+      saveTenantData(selectedTenant.id, cur);
+    }
     saveAutoDispatchLogs([]);
     showToast('Historial de despachos automáticos limpiado.');
   };
@@ -582,9 +592,15 @@ export default function App() {
             const updatedConfig = { ...config, lastAutoDispatchDate: todayStr };
             setConfig(updatedConfig);
             saveConfig(updatedConfig);
-            const updated = [...data.logs, ...loadAutoDispatchLogs()];
+            const updated = [...data.logs, ...autoLogs];
             setAutoLogs(updated);
             saveAutoDispatchLogs(updated);
+            if (selectedTenant) {
+              const cur = loadTenantData(selectedTenant.id);
+              cur.config = updatedConfig;
+              cur.autoLogs = [...data.logs, ...(cur.autoLogs || [])];
+              saveTenantData(selectedTenant.id, cur);
+            }
             showToast(`🤖 Despacho automático matutino: ${data.logs.length} alertas generadas y guardadas en Supabase.`);
           }
         })
@@ -626,10 +642,11 @@ export default function App() {
               setConfig(updatedConfig);
               saveConfig(updatedConfig);
               const curData = loadTenantData(selectedTenant.id);
+              const updatedLogs = [...data.logs, ...(curData.autoLogs || autoLogs)];
               curData.config = updatedConfig;
+              curData.autoLogs = updatedLogs;
               saveTenantData(selectedTenant.id, curData);
 
-              const updatedLogs = [...data.logs, ...loadAutoDispatchLogs()];
               setAutoLogs(updatedLogs);
               saveAutoDispatchLogs(updatedLogs);
               showToast(`📊 Cierre del día automático generado y guardado en Supabase (${data.logs.length} WhatsApp).`);
@@ -1932,9 +1949,14 @@ export default function App() {
     })
       .then((logs) => {
         if (logs.length > 0) {
-          const updatedLogs = [...logs, ...loadAutoDispatchLogs()];
+          const updatedLogs = [...logs, ...autoLogs];
           setAutoLogs(updatedLogs);
           saveAutoDispatchLogs(updatedLogs);
+          if (selectedTenant) {
+            const cur = loadTenantData(selectedTenant.id);
+            cur.autoLogs = [...logs, ...(cur.autoLogs || [])];
+            saveTenantData(selectedTenant.id, cur);
+          }
         }
       })
       .catch((err) => {
@@ -2102,6 +2124,11 @@ export default function App() {
   const handleSaveBroadcast = (broadcast: BroadcastMessage) => {
     const updated = [broadcast, ...broadcasts];
     setBroadcasts(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.broadcasts = updated;
+      saveTenantData(selectedTenant.id, cur);
+    }
     saveBroadcastMessages(updated);
     showToast('Aviso guardado y preparado para enviar por WhatsApp.');
   };
