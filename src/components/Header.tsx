@@ -95,6 +95,11 @@ const TAB_META: Record<string, { section: string; title: string; subtitle: strin
     title: 'Catálogo Online',
     subtitle: 'Publicá fotos, precios y descripciones para recibir pedidos por WhatsApp y retirar',
   },
+  ventas_web: {
+    section: 'Tienda Web',
+    title: 'Historial Ventas Web',
+    subtitle: 'Ingresos generados por el carrito online filtrados por día, semana, mes o historial completo',
+  },
   administradores: {
     section: 'Configuración',
     title: 'Ajustes y Dueños',

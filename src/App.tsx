@@ -23,6 +23,7 @@ import {
   Megaphone,
   X,
   ExternalLink,
+  ShoppingBag,
 } from 'lucide-react';
 import {
   Boleta,
@@ -149,6 +150,9 @@ const CatalogManager = lazy(() =>
 );
 const PublicCatalogView = lazy(() =>
   import('./components/PublicCatalogView').then((m) => ({ default: m.PublicCatalogView }))
+);
+const WebSalesHistoryView = lazy(() =>
+  import('./components/WebSalesHistoryView').then((m) => ({ default: m.WebSalesHistoryView }))
 );
 
 const LazyViewFallback = () => (
@@ -355,13 +359,19 @@ export default function App() {
     if (activeTab === 'rendicion' && effectiveRubro !== 'distribuidora') {
       setActiveTab('boletas');
     }
-    if (activeTab === 'catalogo' && selectedTenant?.catalogEnabled === false) {
+    if (
+      (activeTab === 'catalogo' || activeTab === 'ventas_web') &&
+      selectedTenant?.catalogEnabled === false
+    ) {
       setActiveTab('boletas');
     }
   }, [config.businessRubro, activeTab, selectedTenant?.catalogEnabled]);
 
   useEffect(() => {
-    if (activeTab === 'catalogo' && selectedTenant) {
+    if (
+      (activeTab === 'catalogo' || activeTab === 'ventas_web' || activeTab === 'boletas') &&
+      selectedTenant
+    ) {
       void handleRefreshCatalogOrders();
     }
   }, [activeTab, selectedTenant?.id]);
@@ -2372,6 +2382,15 @@ export default function App() {
     return acc + Math.max(0, (b.amount || 0) - creditNotesSum);
   }, 0);
 
+  const validWebOrders = catalogOrders.filter((o) => o.status !== 'cancelado');
+  const totalWebSalesRevenue = validWebOrders.reduce(
+    (acc, o) => acc + (Number(o.totalAmount) || 0),
+    0
+  );
+  const todayWebSalesRevenue = validWebOrders
+    .filter((o) => (o.createdAt || '').slice(0, 10) === currentDateRef)
+    .reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
+
   const urgent10dDebt = pendingBoletas.reduce((acc, b) => {
     const st = calculateAlertStatus(b, config, currentDateRef);
     if (st.daysElapsed >= 10) {
@@ -2898,6 +2917,7 @@ export default function App() {
         isPaidCurrentMonth={tenantSubscriptionStatus?.isPaidForCurrentMonth}
         currentDateRef={currentDateRef}
         catalogEnabled={selectedTenant?.catalogEnabled !== false}
+        webOrdersCount={validWebOrders.length}
       />
 
       {/* Right Main Column */}
@@ -3181,7 +3201,7 @@ export default function App() {
           {activeTab === 'boletas' && (
             <div className="space-y-5">
               {/* Executive KPI Summary Dashboard */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
                 {/* Card 1: Total Fiado en la Calle */}
                 <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 rounded-xl p-4 shadow-2xs flex flex-col justify-between">
                   <div className="flex items-center justify-between text-slate-500 dark:text-[#94A3B8] text-xs font-semibold">
@@ -3272,7 +3292,37 @@ export default function App() {
                   </div>
                 </button>
 
-                {/* Card 4: Regla de 30 Días */}
+                {/* Card 4: Dinero generado por Ventas Web (clic -> Historial Ventas Web) */}
+                {selectedTenant?.catalogEnabled !== false && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('ventas_web')}
+                    className="text-left bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 rounded-xl p-4 shadow-2xs flex flex-col justify-between cursor-pointer hover:border-[#0B1933] dark:hover:border-sky-400/60 transition-colors"
+                    title="Ver datos históricos de ventas web por día, últimos 7 días o último mes"
+                  >
+                    <div className="flex items-center justify-between text-slate-500 dark:text-[#94A3B8] text-xs font-semibold w-full">
+                      <span>Ventas Web (Carrito)</span>
+                      <div className="p-1.5 rounded-lg bg-[#E9EEF5] dark:bg-[#13264A] text-[#0B1933] dark:text-sky-300">
+                        <ShoppingBag className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div className="mt-2 w-full">
+                      <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#0B1933] dark:text-sky-300 tracking-tight">
+                        {formatCurrency(totalWebSalesRevenue, config.currencySymbol)}
+                      </span>
+                      <div className="flex items-center justify-between gap-1 mt-0.5">
+                        <span className="text-[11px] text-slate-500 dark:text-[#8D9CB0] font-medium tabular-nums truncate">
+                          {validWebOrders.length} ped. · Hoy: {formatCurrency(todayWebSalesRevenue, config.currencySymbol)}
+                        </span>
+                        <span className="text-[11px] font-bold text-[#0B1933] dark:text-sky-300 underline shrink-0">
+                          Historial →
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                )}
+
+                {/* Card 5: Regla de 30 Días */}
                 <button
                   type="button"
                   onClick={() => setActiveTab('administradores')}
@@ -3942,6 +3992,23 @@ export default function App() {
                 }
                 setPublicCatalogHandle(handle);
               }}
+              showToast={showToast}
+            />
+          </Suspense>
+        )}
+
+        {/* TAB 5C: HISTORIAL E INGRESOS DE VENTAS WEB */}
+        {activeTab === 'ventas_web' && (
+          <Suspense fallback={<LazyViewFallback />}>
+            <WebSalesHistoryView
+              config={config}
+              orders={catalogOrders}
+              activeUserName={activeAdmin?.name || currentUser?.fullName || 'Administración'}
+              onRefreshOrders={handleRefreshCatalogOrders}
+              onOpenCatalogManager={() => setActiveTab('catalogo')}
+              onBackToDashboard={() => setActiveTab('boletas')}
+              onOpenReceipt={(receipt) => setActiveReceiptData(receipt)}
+              onBillOrder={handleBillCatalogOrder}
               showToast={showToast}
             />
           </Suspense>

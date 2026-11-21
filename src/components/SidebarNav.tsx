@@ -19,6 +19,7 @@ import {
   Headphones,
   ClipboardCheck,
   Store,
+  ShoppingBag,
 } from 'lucide-react';
 import { DistributorConfig, Boleta } from '../types';
 import { calculateAlertStatus, formatCurrency } from '../utils/alerts';
@@ -41,6 +42,7 @@ interface SidebarNavProps {
   isPaidCurrentMonth?: boolean;
   currentDateRef?: string;
   catalogEnabled?: boolean;
+  webOrdersCount?: number;
 }
 
 interface NavGroup {
@@ -71,6 +73,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   isPaidCurrentMonth,
   currentDateRef,
   catalogEnabled = true,
+  webOrdersCount = 0,
 }) => {
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
   const graceDays = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
@@ -193,6 +196,14 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                 label: 'Catálogo Online',
                 hint: 'Productos y pedidos WhatsApp',
                 icon: Store,
+              },
+              {
+                id: 'ventas_web',
+                label: 'Historial Ventas Web',
+                hint: 'Dinero por día, 7 días o mes',
+                icon: ShoppingBag,
+                badge: webOrdersCount > 0 ? webOrdersCount : undefined,
+                badgeTone: 'emerald' as const,
               },
             ]
           : []),

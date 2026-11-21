@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Store,
   Plus,
@@ -25,6 +25,7 @@ import {
   Receipt,
   CreditCard,
   AlertTriangle,
+  Phone,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
@@ -128,6 +129,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
+  const [isEditingWhatsappInline, setIsEditingWhatsappInline] = useState(false);
+  const [inlineWhatsappDraft, setInlineWhatsappDraft] = useState(
+    () => settings.whatsappPhone || config.senderPhone || config.distributorPhone || ''
+  );
 
   // Store settings local draft
   const [draftSettings, setDraftSettings] = useState<OnlineCatalogSettings>(() => ({
@@ -154,6 +159,36 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
     currencySymbol: settings.currencySymbol || config.currencySymbol || '$',
   }));
+
+  useEffect(() => {
+    const resolvedPhone =
+      settings.whatsappPhone || config.senderPhone || config.distributorPhone || '';
+    setInlineWhatsappDraft(resolvedPhone);
+    setDraftSettings({
+      published: settings.published !== false,
+      storeName: settings.storeName || config.distributorName || tenant?.name || 'Mi Catálogo',
+      tagline:
+        settings.tagline ||
+        'Armá tu carrito de compras, elegí retiro en tienda o envío a domicilio y envialo por WhatsApp.',
+      slug: settings.slug || '',
+      whatsappPhone: resolvedPhone,
+      allowPickup: settings.allowPickup !== false,
+      allowDelivery: settings.allowDelivery !== false,
+      deliveryNote:
+        settings.deliveryNote ||
+        'Coordinamos costo y horario de envío por WhatsApp antes de despachar.',
+      pickupAddress:
+        settings.pickupAddress ||
+        tenant?.address ||
+        (tenant?.city ? `${tenant.city}${tenant.province ? `, ${tenant.province}` : ''}` : ''),
+      pickupHours: settings.pickupHours || 'Lunes a Sábado · 9:00 a 19:00 hs',
+      pickupInstructions:
+        settings.pickupInstructions ||
+        'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
+      paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
+      currencySymbol: settings.currencySymbol || config.currencySymbol || '$',
+    });
+  }, [settings, tenant?.id, config.distributorName, config.senderPhone, config.distributorPhone, config.currencySymbol]);
 
   // Product Form Modal
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -266,6 +301,25 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         ? 'Catálogo online publicado y visible para clientes.'
         : 'Catálogo ocultado temporalmente del enlace público.'
     );
+  };
+
+  const handleSaveInlineWhatsapp = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleaned = inlineWhatsappDraft.trim();
+    if (!cleaned) {
+      showToast('Ingresá un número de WhatsApp válido (con código de área o país).');
+      return;
+    }
+    const next: OnlineCatalogSettings = {
+      ...draftSettings,
+      ...settings,
+      whatsappPhone: cleaned,
+      updatedAt: new Date().toISOString(),
+    };
+    setDraftSettings((prev) => ({ ...prev, whatsappPhone: cleaned }));
+    onSaveSettings(next);
+    setIsEditingWhatsappInline(false);
+    showToast(`WhatsApp del carrito web actualizado a ${cleaned} y publicado.`);
   };
 
   const openNewProductModal = () => {
@@ -719,37 +773,99 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           </div>
         </div>
 
-        {/* Shareable Link Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5">
-          <div className="flex items-center gap-2 min-w-0">
-            <Link2 className="w-4 h-4 text-[#0B1933] shrink-0" />
-            <span className="text-xs font-semibold text-slate-600 shrink-0">
-              Enlace público:
-            </span>
-            <span className="text-xs font-mono text-slate-800 truncate select-all">
-              {publicUrl}
-            </span>
+        {/* Shareable Link Bar + Quick WhatsApp Receiver Editor */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5">
+            <div className="flex items-center gap-2 min-w-0">
+              <Link2 className="w-4 h-4 text-[#0B1933] shrink-0" />
+              <span className="text-xs font-semibold text-slate-600 shrink-0">
+                Enlace público:
+              </span>
+              <span className="text-xs font-mono text-slate-800 truncate select-all">
+                {publicUrl}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleCopyPublicUrl}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 transition-colors cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap"
+            >
+              {copiedLink ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Copiado</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Copiar enlace</span>
+                </>
+              )}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleCopyPublicUrl}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 transition-colors cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap"
-          >
-            {copiedLink ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Copiado</span>
-              </>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            {isEditingWhatsappInline ? (
+              <form
+                onSubmit={handleSaveInlineWhatsapp}
+                className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full"
+              >
+                <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
+                <input
+                  type="text"
+                  value={inlineWhatsappDraft}
+                  onChange={(e) => setInlineWhatsappDraft(e.target.value)}
+                  placeholder="Ej. +54 9 11 1234-5678"
+                  autoFocus
+                  className="flex-1 min-w-[160px] px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
+                />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer whitespace-nowrap"
+                  >
+                    Guardar número
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInlineWhatsappDraft(effectiveWhatsappPhone);
+                      setIsEditingWhatsappInline(false);
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 cursor-pointer whitespace-nowrap"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
             ) : (
               <>
-                <Copy className="w-3.5 h-3.5 text-slate-600" />
-                <span>Copiar enlace</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Phone className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="text-xs font-semibold text-slate-600 shrink-0">
+                    WhatsApp del carrito web:
+                  </span>
+                  <span className="text-xs font-mono font-bold text-slate-900 truncate tabular-nums">
+                    {effectiveWhatsappPhone || 'Sin configurar'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInlineWhatsappDraft(effectiveWhatsappPhone);
+                    setIsEditingWhatsappInline(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 transition-colors cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap"
+                >
+                  <Edit2 className="w-3.5 h-3.5 text-[#0B1933]" />
+                  <span>{effectiveWhatsappPhone ? 'Modificar WhatsApp' : 'Configurar WhatsApp'}</span>
+                </button>
               </>
             )}
-          </button>
+          </div>
         </div>
 
-        {!effectiveWhatsappPhone && (
+        {!effectiveWhatsappPhone && !isEditingWhatsappInline && (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 text-xs text-amber-900">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -759,10 +875,13 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
             <button
               type="button"
-              onClick={() => setSubTab('configuracion')}
+              onClick={() => {
+                setInlineWhatsappDraft('');
+                setIsEditingWhatsappInline(true);
+              }}
               className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer shrink-0 whitespace-nowrap self-start sm:self-auto"
             >
-              Configurar WhatsApp
+              Cargar WhatsApp ahora
             </button>
           </div>
         )}
