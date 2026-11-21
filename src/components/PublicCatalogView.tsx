@@ -17,14 +17,17 @@ import {
   CreditCard,
   Star,
   Truck,
+  Bell,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
   CatalogProduct,
+  CatalogStockAlertRequest,
   PublishedPublicCatalog,
 } from '../types';
 import {
   fetchPublicCatalogFromSupabase,
+  submitCatalogStockAlertToSupabase,
   submitPublicCatalogOrderToSupabase,
 } from '../utils/supabaseServices';
 import { formatCurrency } from '../utils/alerts';
@@ -111,6 +114,14 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Stock alert request modal state ("Avisar cuando haya stock")
+  const [stockAlertProduct, setStockAlertProduct] = useState<CatalogProduct | null>(null);
+  const [alertCustomerName, setAlertCustomerName] = useState('');
+  const [alertCustomerPhone, setAlertCustomerPhone] = useState('');
+  const [alertSubmitting, setAlertSubmitting] = useState(false);
+  const [alertSubmitted, setAlertSubmitted] = useState(false);
+  const [alertError, setAlertError] = useState<string | null>(null);
+
   useEffect(() => {
     let active = true;
     setLoading(true);
@@ -183,13 +194,20 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   );
 
   const addToCart = (product: CatalogProduct) => {
+    const trackedStock =
+      typeof product.stockQuantity === 'number' ? Math.max(0, Math.floor(product.stockQuantity)) : null;
+    if (trackedStock !== null && trackedStock <= 0) return;
+
     setCart((prev) => {
       const existing = prev[product.id];
+      const nextQty = existing ? existing.quantity + 1 : 1;
+      const clampedQty = trackedStock !== null ? Math.min(nextQty, trackedStock) : nextQty;
+      if (clampedQty <= 0) return prev;
       return {
         ...prev,
         [product.id]: {
           product,
-          quantity: existing ? existing.quantity + 1 : 1,
+          quantity: clampedQty,
         },
       };
     });
@@ -199,7 +217,16 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     setCart((prev) => {
       const existing = prev[productId];
       if (!existing) return prev;
-      const nextQty = existing.quantity + delta;
+      const liveProduct =
+        catalog?.products.find((p) => p.id === productId) || existing.product;
+      const trackedStock =
+        typeof liveProduct.stockQuantity === 'number'
+          ? Math.max(0, Math.floor(liveProduct.stockQuantity))
+          : null;
+      let nextQty = existing.quantity + delta;
+      if (trackedStock !== null && delta > 0) {
+        nextQty = Math.min(nextQty, trackedStock);
+      }
       if (nextQty <= 0) {
         const copy = { ...prev };
         delete copy[productId];
@@ -207,7 +234,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       }
       return {
         ...prev,
-        [productId]: { ...existing, quantity: nextQty },
+        [productId]: { product: liveProduct, quantity: nextQty },
       };
     });
   };
@@ -218,6 +245,56 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       delete copy[productId];
       return copy;
     });
+  };
+
+  const openStockAlertModal = (product: CatalogProduct) => {
+    setStockAlertProduct(product);
+    setAlertCustomerName((prev) => prev || customerName);
+    setAlertCustomerPhone((prev) => prev || customerPhone);
+    setAlertSubmitted(false);
+    setAlertError(null);
+  };
+
+  const handleSubmitStockAlert = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!catalog || !stockAlertProduct) return;
+    setAlertError(null);
+
+    const cleanName = alertCustomerName.trim();
+    const cleanPhone = alertCustomerPhone.trim();
+    if (!cleanName) {
+      setAlertError('Ingresá tu nombre para poder avisarte.');
+      return;
+    }
+    if (!cleanPhone) {
+      setAlertError('Ingresá tu teléfono o WhatsApp para enviarte el aviso.');
+      return;
+    }
+
+    setAlertSubmitting(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const request: CatalogStockAlertRequest = {
+        id: `stk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        tenantId: catalog.tenantId,
+        productId: stockAlertProduct.id,
+        productName: stockAlertProduct.name,
+        productSku: stockAlertProduct.sku?.trim() || undefined,
+        customerName: cleanName,
+        customerPhone: cleanPhone,
+        status: 'pending',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      await submitCatalogStockAlertToSupabase(request);
+      setAlertSubmitted(true);
+      setCustomerName((prev) => prev || cleanName);
+      setCustomerPhone((prev) => prev || cleanPhone);
+    } catch {
+      setAlertError('No pudimos guardar tu solicitud. Intentá nuevamente en unos segundos.');
+    } finally {
+      setAlertSubmitting(false);
+    }
   };
 
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
@@ -283,6 +360,27 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       };
 
       await submitPublicCatalogOrderToSupabase(order);
+
+      // Update local stock counts immediately so out-of-stock states reflect right away
+      const qtyByProductId = new Map<string, number>();
+      itemsPayload.forEach((it) => {
+        qtyByProductId.set(it.productId, (qtyByProductId.get(it.productId) || 0) + it.quantity);
+      });
+      setCatalog((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          products: prev.products.map((p) => {
+            if (typeof p.stockQuantity !== 'number') return p;
+            const bought = qtyByProductId.get(p.id) || 0;
+            if (bought <= 0) return p;
+            return {
+              ...p,
+              stockQuantity: Math.max(0, Math.floor(p.stockQuantity - bought)),
+            };
+          }),
+        };
+      });
 
       const itemLines = itemsPayload
         .map(
@@ -656,10 +754,17 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredProducts.map((product) => {
               const inCart = cart[product.id];
+              const hasTrackedStock = typeof product.stockQuantity === 'number';
+              const stockCount = hasTrackedStock ? Math.max(0, Math.floor(product.stockQuantity as number)) : null;
+              const isOutOfStock = stockCount !== null && stockCount <= 0;
+              const isAtMaxStock = stockCount !== null && Boolean(inCart) && inCart.quantity >= stockCount;
+
               return (
                 <article
                   key={product.id}
-                  className="bg-white border border-slate-200 rounded-2xl overflow-hidden flex flex-col hover:shadow-md transition-shadow"
+                  className={`bg-white border rounded-2xl overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
+                    isOutOfStock ? 'border-slate-200 bg-slate-50/40' : 'border-slate-200'
+                  }`}
                 >
                   <div className="aspect-[4/3] bg-slate-100 relative overflow-hidden">
                     {product.imageUrl ? (
@@ -667,26 +772,44 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                         src={product.imageUrl}
                         alt={product.name}
                         referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
+                        className={`w-full h-full object-cover transition-opacity ${
+                          isOutOfStock ? 'opacity-65 grayscale-[35%]' : ''
+                        }`}
                       />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-gradient-to-br from-slate-100 to-slate-200">
                         <ImageIcon className="w-9 h-9 opacity-50" />
                       </div>
                     )}
-                    {product.featured && (
+                    {product.featured && !isOutOfStock && (
                       <span className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 text-[10px] font-bold inline-flex items-center gap-1 shadow-xs">
                         <Star className="w-3 h-3 fill-current" />
                         <span>Destacado</span>
+                      </span>
+                    )}
+                    {isOutOfStock && (
+                      <span className="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-slate-950/90 text-white text-[11px] font-bold tracking-wide shadow-xs">
+                        Sin stock
                       </span>
                     )}
                   </div>
 
                   <div className="p-4 flex-1 flex flex-col justify-between gap-4">
                     <div className="space-y-1.5">
-                      <div className="text-[11px] font-medium text-slate-500 truncate">
-                        {product.category || 'General'} · {product.unitLabel || 'Unidad'}
-                        {product.sku ? ` · Cód: ${product.sku}` : ''}
+                      <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500">
+                        <span className="truncate">
+                          {product.category || 'General'} · {product.unitLabel || 'Unidad'}
+                          {product.sku ? ` · Cód: ${product.sku}` : ''}
+                        </span>
+                        {stockCount !== null && (
+                          <span
+                            className={`shrink-0 font-semibold font-mono tabular-nums ${
+                              isOutOfStock ? 'text-rose-700' : 'text-emerald-700'
+                            }`}
+                          >
+                            {isOutOfStock ? 'Sin stock' : `Stock: ${stockCount} u.`}
+                          </span>
+                        )}
                       </div>
                       <h3 className="text-base font-bold text-slate-900 leading-snug">
                         {product.name}
@@ -699,11 +822,24 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                     </div>
 
                     <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3">
-                      <span className="text-lg font-bold font-mono tabular-nums text-slate-900">
+                      <span
+                        className={`text-lg font-bold font-mono tabular-nums ${
+                          isOutOfStock ? 'text-slate-400' : 'text-slate-900'
+                        }`}
+                      >
                         {formatCurrency(product.price, currency)}
                       </span>
 
-                      {inCart ? (
+                      {isOutOfStock ? (
+                        <button
+                          type="button"
+                          onClick={() => openStockAlertModal(product)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white transition-colors cursor-pointer whitespace-nowrap"
+                        >
+                          <Bell className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Avisar cuando haya stock</span>
+                        </button>
+                      ) : inCart ? (
                         <div className="flex items-center gap-2">
                           <div className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
                             <button
@@ -719,8 +855,10 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             </span>
                             <button
                               type="button"
+                              disabled={isAtMaxStock}
                               onClick={() => updateCartQty(product.id, 1)}
-                              className="w-7 h-7 rounded-lg bg-[#0B1933] hover:bg-[#13264A] text-white flex items-center justify-center cursor-pointer"
+                              title={isAtMaxStock ? `Máximo disponible: ${stockCount} u.` : 'Sumar unidad'}
+                              className="w-7 h-7 rounded-lg bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-40 disabled:cursor-not-allowed text-white flex items-center justify-center cursor-pointer"
                               aria-label="Sumar unidad"
                             >
                               <Plus className="w-3.5 h-3.5" />
@@ -889,54 +1027,70 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                         Vaciar carrito
                       </button>
                     </div>
-                    {cartItems.map(({ product, quantity }) => (
-                      <div
-                        key={product.id}
-                        className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50/70"
-                      >
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-900 truncate">
-                            {product.name}
-                          </div>
-                          <div className="text-[11px] font-mono tabular-nums text-slate-500">
-                            {formatCurrency(product.price, currency)} × {quantity} ={' '}
-                            <strong className="text-slate-800">
-                              {formatCurrency(product.price * quantity, currency)}
-                            </strong>
-                          </div>
-                        </div>
+                    {cartItems.map(({ product, quantity }) => {
+                      const liveP = catalog?.products.find((p) => p.id === product.id) || product;
+                      const maxStock =
+                        typeof liveP.stockQuantity === 'number'
+                          ? Math.max(0, Math.floor(liveP.stockQuantity))
+                          : null;
+                      const reachedMax = maxStock !== null && quantity >= maxStock;
 
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => updateCartQty(product.id, -1)}
-                            className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-700 flex items-center justify-center cursor-pointer"
-                            aria-label="Restar"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <span className="w-6 text-center text-xs font-mono tabular-nums font-bold">
-                            {quantity}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => updateCartQty(product.id, 1)}
-                            className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-700 flex items-center justify-center cursor-pointer"
-                            aria-label="Sumar"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeCartItem(product.id)}
-                            className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer"
-                            title="Quitar"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                      return (
+                        <div
+                          key={product.id}
+                          className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50/70"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-slate-900 truncate">
+                              {product.name}
+                            </div>
+                            <div className="text-[11px] font-mono tabular-nums text-slate-500">
+                              {formatCurrency(product.price, currency)} × {quantity} ={' '}
+                              <strong className="text-slate-800">
+                                {formatCurrency(product.price * quantity, currency)}
+                              </strong>
+                            </div>
+                            {maxStock !== null && (
+                              <div className="text-[10px] font-mono tabular-nums text-slate-500 mt-0.5">
+                                Stock disponible: {maxStock} u.{reachedMax ? ' (máximo alcanzado)' : ''}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => updateCartQty(product.id, -1)}
+                              className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-700 flex items-center justify-center cursor-pointer"
+                              aria-label="Restar"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="w-6 text-center text-xs font-mono tabular-nums font-bold">
+                              {quantity}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={reachedMax}
+                              onClick={() => updateCartQty(product.id, 1)}
+                              title={reachedMax ? `Stock máximo: ${maxStock}` : 'Sumar'}
+                              className="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-700 flex items-center justify-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              aria-label="Sumar"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeCartItem(product.id)}
+                              className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer"
+                              title="Quitar"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {/* Subtotal Box */}
@@ -1168,6 +1322,145 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               </div>
             )}
           </aside>
+        </div>
+      )}
+
+      {/* Modal: Avisar cuando haya stock (Nombre + Teléfono) */}
+      {stockAlertProduct && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#0B1933] text-white flex items-center justify-center shrink-0">
+                  <Bell className="w-4 h-4 text-amber-300" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Avisar cuando haya stock
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Dejanos tus datos y te avisamos por WhatsApp
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStockAlertProduct(null)}
+                aria-label="Cerrar aviso de stock"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Selected Out-of-stock Product Preview */}
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="w-12 h-12 rounded-lg bg-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                  {stockAlertProduct.imageUrl ? (
+                    <img
+                      src={stockAlertProduct.imageUrl}
+                      alt={stockAlertProduct.name}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <ImageIcon className="w-5 h-5 text-slate-400" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-slate-900 truncate">
+                    {stockAlertProduct.name}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-mono tabular-nums">
+                    {formatCurrency(stockAlertProduct.price, currency)}
+                    {stockAlertProduct.sku ? ` · Cód: ${stockAlertProduct.sku}` : ''}
+                    {' · '}
+                    <span className="text-rose-700 font-semibold">Sin stock actual</span>
+                  </div>
+                </div>
+              </div>
+
+              {alertSubmitted ? (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center space-y-2">
+                    <CheckCircle2 className="w-9 h-9 text-emerald-600 mx-auto" />
+                    <h4 className="text-sm font-bold text-slate-900">
+                      ¡Te anotamos en la lista de aviso!
+                    </h4>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Cuando vuelva a ingresar <strong>{stockAlertProduct.name}</strong>,{' '}
+                      <strong>{catalog.storeName}</strong> se va a comunicar con{' '}
+                      <strong>{alertCustomerName}</strong> al{' '}
+                      <strong className="font-mono tabular-nums">{alertCustomerPhone}</strong>.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setStockAlertProduct(null)}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer"
+                  >
+                    Seguir viendo el catálogo
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmitStockAlert} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">
+                      Tu nombre y apellido *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      value={alertCustomerName}
+                      onChange={(e) => setAlertCustomerName(e.target.value)}
+                      placeholder="Ej. María Gómez"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700">
+                      Tu teléfono / WhatsApp *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={alertCustomerPhone}
+                      onChange={(e) => setAlertCustomerPhone(e.target.value)}
+                      placeholder="Ej. 11 4567-8900"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
+                    />
+                  </div>
+
+                  {alertError && (
+                    <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium">
+                      {alertError}
+                    </div>
+                  )}
+
+                  <div className="pt-2 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStockAlertProduct(null)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={alertSubmitting}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-60 text-white cursor-pointer"
+                    >
+                      <Bell className="w-3.5 h-3.5 text-amber-300" />
+                      <span>{alertSubmitting ? 'Guardando...' : 'Avisarme cuando haya stock'}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

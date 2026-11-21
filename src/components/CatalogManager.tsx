@@ -27,10 +27,13 @@ import {
   AlertTriangle,
   Phone,
   Barcode,
+  Bell,
+  Minus,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
   CatalogProduct,
+  CatalogStockAlertRequest,
   DistributorConfig,
   OnlineCatalogSettings,
   SaleLineItem,
@@ -51,11 +54,14 @@ interface CatalogManagerProps {
   settings: OnlineCatalogSettings;
   products: CatalogProduct[];
   orders: CatalogPickupOrder[];
+  stockAlerts?: CatalogStockAlertRequest[];
   activeUserName?: string;
   onSaveSettings: (next: OnlineCatalogSettings) => void;
   onSaveProducts: (next: CatalogProduct[]) => void;
   onSaveOrders: (next: CatalogPickupOrder[]) => void;
+  onSaveStockAlerts?: (next: CatalogStockAlertRequest[]) => void;
   onRefreshOrders?: () => Promise<void>;
+  onRefreshStockAlerts?: () => Promise<void>;
   onBillOrder?: (order: CatalogPickupOrder) => void;
   onOpenReceipt?: (receipt: ReceiptModalData) => void;
   onOpenPublicPreview: (handle: string) => void;
@@ -116,21 +122,25 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   settings,
   products,
   orders,
+  stockAlerts = [],
   activeUserName,
   onSaveSettings,
   onSaveProducts,
   onSaveOrders,
+  onSaveStockAlerts,
   onRefreshOrders,
+  onRefreshStockAlerts,
   onBillOrder,
   onOpenReceipt,
   onOpenPublicPreview,
   showToast,
 }) => {
-  const [subTab, setSubTab] = useState<'productos' | 'configuracion' | 'pedidos'>('productos');
+  const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'avisos_stock' | 'configuracion'>('productos');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
+  const [isRefreshingAlerts, setIsRefreshingAlerts] = useState(false);
   const [isEditingWhatsappInline, setIsEditingWhatsappInline] = useState(false);
   const [inlineWhatsappDraft, setInlineWhatsappDraft] = useState(
     () => settings.whatsappPhone || config.senderPhone || config.distributorPhone || ''
@@ -198,6 +208,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [productName, setProductName] = useState('');
   const [productSku, setProductSku] = useState('');
   const [productPrice, setProductPrice] = useState('');
+  const [productStockQuantity, setProductStockQuantity] = useState('');
   const [productCategory, setProductCategory] = useState('General');
   const [productUnitLabel, setProductUnitLabel] = useState('Unidad');
   const [productDescription, setProductDescription] = useState('');
@@ -279,6 +290,38 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     [orders]
   );
 
+  const pendingStockAlertsCount = useMemo(
+    () => stockAlerts.filter((a) => a.status === 'pending').length,
+    [stockAlerts]
+  );
+
+  const pendingAlertsByProductId = useMemo(() => {
+    const map = new Map<string, number>();
+    stockAlerts.forEach((a) => {
+      if (a.status === 'pending') {
+        map.set(a.productId, (map.get(a.productId) || 0) + 1);
+      }
+    });
+    return map;
+  }, [stockAlerts]);
+
+  const sortedStockAlerts = useMemo(
+    () =>
+      [...stockAlerts].sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'pending' ? -1 : 1;
+        return b.createdAt.localeCompare(a.createdAt);
+      }),
+    [stockAlerts]
+  );
+
+  const outOfStockProductsCount = useMemo(
+    () =>
+      products.filter(
+        (p) => p.available && typeof p.stockQuantity === 'number' && p.stockQuantity <= 0
+      ).length,
+    [products]
+  );
+
   const effectiveWhatsappPhone = (
     settings.whatsappPhone ||
     config.senderPhone ||
@@ -347,6 +390,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductName('');
     setProductSku('');
     setProductPrice('');
+    setProductStockQuantity('');
     setProductCategory('General');
     setProductUnitLabel('Unidad');
     setProductDescription('');
@@ -361,6 +405,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductName(product.name);
     setProductSku(product.sku || '');
     setProductPrice(String(product.price));
+    setProductStockQuantity(
+      typeof product.stockQuantity === 'number' ? String(product.stockQuantity) : ''
+    );
     setProductCategory(product.category || 'General');
     setProductUnitLabel(product.unitLabel || 'Unidad');
     setProductDescription(product.description || '');
@@ -399,9 +446,25 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       return;
     }
 
+    const trimmedStock = productStockQuantity.trim();
+    let parsedStock: number | undefined = undefined;
+    if (trimmedStock !== '') {
+      const numericStock = Number(trimmedStock);
+      if (!Number.isFinite(numericStock) || numericStock < 0) {
+        showToast('Ingresá una cantidad de stock válida (0 o mayor), o dejalo vacío para stock libre.');
+        return;
+      }
+      parsedStock = Math.floor(numericStock);
+    }
+
     const now = new Date().toISOString();
     const cleanSku = productSku.trim() || undefined;
     if (editingProduct) {
+      const wasOutOfStock =
+        typeof editingProduct.stockQuantity === 'number' && editingProduct.stockQuantity <= 0;
+      const isNowInStock = parsedStock === undefined || parsedStock > 0;
+      const waitingCount = pendingAlertsByProductId.get(editingProduct.id) || 0;
+
       const updated = products.map((p) =>
         p.id === editingProduct.id
           ? {
@@ -409,6 +472,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               name: cleanName,
               sku: cleanSku,
               price: numericPrice,
+              stockQuantity: parsedStock,
               category: productCategory.trim() || 'General',
               unitLabel: productUnitLabel.trim() || 'Unidad',
               description: productDescription.trim(),
@@ -420,13 +484,20 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           : p
       );
       onSaveProducts(updated);
-      showToast(`Producto "${cleanName}" actualizado en el catálogo.`);
+      if (wasOutOfStock && isNowInStock && waitingCount > 0) {
+        showToast(
+          `Stock repuesto en "${cleanName}". Tenés ${waitingCount} cliente(s) para avisar en "Avisos de Stock".`
+        );
+      } else {
+        showToast(`Producto "${cleanName}" actualizado en el catálogo.`);
+      }
     } else {
       const created: CatalogProduct = {
         id: `cat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         name: cleanName,
         sku: cleanSku,
         price: numericPrice,
+        stockQuantity: parsedStock,
         category: productCategory.trim() || 'General',
         unitLabel: productUnitLabel.trim() || 'Unidad',
         description: productDescription.trim(),
@@ -440,6 +511,75 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       showToast(`Producto "${cleanName}" publicado en tu catálogo online.`);
     }
     setIsProductModalOpen(false);
+  };
+
+  const handleQuickUpdateStock = (
+    product: CatalogProduct,
+    nextStock: number | undefined
+  ) => {
+    const now = new Date().toISOString();
+    const wasOutOfStock =
+      typeof product.stockQuantity === 'number' && product.stockQuantity <= 0;
+    const isNowInStock = nextStock === undefined || nextStock > 0;
+    const waitingCount = pendingAlertsByProductId.get(product.id) || 0;
+
+    const updated = products.map((p) =>
+      p.id === product.id ? { ...p, stockQuantity: nextStock, updatedAt: now } : p
+    );
+    onSaveProducts(updated);
+    if (wasOutOfStock && isNowInStock && waitingCount > 0) {
+      showToast(
+        `Stock repuesto en "${product.name}". Tenés ${waitingCount} aviso(s) pendientes para enviar por WhatsApp.`
+      );
+    } else if (nextStock === 0) {
+      showToast(`"${product.name}" marcado Sin stock (0 u.) en el catálogo.`);
+    }
+  };
+
+  const handleNotifyStockAlertWhatsApp = (alert: CatalogStockAlertRequest) => {
+    const storeTitle = settings.storeName || config.distributorName || 'Nuestra Tienda';
+    const skuPart = alert.productSku ? ` (Cód: ${alert.productSku})` : '';
+    const message =
+      `Hola ${alert.customerName}! 👋 Te avisamos de *${storeTitle}* que ya volvió a entrar stock de *${alert.productName}*${skuPart}.\n\n` +
+      `Podés verlo y hacer tu pedido directo desde nuestro catálogo online:\n🔗 ${publicUrl}\n\n` +
+      `¡Gracias por esperar!`;
+    window.open(createWhatsAppUrl(alert.customerPhone, message), '_blank', 'noopener,noreferrer');
+
+    if (onSaveStockAlerts) {
+      const now = new Date().toISOString();
+      onSaveStockAlerts(
+        stockAlerts.map((a) =>
+          a.id === alert.id
+            ? { ...a, status: 'notified', notifiedAt: now, updatedAt: now }
+            : a
+        )
+      );
+    }
+    showToast(`Aviso enviado por WhatsApp a ${alert.customerName}.`);
+  };
+
+  const handleToggleStockAlertStatus = (alert: CatalogStockAlertRequest) => {
+    if (!onSaveStockAlerts) return;
+    const now = new Date().toISOString();
+    const nextStatus = alert.status === 'pending' ? 'notified' : 'pending';
+    onSaveStockAlerts(
+      stockAlerts.map((a) =>
+        a.id === alert.id
+          ? {
+              ...a,
+              status: nextStatus,
+              notifiedAt: nextStatus === 'notified' ? now : undefined,
+              updatedAt: now,
+            }
+          : a
+      )
+    );
+  };
+
+  const handleDeleteStockAlert = (alertId: string) => {
+    if (!onSaveStockAlerts) return;
+    onSaveStockAlerts(stockAlerts.filter((a) => a.id !== alertId));
+    showToast('Solicitud de aviso eliminada.');
   };
 
   const handleToggleProductAvailability = (productId: string) => {
@@ -971,6 +1111,23 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setSubTab('avisos_stock')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'avisos_stock'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Bell className="w-3.5 h-3.5 text-amber-600" />
+              <span>Avisos de Stock</span>
+              {pendingStockAlertsCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded bg-amber-600 text-white text-[10px] font-mono tabular-nums">
+                  {pendingStockAlertsCount}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
               onClick={() => setSubTab('configuracion')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 subTab === 'configuracion'
@@ -982,10 +1139,18 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center gap-4 text-xs text-slate-500 font-medium tabular-nums">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-medium tabular-nums">
             <span>
               <strong className="text-slate-800">{activeProductsCount}</strong> activos
             </span>
+            {outOfStockProductsCount > 0 && (
+              <>
+                <span>·</span>
+                <span className="text-rose-700 font-semibold">
+                  <strong>{outOfStockProductsCount}</strong> sin stock
+                </span>
+              </>
+            )}
             <span>·</span>
             <span>
               WhatsApp pedidos:{' '}
@@ -1061,98 +1226,195 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  className={`bg-white border rounded-2xl overflow-hidden flex flex-col transition-shadow hover:shadow-sm ${
-                    product.available ? 'border-slate-200' : 'border-slate-200 opacity-75'
-                  }`}
-                >
-                  {/* Product Image Container */}
-                  <div className="aspect-[4/3] bg-slate-100 relative overflow-hidden">
-                    {product.imageUrl ? (
-                      <img
-                        src={product.imageUrl}
-                        alt={product.name}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-1.5 bg-gradient-to-br from-slate-100 to-slate-200">
-                        <ImageIcon className="w-8 h-8 opacity-60" />
-                        <span className="text-[11px] font-medium">Sin foto cargada</span>
-                      </div>
-                    )}
-                    {product.featured && (
-                      <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 text-[10px] font-bold inline-flex items-center gap-1 shadow-xs">
-                        <Star className="w-3 h-3 fill-current" />
-                        <span>Destacado</span>
-                      </span>
-                    )}
-                  </div>
+              {filteredProducts.map((product) => {
+                const hasTrackedStock = typeof product.stockQuantity === 'number';
+                const stockQty = hasTrackedStock ? Math.max(0, Math.floor(product.stockQuantity as number)) : null;
+                const isOutOfStock = stockQty !== null && stockQty <= 0;
+                const waitingAlerts = pendingAlertsByProductId.get(product.id) || 0;
 
-                  {/* Card Body */}
-                  <div className="p-4 flex-1 flex flex-col justify-between gap-3">
-                    <div className="space-y-1.5">
-                      <div className="text-[11px] font-medium text-slate-500 flex items-center justify-between gap-2">
-                        <span className="truncate">
-                          {product.category || 'General'} · {product.unitLabel || 'Unidad'}
-                          {product.sku ? ` · Cód: ${product.sku}` : ''}
+                return (
+                  <div
+                    key={product.id}
+                    className={`bg-white border rounded-2xl overflow-hidden flex flex-col transition-shadow hover:shadow-sm ${
+                      product.available ? 'border-slate-200' : 'border-slate-200 opacity-75'
+                    }`}
+                  >
+                    {/* Product Image Container */}
+                    <div className="aspect-[4/3] bg-slate-100 relative overflow-hidden">
+                      {product.imageUrl ? (
+                        <img
+                          src={product.imageUrl}
+                          alt={product.name}
+                          referrerPolicy="no-referrer"
+                          className={`w-full h-full object-cover ${isOutOfStock ? 'opacity-70 grayscale-[30%]' : ''}`}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 gap-1.5 bg-gradient-to-br from-slate-100 to-slate-200">
+                          <ImageIcon className="w-8 h-8 opacity-60" />
+                          <span className="text-[11px] font-medium">Sin foto cargada</span>
+                        </div>
+                      )}
+                      {product.featured && (
+                        <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 text-[10px] font-bold inline-flex items-center gap-1 shadow-xs">
+                          <Star className="w-3 h-3 fill-current" />
+                          <span>Destacado</span>
                         </span>
-                        <span
-                          className={`font-semibold shrink-0 ${
-                            product.available ? 'text-emerald-700' : 'text-slate-500'
-                          }`}
-                        >
-                          {product.available ? 'En stock' : 'Pausado'}
+                      )}
+                      {isOutOfStock && product.available && (
+                        <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-rose-700 text-white text-[10px] font-bold shadow-xs">
+                          Sin stock (0 u.)
                         </span>
-                      </div>
-                      <h3 className="text-sm font-bold text-slate-900 leading-snug line-clamp-2">
-                        {product.name}
-                      </h3>
-                      <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
-                        {product.description || 'Sin descripción cargada.'}
-                      </p>
+                      )}
                     </div>
 
-                    <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                      <span className="text-base font-bold font-mono tabular-nums text-slate-900">
-                        {formatCurrency(product.price, currency)}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleProductAvailability(product.id)}
-                          title={product.available ? 'Pausar publicación' : 'Activar stock'}
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
-                        >
-                          {product.available ? (
-                            <Eye className="w-4 h-4 text-emerald-600" />
+                    {/* Card Body */}
+                    <div className="p-4 flex-1 flex flex-col justify-between gap-3">
+                      <div className="space-y-1.5">
+                        <div className="text-[11px] font-medium text-slate-500 flex items-center justify-between gap-2">
+                          <span className="truncate">
+                            {product.category || 'General'} · {product.unitLabel || 'Unidad'}
+                            {product.sku ? ` · Cód: ${product.sku}` : ''}
+                          </span>
+                          <span
+                            className={`font-semibold shrink-0 tabular-nums ${
+                              !product.available
+                                ? 'text-slate-500'
+                                : isOutOfStock
+                                ? 'text-rose-700'
+                                : 'text-emerald-700'
+                            }`}
+                          >
+                            {!product.available
+                              ? 'Pausado'
+                              : isOutOfStock
+                              ? 'Sin stock'
+                              : stockQty !== null
+                              ? `Stock: ${stockQty} u.`
+                              : 'Stock libre'}
+                          </span>
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-900 leading-snug line-clamp-2">
+                          {product.name}
+                        </h3>
+                        <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                          {product.description || 'Sin descripción cargada.'}
+                        </p>
+
+                        {/* Quick Inline Stock Control */}
+                        <div className="pt-1 flex items-center justify-between gap-2 flex-wrap">
+                          {stockQty !== null ? (
+                            <div className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg p-0.5">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleQuickUpdateStock(product, Math.max(0, stockQty - 1))
+                                }
+                                title="Restar 1 unidad de stock"
+                                className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
+                              >
+                                <Minus className="w-3 h-3" />
+                              </button>
+                              <span className="px-2 text-[11px] font-mono tabular-nums font-bold text-slate-900">
+                                {stockQty} u.
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickUpdateStock(product, stockQty + 1)}
+                                title="Sumar 1 unidad de stock"
+                                className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" />
+                              </button>
+                              {stockQty > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickUpdateStock(product, 0)}
+                                  title="Marcar sin stock (0 u.)"
+                                  className="px-1.5 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-50 rounded cursor-pointer"
+                                >
+                                  0
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleQuickUpdateStock(product, undefined)}
+                                title="Pasar a stock libre (sin límite)"
+                                className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:text-slate-800 rounded cursor-pointer"
+                              >
+                                Libre
+                              </button>
+                            </div>
                           ) : (
-                            <EyeOff className="w-4 h-4 text-slate-400" />
+                            <div className="inline-flex items-center gap-1.5 text-[11px]">
+                              <button
+                                type="button"
+                                onClick={() => openEditProductModal(product)}
+                                className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                              >
+                                Cargar cantidad
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickUpdateStock(product, 0)}
+                                className="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold cursor-pointer"
+                              >
+                                Marcar sin stock
+                              </button>
+                            </div>
                           )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openEditProductModal(product)}
-                          title="Editar producto"
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-[#0B1933] hover:bg-slate-100 transition-colors cursor-pointer"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteProduct(product)}
-                          title="Eliminar producto"
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+
+                          {waitingAlerts > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setSubTab('avisos_stock')}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold hover:bg-amber-100 cursor-pointer"
+                            >
+                              <Bell className="w-3 h-3" />
+                              <span>{waitingAlerts} esperando aviso</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <span className="text-base font-bold font-mono tabular-nums text-slate-900">
+                          {formatCurrency(product.price, currency)}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleProductAvailability(product.id)}
+                            title={product.available ? 'Ocultar del catálogo' : 'Mostrar en catálogo'}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                          >
+                            {product.available ? (
+                              <Eye className="w-4 h-4 text-emerald-600" />
+                            ) : (
+                              <EyeOff className="w-4 h-4 text-slate-400" />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditProductModal(product)}
+                            title="Editar producto y stock"
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-[#0B1933] hover:bg-slate-100 transition-colors cursor-pointer"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProduct(product)}
+                            title="Eliminar producto"
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -1478,6 +1740,182 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           <span>Enviar Comprobante WA</span>
                         </button>
                       </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* SUB-TAB 2B: AVISOS DE STOCK SOLICITADOS POR CLIENTES */}
+      {subTab === 'avisos_stock' && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                Clientes esperando aviso de reposición de stock
+              </h3>
+              <p className="text-xs text-slate-500">
+                Cuando un producto figura Sin stock, los clientes pueden dejar su nombre y teléfono. Al reponer unidades, avisales en 1 clic por WhatsApp.
+              </p>
+            </div>
+            {onRefreshStockAlerts && (
+              <button
+                type="button"
+                disabled={isRefreshingAlerts}
+                onClick={async () => {
+                  setIsRefreshingAlerts(true);
+                  try {
+                    await onRefreshStockAlerts();
+                  } finally {
+                    setIsRefreshingAlerts(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingAlerts ? 'animate-spin' : ''}`} />
+                <span>Actualizar avisos</span>
+              </button>
+            )}
+          </div>
+
+          {sortedStockAlerts.length === 0 ? (
+            <div className="border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-1.5">
+              <Bell className="w-7 h-7 text-slate-300 mx-auto" />
+              <div className="text-xs font-semibold text-slate-700">
+                Todavía no hay solicitudes de aviso de stock
+              </div>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Cuando marques un producto con stock 0, aparecerá como "Sin stock" en la página web y permitirá dejar nombre y teléfono.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {sortedStockAlerts.map((alert) => {
+                const liveProduct =
+                  productMap.byId.get(alert.productId) ||
+                  productMap.byName.get(alert.productName.trim().toLowerCase());
+                const liveStock =
+                  liveProduct && typeof liveProduct.stockQuantity === 'number'
+                    ? liveProduct.stockQuantity
+                    : null;
+                const isRestocked =
+                  Boolean(liveProduct?.available) && (liveStock === null || liveStock > 0);
+
+                return (
+                  <div
+                    key={alert.id}
+                    className={`border rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
+                      alert.status === 'pending'
+                        ? 'border-amber-200 bg-amber-50/40'
+                        : 'border-slate-200 bg-slate-50/50'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                        {liveProduct?.imageUrl ? (
+                          <img
+                            src={liveProduct.imageUrl}
+                            alt={alert.productName}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <ImageIcon className="w-5 h-5 text-slate-400" />
+                        )}
+                      </div>
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-slate-900">
+                            {alert.customerName}
+                          </span>
+                          <span className="text-xs font-mono font-semibold text-slate-600">
+                            {alert.customerPhone}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+                              alert.status === 'pending'
+                                ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}
+                          >
+                            {alert.status === 'pending' ? 'Pendiente de avisar' : 'Avisado'}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-slate-700 flex items-center gap-2 flex-wrap">
+                          <span>
+                            Producto pedido: <strong>{alert.productName}</strong>
+                            {alert.productSku ? ` (Cód: ${alert.productSku})` : ''}
+                          </span>
+                          <span
+                            className={`font-mono tabular-nums font-semibold ${
+                              isRestocked ? 'text-emerald-700' : 'text-rose-700'
+                            }`}
+                          >
+                            {!liveProduct
+                              ? '· Producto eliminado'
+                              : !liveProduct.available
+                              ? '· Publicación pausada'
+                              : liveStock === null
+                              ? '· Ya disponible (Stock libre)'
+                              : liveStock > 0
+                              ? `· ¡Ya hay stock! (${liveStock} u.)`
+                              : '· Sigue sin stock (0 u.)'}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-500">
+                          Solicitado: {new Date(alert.createdAt).toLocaleString('es-AR')}
+                          {alert.notifiedAt
+                            ? ` · Avisado: ${new Date(alert.notifiedAt).toLocaleString('es-AR')}`
+                            : ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                      {liveProduct && !isRestocked && (
+                        <button
+                          type="button"
+                          onClick={() => openEditProductModal(liveProduct)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer whitespace-nowrap"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>Cargar stock</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleNotifyStockAlertWhatsApp(alert)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        <span>Avisar por WhatsApp</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStockAlertStatus(alert)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer whitespace-nowrap"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>
+                          {alert.status === 'pending' ? 'Marcar avisado' : 'Volver a pendiente'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteStockAlert(alert.id)}
+                        title="Eliminar solicitud"
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </div>
                 );
@@ -1828,7 +2266,62 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   />
                 </div>
 
-                <div className="sm:col-span-2 space-y-1">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Cantidad en stock
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={productStockQuantity}
+                    onChange={(e) => setProductStockQuantity(e.target.value)}
+                    placeholder="Vacío = stock libre"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                  />
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setProductStockQuantity('0')}
+                      className="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold cursor-pointer"
+                    >
+                      Sin stock (0)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setProductStockQuantity((prev) =>
+                          String((Number(prev || 0) || 0) + 5)
+                        )
+                      }
+                      className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
+                    >
+                      +5
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setProductStockQuantity((prev) =>
+                          String((Number(prev || 0) || 0) + 10)
+                        )
+                      }
+                      className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
+                    >
+                      +10
+                    </button>
+                    {productStockQuantity !== '' && (
+                      <button
+                        type="button"
+                        onClick={() => setProductStockQuantity('')}
+                        className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-semibold cursor-pointer"
+                      >
+                        Stock libre
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-700">
                     Presentación / Unidad
                   </label>

@@ -542,8 +542,23 @@ export interface CatalogProduct {
   available: boolean;
   featured?: boolean;
   sku?: string;
+  stockQuantity?: number; // undefined = stock sin límite; 0 = Sin stock (habilita "Avisar cuando haya stock")
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CatalogStockAlertRequest {
+  id: string;
+  tenantId: string;
+  productId: string;
+  productName: string;
+  productSku?: string;
+  customerName: string;
+  customerPhone: string;
+  status: 'pending' | 'notified';
+  notifiedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface OnlineCatalogSettings {
@@ -592,6 +607,7 @@ export interface CatalogPickupOrder {
   totalAmount: number;
   currencySymbol: string;
   status: 'pendiente_retiro' | 'listo_para_retirar' | 'en_camino' | 'retirado' | 'cancelado';
+  stockDeducted?: boolean;
   linkedBoletaId?: string;
   linkedBoletaNumber?: string;
   dispatchReceiptNumber?: string;

@@ -43,6 +43,7 @@ const CLOUD_SYNCED_PREFIXES = [
   'client_payment_order_',
   'public_catalog_',
   'catalog_order_',
+  'catalog_stock_alert_',
   'rec:',
 ];
 
@@ -154,6 +155,7 @@ const TENANT_ARRAY_COLLECTIONS = [
   'rendiciones',
   'catalogProducts',
   'catalogOrders',
+  'catalogStockAlerts',
 ] as const;
 
 function getEntityPrefixForAggregateKey(

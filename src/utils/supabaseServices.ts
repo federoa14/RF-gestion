@@ -1,5 +1,6 @@
 import type {
   CatalogPickupOrder,
+  CatalogStockAlertRequest,
   ClientPaymentOrder,
   PlatformAnnouncement,
   PlatformBillingConfig,
@@ -1021,6 +1022,60 @@ export async function submitPublicCatalogOrderToSupabase(
     insertOrUpdateCloudStoreKey(publicOrderKey, order),
     insertOrUpdateCloudStoreKey(tenantEntityKey, order),
   ]);
+
+  // Descontar cantidades en stock en el catálogo público publicado (si los artículos controlan stock)
+  try {
+    const qtyByProd = new Map<string, number>();
+    for (const it of order.items || []) {
+      if (it.productId && Number(it.quantity) > 0) {
+        qtyByProd.set(it.productId, (qtyByProd.get(it.productId) || 0) + Number(it.quantity));
+      }
+    }
+    if (qtyByProd.size > 0) {
+      const catKey = `public_catalog_${order.tenantId}`;
+      let snapshot: PublishedPublicCatalog | null = null;
+      const localRaw = dbGetItem(catKey);
+      if (localRaw) {
+        try {
+          snapshot = JSON.parse(localRaw) as PublishedPublicCatalog;
+        } catch {
+          snapshot = null;
+        }
+      }
+      if (!snapshot) {
+        snapshot = await readCloudJsonRecord<PublishedPublicCatalog>(catKey);
+      }
+      if (snapshot && Array.isArray(snapshot.products)) {
+        let changed = false;
+        const nextProducts = snapshot.products.map((p) => {
+          const orderedQty = qtyByProd.get(p.id);
+          if (!orderedQty || typeof p.stockQuantity !== 'number') return p;
+          changed = true;
+          return {
+            ...p,
+            stockQuantity: Math.max(0, p.stockQuantity - orderedQty),
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        if (changed) {
+          const nextCatalog: PublishedPublicCatalog = {
+            ...snapshot,
+            products: nextProducts,
+            updatedAt: new Date().toISOString(),
+          };
+          try {
+            dbSetItem(catKey, JSON.stringify(nextCatalog));
+          } catch {
+            // ignore
+          }
+          await insertOrUpdateCloudStoreKey(catKey, nextCatalog);
+        }
+      }
+    }
+  } catch {
+    // non-fatal stock snapshot update
+  }
+
   return okPublic || okEntity;
 }
 
@@ -1062,6 +1117,78 @@ export async function fetchCatalogOrdersForTenantFromSupabase(
           const prev = mergedMap.get(o.id);
           if (!prev || (o.updatedAt || o.createdAt) >= (prev.updatedAt || prev.createdAt)) {
             mergedMap.set(o.id, o);
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return Array.from(mergedMap.values());
+}
+
+export async function submitCatalogStockAlertToSupabase(
+  alert: CatalogStockAlertRequest
+): Promise<boolean> {
+  if (!alert?.id || !alert?.tenantId) return false;
+  const publicAlertKey = `catalog_stock_alert_${alert.id}`;
+  const tenantEntityKey = `rec:${alert.tenantId}:catalogStockAlerts:${alert.id}`;
+
+  try {
+    const cacheKey = `public_stock_alerts_cache_${alert.tenantId}`;
+    const raw = dbGetItem(cacheKey);
+    const existing: CatalogStockAlertRequest[] = raw ? JSON.parse(raw) : [];
+    const filtered = Array.isArray(existing) ? existing.filter((a) => a.id !== alert.id) : [];
+    dbSetItem(cacheKey, JSON.stringify([alert, ...filtered].slice(0, 300)));
+  } catch {
+    // ignore local cache write issue
+  }
+
+  const [okPublic, okEntity] = await Promise.all([
+    insertOrUpdateCloudStoreKey(publicAlertKey, alert),
+    insertOrUpdateCloudStoreKey(tenantEntityKey, alert),
+  ]);
+  return okPublic || okEntity;
+}
+
+export async function fetchCatalogStockAlertsForTenantFromSupabase(
+  tenantId: string
+): Promise<CatalogStockAlertRequest[]> {
+  if (!tenantId) return [];
+  const mergedMap = new Map<string, CatalogStockAlertRequest>();
+
+  try {
+    const rawLocal = dbGetItem(`public_stock_alerts_cache_${tenantId}`);
+    if (rawLocal) {
+      const localList = JSON.parse(rawLocal);
+      if (Array.isArray(localList)) {
+        for (const a of localList) {
+          if (a && a.id && a.tenantId === tenantId) mergedMap.set(a.id, a);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return Array.from(mergedMap.values());
+
+  try {
+    const { data, error } = await supabase
+      .from(CLOUD_TABLE)
+      .select('value')
+      .like('key', 'rec:%:catalogStockAlerts:%')
+      .eq('value->>tenantId', tenantId)
+      .order('updated_at', { ascending: false })
+      .limit(300);
+    if (!error && Array.isArray(data)) {
+      for (const row of data) {
+        const a = row?.value as CatalogStockAlertRequest | undefined;
+        if (a && a.id && a.tenantId === tenantId) {
+          const prev = mergedMap.get(a.id);
+          if (!prev || (a.updatedAt || a.createdAt) >= (prev.updatedAt || prev.createdAt)) {
+            mergedMap.set(a.id, a);
           }
         }
       }

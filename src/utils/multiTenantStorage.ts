@@ -16,6 +16,7 @@ import {
   OnlineCatalogSettings,
   CatalogProduct,
   CatalogPickupOrder,
+  CatalogStockAlertRequest,
 } from '../types';
 import { applyRubroProfileToConfig, getRubroProfile } from './businessMode';
 import {
@@ -187,6 +188,7 @@ export interface TenantData {
   catalogSettings?: OnlineCatalogSettings;
   catalogProducts?: CatalogProduct[];
   catalogOrders?: CatalogPickupOrder[];
+  catalogStockAlerts?: CatalogStockAlertRequest[];
 }
 
 // TENANTS STORAGE
@@ -645,11 +647,13 @@ export function loadTenantData(tenantId: string): TenantData {
       },
       catalogProducts: [],
       catalogOrders: [],
+      catalogStockAlerts: [],
     };
   }
 
   if (!data.catalogProducts) data.catalogProducts = [];
   if (!data.catalogOrders) data.catalogOrders = [];
+  if (!data.catalogStockAlerts) data.catalogStockAlerts = [];
   if (!data.catalogSettings) {
     const tenants = loadTenants();
     const currentTenant = tenants.find((t) => t.id === tenantId);
@@ -959,6 +963,7 @@ export function registerSelfServiceTrialTenant(
     },
     catalogProducts: [],
     catalogOrders: [],
+    catalogStockAlerts: [],
   });
 
   saveTenants([...tenants, newTenant]);

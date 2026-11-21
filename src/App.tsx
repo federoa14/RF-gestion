@@ -48,6 +48,7 @@ import {
   OnlineCatalogSettings,
   CatalogProduct,
   CatalogPickupOrder,
+  CatalogStockAlertRequest,
   PublishedPublicCatalog,
   SaleLineItem,
 } from './types';
@@ -181,6 +182,7 @@ import { SUPABASE_SYNC_EVENT } from './utils/supabaseSync';
 import { ensureCloudHydrated } from './utils/localInternalDb';
 import {
   fetchCatalogOrdersForTenantFromSupabase,
+  fetchCatalogStockAlertsForTenantFromSupabase,
   fetchPendingReconciliationOrdersFromSupabase,
   fetchVerifiedTenantPaymentStatusFromSupabase,
   markClientPaymentOrderReconciledInSupabase,
@@ -267,6 +269,13 @@ export default function App() {
     }
     return [];
   });
+  const [catalogStockAlerts, setCatalogStockAlerts] = useState<CatalogStockAlertRequest[]>(() => {
+    const user = getCurrentSessionUser();
+    if (user && user.role !== 'superadmin' && user.tenantId) {
+      return loadTenantData(user.tenantId).catalogStockAlerts || [];
+    }
+    return [];
+  });
 
   // Helper to load complete dataset for a specific tenant
   const loadDataForTenant = (tenantId: string) => {
@@ -283,6 +292,7 @@ export default function App() {
     setCatalogSettings(data.catalogSettings || { published: true });
     setCatalogProducts(data.catalogProducts || []);
     setCatalogOrders(data.catalogOrders || []);
+    setCatalogStockAlerts(data.catalogStockAlerts || []);
   };
 
   // Sync data whenever selected tenant changes (local cache + Supabase cloud refresh)
@@ -375,6 +385,9 @@ export default function App() {
       selectedTenant
     ) {
       void handleRefreshCatalogOrders();
+      if (activeTab === 'catalogo' || activeTab === 'boletas') {
+        void handleRefreshCatalogStockAlerts();
+      }
     }
   }, [activeTab, selectedTenant?.id]);
 
@@ -920,6 +933,35 @@ export default function App() {
     }
   };
 
+  const handleSaveCatalogStockAlerts = (updated: CatalogStockAlertRequest[]) => {
+    setCatalogStockAlerts(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.catalogStockAlerts = updated;
+      saveTenantData(selectedTenant.id, cur);
+    }
+  };
+
+  const handleRefreshCatalogStockAlerts = async () => {
+    if (!selectedTenant) return;
+    const remoteAlerts = await fetchCatalogStockAlertsForTenantFromSupabase(selectedTenant.id);
+    if (remoteAlerts.length === 0) return;
+    const curTenantData = loadTenantData(selectedTenant.id);
+    const localAlerts = curTenantData.catalogStockAlerts || catalogStockAlerts;
+    const mergedMap = new Map<string, CatalogStockAlertRequest>();
+    for (const a of localAlerts) mergedMap.set(a.id, a);
+    for (const r of remoteAlerts) {
+      const existing = mergedMap.get(r.id);
+      if (!existing || ((r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt))) {
+        mergedMap.set(r.id, r);
+      }
+    }
+    const merged = Array.from(mergedMap.values()).sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
+    handleSaveCatalogStockAlerts(merged);
+  };
+
   const handleMarkWebOrderRetirado = (order: CatalogPickupOrder) => {
     const now = new Date().toISOString();
     const receiptNumber =
@@ -1023,14 +1065,52 @@ export default function App() {
     if (!selectedTenant) return;
     const remoteOrders = await fetchCatalogOrdersForTenantFromSupabase(selectedTenant.id);
     if (remoteOrders.length === 0) return;
+
+    const curTenantData = loadTenantData(selectedTenant.id);
+    const currentLocalOrders = curTenantData.catalogOrders || catalogOrders;
     const mergedMap = new Map<string, CatalogPickupOrder>();
-    for (const o of catalogOrders) mergedMap.set(o.id, o);
+    for (const o of currentLocalOrders) mergedMap.set(o.id, o);
+
+    const qtyToDeductByProductId = new Map<string, number>();
+
     for (const r of remoteOrders) {
       const existing = mergedMap.get(r.id);
-      if (!existing || ((r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt))) {
-        mergedMap.set(r.id, r);
+      if (!existing) {
+        const shouldDeduct = !r.stockDeducted && r.status !== 'cancelado';
+        if (shouldDeduct) {
+          r.items.forEach((it) => {
+            qtyToDeductByProductId.set(
+              it.productId,
+              (qtyToDeductByProductId.get(it.productId) || 0) + it.quantity
+            );
+          });
+        }
+        mergedMap.set(r.id, shouldDeduct ? { ...r, stockDeducted: true } : r);
+      } else if ((r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt)) {
+        mergedMap.set(r.id, { ...r, stockDeducted: existing.stockDeducted ?? r.stockDeducted });
       }
     }
+
+    if (qtyToDeductByProductId.size > 0) {
+      const baseProducts = curTenantData.catalogProducts || catalogProducts;
+      let productsChanged = false;
+      const nowIso = new Date().toISOString();
+      const updatedProducts = baseProducts.map((p) => {
+        if (typeof p.stockQuantity !== 'number') return p;
+        const deduct = qtyToDeductByProductId.get(p.id) || 0;
+        if (deduct <= 0) return p;
+        productsChanged = true;
+        return {
+          ...p,
+          stockQuantity: Math.max(0, Math.floor(p.stockQuantity - deduct)),
+          updatedAt: nowIso,
+        };
+      });
+      if (productsChanged) {
+        handleSaveCatalogProducts(updatedProducts);
+      }
+    }
+
     const merged = Array.from(mergedMap.values()).sort((a, b) =>
       b.createdAt.localeCompare(a.createdAt)
     );
@@ -4194,11 +4274,14 @@ export default function App() {
               settings={catalogSettings}
               products={catalogProducts}
               orders={catalogOrders}
+              stockAlerts={catalogStockAlerts}
               activeUserName={activeAdmin?.name || currentUser?.fullName || 'Administración'}
               onSaveSettings={handleSaveCatalogSettings}
               onSaveProducts={handleSaveCatalogProducts}
               onSaveOrders={handleSaveCatalogOrders}
+              onSaveStockAlerts={handleSaveCatalogStockAlerts}
               onRefreshOrders={handleRefreshCatalogOrders}
+              onRefreshStockAlerts={handleRefreshCatalogStockAlerts}
               onBillOrder={handleBillCatalogOrder}
               onOpenReceipt={(receipt) => setActiveReceiptData(receipt)}
               onOpenPublicPreview={(handle) => {
