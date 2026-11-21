@@ -30,6 +30,7 @@ interface WebSalesHistoryViewProps {
   onBackToDashboard: () => void;
   onOpenReceipt?: (receipt: ReceiptModalData) => void;
   onBillOrder?: (order: CatalogPickupOrder) => void;
+  onMarkOrderAsRetirado?: (order: CatalogPickupOrder) => void;
   showToast: (msg: string) => void;
 }
 
@@ -95,7 +96,7 @@ function resolvePaymentLabel(
 function resolveStatusLabel(status: CatalogPickupOrder['status'], isDelivery: boolean): string {
   switch (status) {
     case 'retirado':
-      return isDelivery ? 'Entregado' : 'Retirado';
+      return isDelivery ? 'Entregado (Pagado)' : 'Retirado (Pagado)';
     case 'en_camino':
       return 'En camino';
     case 'listo_para_retirar':
@@ -107,6 +108,13 @@ function resolveStatusLabel(status: CatalogPickupOrder['status'], isDelivery: bo
   }
 }
 
+function getEffectiveOrderDateKey(order: CatalogPickupOrder): string {
+  if (order.status === 'retirado') {
+    return toLocalDateKey(order.dispatchedAt || order.createdAt);
+  }
+  return toLocalDateKey(order.createdAt);
+}
+
 export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   config,
   orders,
@@ -116,6 +124,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   onBackToDashboard,
   onOpenReceipt,
   onBillOrder,
+  onMarkOrderAsRetirado,
   showToast,
 }) => {
   const todayKey = useMemo(() => getTodayDateKey(), []);
@@ -156,12 +165,12 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   const periodOrders = useMemo(() => {
     return orders
       .filter((o) => {
-        const dk = toLocalDateKey(o.createdAt);
+        const dk = getEffectiveOrderDateKey(o);
         if (rangeBounds.start && dk < rangeBounds.start) return false;
         if (rangeBounds.end && dk > rangeBounds.end) return false;
         return true;
       })
-      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      .sort((a, b) => (b.dispatchedAt || b.createdAt || '').localeCompare(a.dispatchedAt || a.createdAt || ''));
   }, [orders, rangeBounds]);
 
   // Orders matching period + status + modality + search (for table display)
@@ -202,17 +211,17 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
     const pendingOrders = activePeriodOrders.filter((o) => o.status !== 'retirado');
     const cancelledOrders = periodOrders.filter((o) => o.status === 'cancelado');
 
-    const totalRevenue = activePeriodOrders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
+    // Solo los pedidos marcados como Retirado / Entregado cuentan como dinero generado en la web
     const deliveredRevenue = deliveredOrders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
     const pendingRevenue = pendingOrders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
-    const avgTicket = activePeriodOrders.length > 0 ? totalRevenue / activePeriodOrders.length : 0;
+    const avgTicket = deliveredOrders.length > 0 ? deliveredRevenue / deliveredOrders.length : 0;
 
     let totalUnits = 0;
     let deliveryCount = 0;
     let pickupCount = 0;
     const dayMap = new Map<
       string,
-      { dateKey: string; count: number; total: number; deliveredTotal: number }
+      { dateKey: string; count: number; pendingCount: number; total: number }
     >();
     const productMap = new Map<
       string,
@@ -220,26 +229,28 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
     >();
 
     for (const o of activePeriodOrders) {
-      if (o.deliveryMethod === 'envio') deliveryCount++;
-      else pickupCount++;
+      const dk = getEffectiveOrderDateKey(o);
+      const prevDay = dayMap.get(dk) || { dateKey: dk, count: 0, pendingCount: 0, total: 0 };
 
-      const dk = toLocalDateKey(o.createdAt);
-      const prevDay = dayMap.get(dk) || { dateKey: dk, count: 0, total: 0, deliveredTotal: 0 };
-      prevDay.count += 1;
-      prevDay.total += Number(o.totalAmount) || 0;
       if (o.status === 'retirado') {
-        prevDay.deliveredTotal += Number(o.totalAmount) || 0;
-      }
-      dayMap.set(dk, prevDay);
+        prevDay.count += 1;
+        prevDay.total += Number(o.totalAmount) || 0;
+        if (o.deliveryMethod === 'envio') deliveryCount++;
+        else pickupCount++;
 
-      for (const it of o.items || []) {
-        totalUnits += Number(it.quantity) || 0;
-        const pKey = it.productName.trim().toLowerCase();
-        const prevProd = productMap.get(pKey) || { name: it.productName, quantity: 0, revenue: 0 };
-        prevProd.quantity += Number(it.quantity) || 0;
-        prevProd.revenue += Number(it.subtotal) || 0;
-        productMap.set(pKey, prevProd);
+        for (const it of o.items || []) {
+          totalUnits += Number(it.quantity) || 0;
+          const pKey = it.productName.trim().toLowerCase();
+          const prevProd = productMap.get(pKey) || { name: it.productName, quantity: 0, revenue: 0 };
+          prevProd.quantity += Number(it.quantity) || 0;
+          prevProd.revenue += Number(it.subtotal) || 0;
+          productMap.set(pKey, prevProd);
+        }
+      } else {
+        prevDay.pendingCount += 1;
       }
+
+      dayMap.set(dk, prevDay);
     }
 
     const dailyBreakdown = Array.from(dayMap.values()).sort((a, b) =>
@@ -250,8 +261,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
       .slice(0, 6);
 
     return {
-      totalRevenue,
-      deliveredRevenue,
+      totalRevenue: deliveredRevenue,
       pendingRevenue,
       avgTicket,
       activeCount: activePeriodOrders.length,
@@ -349,9 +359,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
     const paymentMethodLabel = resolvePaymentLabel(paymentKey, isDelivery);
     const receiptNumber =
       order.dispatchReceiptNumber || `DESP-${order.orderNumber.replace(/^PED-/, '')}`;
-    const isPaidOnDispatch =
-      order.status === 'retirado' &&
-      (paymentKey === 'efectivo' || paymentKey === 'transferencia' || paymentKey === 'link_pago');
+    const isPaidOnDispatch = order.status === 'retirado' && paymentKey !== 'fiado';
 
     const lineItems: SaleLineItem[] = order.items.map((it, idx) => ({
       id: `wh-it-${order.id}-${idx}`,
@@ -569,37 +577,37 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 rounded-xl p-4 flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-[#94A3B8]">
-            <span>Dinero Generado (Web)</span>
-            <TrendingUp className="w-4 h-4 text-[#0B1933] dark:text-emerald-400" />
-          </div>
-          <div className="mt-2">
-            <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#0B1933] dark:text-white">
-              {formatCurrency(metrics.totalRevenue, currency)}
-            </div>
-            <div className="text-[11px] text-slate-500 dark:text-[#8D9CB0] mt-0.5 tabular-nums">
-              Ticket promedio: {formatCurrency(metrics.avgTicket, currency)}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 rounded-xl p-4 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-[#94A3B8]">
-            <span>Entregado / Finalizado</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Dinero Generado (Pagado)</span>
+            <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           </div>
           <div className="mt-2">
             <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
-              {formatCurrency(metrics.deliveredRevenue, currency)}
+              {formatCurrency(metrics.totalRevenue, currency)}
             </div>
             <div className="text-[11px] text-slate-500 dark:text-[#8D9CB0] mt-0.5 tabular-nums">
-              {metrics.deliveredCount} pedido(s) completados
+              {metrics.deliveredCount} retirados · Promedio: {formatCurrency(metrics.avgTicket, currency)}
             </div>
           </div>
         </div>
 
         <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 rounded-xl p-4 flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-[#94A3B8]">
-            <span>En Curso / A Despachar</span>
+            <span>Pedidos Retirados / Pagos</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          </div>
+          <div className="mt-2">
+            <div className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#0B1933] dark:text-white">
+              {metrics.deliveredCount}
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-[#8D9CB0] mt-0.5 tabular-nums">
+              {metrics.totalUnits} u. · {metrics.pickupCount} retiros / {metrics.deliveryCount} envíos
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 rounded-xl p-4 flex flex-col justify-between">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-[#94A3B8]">
+            <span>Por Retirar / A Cobrar</span>
             <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
           </div>
           <div className="mt-2">
@@ -607,14 +615,14 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
               {formatCurrency(metrics.pendingRevenue, currency)}
             </div>
             <div className="text-[11px] text-slate-500 dark:text-[#8D9CB0] mt-0.5 tabular-nums">
-              {metrics.pendingCount} pedido(s) activos
+              {metrics.pendingCount} pendiente(s) — suman al marcar Retirado
             </div>
           </div>
         </div>
 
         <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 rounded-xl p-4 flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-[#94A3B8]">
-            <span>Volumen de Pedidos</span>
+            <span>Total Carritos Recibidos</span>
             <ShoppingBag className="w-4 h-4 text-[#0B1933] dark:text-[#CBD5E1]" />
           </div>
           <div className="mt-2">
@@ -622,7 +630,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
               {metrics.activeCount}
             </div>
             <div className="text-[11px] text-slate-500 dark:text-[#8D9CB0] mt-0.5 tabular-nums">
-              {metrics.totalUnits} u. · {metrics.pickupCount} retiros / {metrics.deliveryCount} envíos
+              {metrics.deliveredCount} pagados · {metrics.pendingCount} en proceso
             </div>
           </div>
         </div>
@@ -658,10 +666,11 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                       {day.dateKey === todayKey ? ' (Hoy)' : ''}
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-[#94A3B8] tabular-nums">
-                      {day.count} pedido(s) · Entregado: {formatCurrency(day.deliveredTotal, currency)}
+                      {day.count} cobrado(s)
+                      {day.pendingCount > 0 ? ` · ${day.pendingCount} pendiente(s)` : ''}
                     </div>
                   </div>
-                  <div className="text-xs font-bold font-mono tabular-nums text-[#0B1933] dark:text-emerald-400">
+                  <div className="text-xs font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
                     {formatCurrency(day.total, currency)}
                   </div>
                 </button>
@@ -854,6 +863,19 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
 
                       <td className="py-3 px-4 align-top text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
+                          {onMarkOrderAsRetirado &&
+                            order.status !== 'retirado' &&
+                            order.status !== 'cancelado' && (
+                              <button
+                                type="button"
+                                onClick={() => onMarkOrderAsRetirado(order)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                                title="Marcar como Retirado / Pagado y sumar al dinero generado en la web"
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                <span>{isDelivery ? 'Entregado (Pagado)' : 'Retirado (Pagado)'}</span>
+                              </button>
+                            )}
                           {onBillOrder && !order.linkedBoletaNumber && order.status !== 'cancelado' && (
                             <button
                               type="button"

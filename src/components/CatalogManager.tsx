@@ -499,9 +499,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       paymentMode: paymentKey === 'fiado' ? 'un_pago_fiado' : 'contado_hoy',
     }));
 
-    const isPaidOnDispatch =
-      order.status === 'retirado' &&
-      (paymentKey === 'efectivo' || paymentKey === 'transferencia' || paymentKey === 'link_pago');
+    const isPaidOnDispatch = order.status === 'retirado' && paymentKey !== 'fiado';
 
     const addressForReceipt = isDelivery
       ? order.deliveryAddress || 'Dirección de envío a confirmar'
@@ -592,13 +590,43 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     }
   };
 
+  const handleMarkOrderPaidPickedUp = (order: CatalogPickupOrder) => {
+    const now = new Date().toISOString();
+    const receiptNumber =
+      order.dispatchReceiptNumber || `DESP-${order.orderNumber.replace(/^PED-/, '')}`;
+    const resolvedPayment: NonNullable<CatalogPickupOrder['confirmedPaymentMethod']> =
+      order.confirmedPaymentMethod ||
+      (order.preferredPaymentMethod && order.preferredPaymentMethod !== 'acordar'
+        ? order.preferredPaymentMethod
+        : 'efectivo');
+
+    const enrichedOrder: CatalogPickupOrder = {
+      ...order,
+      status: 'retirado',
+      dispatchReceiptNumber: receiptNumber,
+      dispatchedAt: order.dispatchedAt || now,
+      confirmedPaymentMethod: resolvedPayment,
+      updatedAt: now,
+    };
+
+    onSaveOrders(orders.map((o) => (o.id === order.id ? enrichedOrder : o)));
+    showToast(
+      `Pedido #${order.orderNumber} marcado como Retirado y Pagado. Ya suma al dinero generado en la web.`
+    );
+  };
+
   const handleUpdateOrderStatus = (
     orderId: string,
     status: CatalogPickupOrder['status']
   ) => {
     const target = orders.find((o) => o.id === orderId);
+    if (target && status === 'retirado') {
+      handleMarkOrderPaidPickedUp(target);
+      return;
+    }
+
     const isDispatchStatus =
-      status === 'listo_para_retirar' || status === 'en_camino' || status === 'retirado';
+      status === 'listo_para_retirar' || status === 'en_camino';
 
     if (target && isDispatchStatus) {
       handleDispatchAndOpenReceipt(target, status);
@@ -1203,7 +1231,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             : order.status === 'en_camino'
                             ? 'En camino (Envío)'
                             : order.status === 'retirado'
-                            ? 'Entregado / Retirado'
+                            ? 'Retirado / Pagado'
                             : 'Cancelado'}
                         </span>
                         {order.linkedBoletaNumber && (
@@ -1268,6 +1296,18 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         {formatCurrency(order.totalAmount, order.currencySymbol || currency)}
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
+                        {order.status !== 'retirado' && order.status !== 'cancelado' && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkOrderPaidPickedUp(order)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
+                            title="Confirmar como retirado/entregado y pagado para sumarlo al dinero generado en la web"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>{isDelivery ? 'Entregado (Pagado)' : 'Marcar Retirado (Pagado)'}</span>
+                          </button>
+                        )}
+
                         <select
                           aria-label="Forma de pago del pedido"
                           value={activePaymentKey}
@@ -1306,7 +1346,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             {isDelivery ? 'Listo para despachar' : 'Listo para retirar'}
                           </option>
                           <option value="en_camino">En camino (Envío)</option>
-                          <option value="retirado">Entregado / Retirado</option>
+                          <option value="retirado">Retirado / Entregado (Pagado)</option>
                           <option value="cancelado">Cancelado</option>
                         </select>
 

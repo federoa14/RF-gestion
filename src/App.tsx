@@ -917,6 +917,31 @@ export default function App() {
     }
   };
 
+  const handleMarkWebOrderRetirado = (order: CatalogPickupOrder) => {
+    const now = new Date().toISOString();
+    const receiptNumber =
+      order.dispatchReceiptNumber || `DESP-${order.orderNumber.replace(/^PED-/, '')}`;
+    const resolvedPayment: NonNullable<CatalogPickupOrder['confirmedPaymentMethod']> =
+      order.confirmedPaymentMethod ||
+      (order.preferredPaymentMethod && order.preferredPaymentMethod !== 'acordar'
+        ? order.preferredPaymentMethod
+        : 'efectivo');
+
+    const enriched: CatalogPickupOrder = {
+      ...order,
+      status: 'retirado',
+      dispatchReceiptNumber: receiptNumber,
+      dispatchedAt: order.dispatchedAt || now,
+      confirmedPaymentMethod: resolvedPayment,
+      updatedAt: now,
+    };
+
+    handleSaveCatalogOrders(catalogOrders.map((o) => (o.id === order.id ? enriched : o)));
+    showToast(
+      `Pedido #${order.orderNumber} marcado como Retirado / Pagado. Sumado al dinero generado en la web.`
+    );
+  };
+
   const handleRefreshCatalogOrders = async () => {
     if (!selectedTenant) return;
     const remoteOrders = await fetchCatalogOrdersForTenantFromSupabase(selectedTenant.id);
@@ -2382,13 +2407,16 @@ export default function App() {
     return acc + Math.max(0, (b.amount || 0) - creditNotesSum);
   }, 0);
 
-  const validWebOrders = catalogOrders.filter((o) => o.status !== 'cancelado');
-  const totalWebSalesRevenue = validWebOrders.reduce(
+  const paidWebOrders = catalogOrders.filter((o) => o.status === 'retirado');
+  const pendingWebOrdersCount = catalogOrders.filter(
+    (o) => o.status !== 'retirado' && o.status !== 'cancelado'
+  ).length;
+  const totalWebSalesRevenue = paidWebOrders.reduce(
     (acc, o) => acc + (Number(o.totalAmount) || 0),
     0
   );
-  const todayWebSalesRevenue = validWebOrders
-    .filter((o) => (o.createdAt || '').slice(0, 10) === currentDateRef)
+  const todayWebSalesRevenue = paidWebOrders
+    .filter((o) => (o.dispatchedAt || o.createdAt || '').slice(0, 10) === currentDateRef)
     .reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
 
   const urgent10dDebt = pendingBoletas.reduce((acc, b) => {
@@ -2917,7 +2945,7 @@ export default function App() {
         isPaidCurrentMonth={tenantSubscriptionStatus?.isPaidForCurrentMonth}
         currentDateRef={currentDateRef}
         catalogEnabled={selectedTenant?.catalogEnabled !== false}
-        webOrdersCount={validWebOrders.length}
+        webOrdersCount={paidWebOrders.length}
       />
 
       {/* Right Main Column */}
@@ -3312,7 +3340,9 @@ export default function App() {
                       </span>
                       <div className="flex items-center justify-between gap-1 mt-0.5">
                         <span className="text-[11px] text-slate-500 dark:text-[#8D9CB0] font-medium tabular-nums truncate">
-                          {validWebOrders.length} ped. · Hoy: {formatCurrency(todayWebSalesRevenue, config.currencySymbol)}
+                          {paidWebOrders.length} retirado(s)
+                          {pendingWebOrdersCount > 0 ? ` · ${pendingWebOrdersCount} pend.` : ''} · Hoy:{' '}
+                          {formatCurrency(todayWebSalesRevenue, config.currencySymbol)}
                         </span>
                         <span className="text-[11px] font-bold text-[#0B1933] dark:text-sky-300 underline shrink-0">
                           Historial →
@@ -4009,6 +4039,7 @@ export default function App() {
               onBackToDashboard={() => setActiveTab('boletas')}
               onOpenReceipt={(receipt) => setActiveReceiptData(receipt)}
               onBillOrder={handleBillCatalogOrder}
+              onMarkOrderAsRetirado={handleMarkWebOrderRetirado}
               showToast={showToast}
             />
           </Suspense>
