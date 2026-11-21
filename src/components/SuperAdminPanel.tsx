@@ -88,7 +88,11 @@ import {
   calculateAnnualFee,
   formatMonthKeyEs,
 } from '../utils/tenantSubscription';
-import { fetchVerifiedTenantPaymentsMapFromSupabase } from '../utils/supabaseServices';
+import {
+  buildPublicCatalogHandle,
+  fetchVerifiedTenantPaymentsMapFromSupabase,
+  setPublicCatalogSuperAdminEnabledInSupabase,
+} from '../utils/supabaseServices';
 
 interface SuperAdminPanelProps {
   currentUser: PlatformUser;
@@ -554,6 +558,23 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     saveTenants(updated);
     showToast(
       `Empresa ${tenant.name} ahora está ${!isCurrentlyPaused ? 'EN PAUSA (Acceso restringido)' : 'REANUDADA (Servicio activo)'}.`
+    );
+  };
+
+  // Habilitar / Pausar Servicio de Catálogo Online por empresa (habilitado para todos por defecto)
+  const handleToggleTenantCatalog = (tenant: Tenant) => {
+    const currentlyEnabled = tenant.catalogEnabled !== false;
+    const nextEnabled = !currentlyEnabled;
+    const updated = tenants.map((t) =>
+      t.id === tenant.id ? { ...t, catalogEnabled: nextEnabled } : t
+    );
+    setTenants(updated);
+    saveTenants(updated);
+    void setPublicCatalogSuperAdminEnabledInSupabase(tenant, nextEnabled);
+    showToast(
+      `Catálogo Online de "${tenant.name}" ${
+        nextEnabled ? 'HABILITADO para publicar y recibir pedidos.' : 'PAUSADO desde SuperGestión.'
+      }`
     );
   };
 
@@ -1791,6 +1812,41 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                               <span>Cobrar WA</span>
                             </button>
                           </div>
+
+                          <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleTenantCatalog(tenant)}
+                              className={`flex-1 py-1.5 px-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                                tenant.catalogEnabled !== false
+                                  ? 'bg-sky-600/20 hover:bg-sky-600/30 text-sky-200 border border-sky-400/30'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700'
+                              }`}
+                              title="Habilitar o pausar el módulo de Catálogo Online para esta empresa"
+                            >
+                              <Store className="w-3 h-3" />
+                              <span>
+                                Catálogo Online: {tenant.catalogEnabled !== false ? 'Habilitado' : 'Pausado'}
+                              </span>
+                            </button>
+
+                            {tenant.catalogEnabled !== false && (
+                              <a
+                                href={`/?catalog=${encodeURIComponent(
+                                  buildPublicCatalogHandle({
+                                    tenantCode: tenant.tenantCode,
+                                    tenantId: tenant.id,
+                                  })
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Abrir catálogo público de la empresa"
+                                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
                         </div>
                       );
                     })()}
@@ -2455,6 +2511,24 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                   title={evalStatus.isPaused ? 'Reanudar acceso a la cuenta' : 'Pausar acceso a la empresa'}
                                 >
                                   {evalStatus.isPaused ? <Play className="w-3.5 h-3.5 text-emerald-400" /> : <Pause className="w-3.5 h-3.5" />}
+                                </button>
+
+                                {/* HABILITAR / PAUSAR CATÁLOGO ONLINE */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleTenantCatalog(tenant)}
+                                  className={`p-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all inline-flex items-center gap-1 ${
+                                    tenant.catalogEnabled !== false
+                                      ? 'bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/30'
+                                      : 'bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700'
+                                  }`}
+                                  title={
+                                    tenant.catalogEnabled !== false
+                                      ? 'Catálogo Online habilitado (clic para pausar)'
+                                      : 'Catálogo Online pausado (clic para habilitar)'
+                                  }
+                                >
+                                  <Store className="w-3.5 h-3.5" />
                                 </button>
 
                                 {/* COBRAR POR WHATSAPP */}

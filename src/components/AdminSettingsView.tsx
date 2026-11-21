@@ -39,6 +39,7 @@ import { RUBRO_PROFILES, getRubroProfile, applyRubroProfileToConfig } from '../u
 import {
   getInternalDatabaseStatus,
   downloadInternalDatabaseBackup,
+  downloadTenantCsvBackup,
   importInternalDatabaseBackup,
   InternalDbStatus,
 } from '../utils/localInternalDb';
@@ -1232,6 +1233,24 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const csvInfo = downloadTenantCsvBackup(
+                  currentConfig.tenantId,
+                  currentConfig.distributorName || 'Cobranzas'
+                );
+                setBackupFeedback({
+                  type: 'ok',
+                  text: `Planilla CSV descargada (${csvInfo.filename} · ${csvInfo.rowCount} boletas).`,
+                });
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Exportar Excel (.csv)</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {

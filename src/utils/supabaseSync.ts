@@ -41,6 +41,8 @@ const CLOUD_SYNCED_PREFIXES = [
   'saas_verified_tenant_payments_v1',
   'merchant_mp_token_',
   'client_payment_order_',
+  'public_catalog_',
+  'catalog_order_',
   'rec:',
 ];
 
@@ -150,6 +152,8 @@ const TENANT_ARRAY_COLLECTIONS = [
   'broadcasts',
   'autoLogs',
   'rendiciones',
+  'catalogProducts',
+  'catalogOrders',
 ] as const;
 
 function getEntityPrefixForAggregateKey(
@@ -193,6 +197,9 @@ function extractEntityMap(aggregateKey: string, parsedVal: unknown): Map<string,
   if (meta.isTenantData && isPlainObject(parsedVal)) {
     if (isPlainObject(parsedVal.config)) {
       map.set(buildEntityKey(meta.scope, 'config', 'main'), parsedVal.config);
+    }
+    if (isPlainObject(parsedVal.catalogSettings)) {
+      map.set(buildEntityKey(meta.scope, 'catalogSettings', 'main'), parsedVal.catalogSettings);
     }
     for (const col of TENANT_ARRAY_COLLECTIONS) {
       const arr = parsedVal[col];
@@ -362,6 +369,11 @@ function mergeKeyValueNonDestructive(params: {
     const baseObj = isPlainObject(baselineVal) ? baselineVal : {};
     const merged: Record<string, any> = {
       config: mergeConfigNonDestructive(remoteVal.config, localVal.config, baseObj.config),
+      catalogSettings: mergeConfigNonDestructive(
+        remoteVal.catalogSettings,
+        localVal.catalogSettings,
+        baseObj.catalogSettings
+      ),
     };
 
     for (const col of TENANT_ARRAY_COLLECTIONS) {
@@ -496,6 +508,16 @@ async function insertOrUpdateSingleRow(
   return true;
 }
 
+async function runInChunks<T>(
+  items: T[],
+  chunkSize: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  for (let i = 0; i < items.length; i += chunkSize) {
+    await Promise.all(items.slice(i, i + chunkSize).map(worker));
+  }
+}
+
 async function applyIndividualEntityOps(
   aggregateKey: string,
   localParsed: unknown,
@@ -511,6 +533,8 @@ async function applyIndividualEntityOps(
   const nextEntities = extractEntityMap(aggregateKey, localParsed);
   const prevEntities = extractEntityMap(aggregateKey, baselineParsed);
 
+  const pendingOps: Array<{ entityKey: string; nextVal: unknown; nextStr: string; isNew: boolean }> = [];
+
   // 1. Detectar nuevas inserciones y actualizaciones individuales
   for (const [entityKey, nextVal] of nextEntities.entries()) {
     explicitDeletedEntityKeys.delete(entityKey);
@@ -518,25 +542,120 @@ async function applyIndividualEntityOps(
     const prevStr = syncedEntityCache.get(entityKey);
 
     if (prevStr === undefined && !prevEntities.has(entityKey)) {
-      const ok = await insertOrUpdateSingleRow(entityKey, nextVal, true);
-      if (ok) syncedEntityCache.set(entityKey, nextStr);
+      pendingOps.push({ entityKey, nextVal, nextStr, isNew: true });
     } else if (prevStr !== nextStr) {
-      const ok = await insertOrUpdateSingleRow(entityKey, nextVal, false);
-      if (ok) syncedEntityCache.set(entityKey, nextStr);
+      pendingOps.push({ entityKey, nextVal, nextStr, isNew: false });
     }
   }
 
+  await runInChunks(pendingOps, 16, async (op) => {
+    const ok = await insertOrUpdateSingleRow(op.entityKey, op.nextVal, op.isNew);
+    if (ok) syncedEntityCache.set(op.entityKey, op.nextStr);
+  });
+
   // 2. Solo eliminar individualmente registros que estaban en el baseline local y el usuario quitó explícitamente
+  const deleteKeys: string[] = [];
   for (const [prevKey] of prevEntities.entries()) {
     if (!nextEntities.has(prevKey)) {
       locallyDeletedKeys.add(prevKey);
       explicitDeletedEntityKeys.add(prevKey);
       syncedEntityCache.delete(prevKey);
-      await supabase.from(CLOUD_TABLE).delete().eq('key', prevKey);
+      deleteKeys.push(prevKey);
     }
   }
 
+  await runInChunks(deleteKeys, 16, async (prevKey) => {
+    await supabase.from(CLOUD_TABLE).delete().eq('key', prevKey);
+  });
+
   return locallyDeletedKeys;
+}
+
+async function executeUpsertEntry(key: string, rawVal: string, now: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  try {
+    const baselineRaw = syncedBaselineValues.get(key);
+    if (baselineRaw === rawVal) {
+      return;
+    }
+
+    const localParsed = parseJsonSafely(rawVal);
+    const baselineParsed = baselineRaw ? parseJsonSafely(baselineRaw) : undefined;
+
+    // Ejecutar en paralelo:
+    // 1. INSERT/UPDATE/DELETE individual por entidad modificada (filas `rec:...`)
+    // 2. Lectura del agregado remoto actual para merge no destructivo (fila `key`)
+    const [locallyDeletedEntityKeys, remoteRes] = await Promise.all([
+      applyIndividualEntityOps(key, localParsed, baselineParsed),
+      supabase.from(CLOUD_TABLE).select('key, value').eq('key', key).maybeSingle(),
+    ]);
+
+    const { data: existingRemote, error: selectErr } = remoteRes;
+    if (selectErr) {
+      handleSupabaseError(selectErr);
+      return;
+    }
+
+    let finalValueToSave: unknown = localParsed;
+    if (existingRemote && existingRemote.value !== undefined) {
+      finalValueToSave = mergeKeyValueNonDestructive({
+        key,
+        remoteVal: existingRemote.value,
+        localVal: localParsed,
+        baselineVal: baselineParsed,
+        locallyDeletedEntityKeys,
+      });
+
+      const { error: updErr } = await supabase
+        .from(CLOUD_TABLE)
+        .update({ value: finalValueToSave, updated_at: now })
+        .eq('key', key);
+
+      if (updErr) {
+        handleSupabaseError(updErr);
+        console.warn('[Supabase] Error al actualizar registro:', updErr.message);
+        return;
+      }
+    } else {
+      const { error: insErr } = await supabase.from(CLOUD_TABLE).insert({
+        key,
+        value: finalValueToSave,
+        updated_at: now,
+      });
+      if (insErr) {
+        if (insErr.code === '23505') {
+          await supabase
+            .from(CLOUD_TABLE)
+            .update({ value: finalValueToSave, updated_at: now })
+            .eq('key', key);
+        } else {
+          handleSupabaseError(insErr);
+          console.warn('[Supabase] Error al insertar registro:', insErr.message);
+          return;
+        }
+      }
+    }
+
+    const finalSerialized = serializeValueSafely(finalValueToSave);
+    recordBaseline(key, finalSerialized);
+
+    // Si el merge incorporó registros remotos nuevos que no estaban en memoria local, actualizar UI inmediatamente
+    if (finalSerialized !== rawVal && externalApplyCallback) {
+      markRecentlyAppliedRemote(key);
+      externalApplyCallback(key, finalSerialized);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(SUPABASE_SYNC_EVENT, { detail: { keys: [key] } }));
+      }
+    }
+
+    syncInfo.status = 'connected';
+    syncInfo.lastSyncedAt = now;
+    syncInfo.lastError = null;
+  } catch (err) {
+    handleSupabaseError({ message: err instanceof Error ? err.message : 'Network error' });
+  }
 }
 
 async function executeUpsertBatch(entries: Array<[string, string]>): Promise<void> {
@@ -544,91 +663,7 @@ async function executeUpsertBatch(entries: Array<[string, string]>): Promise<voi
   if (!supabase || entries.length === 0) return;
 
   const now = new Date().toISOString();
-
-  for (const [key, rawVal] of entries) {
-    try {
-      const localParsed = parseJsonSafely(rawVal);
-      const baselineRaw = syncedBaselineValues.get(key);
-      const baselineParsed = baselineRaw ? parseJsonSafely(baselineRaw) : undefined;
-
-      // 1. Ejecutar INSERT o UPDATE individual por cada entidad modificada o agregada
-      const locallyDeletedEntityKeys = await applyIndividualEntityOps(
-        key,
-        localParsed,
-        baselineParsed
-      );
-
-      // 2. Leer SIEMPRE el estado remoto actual antes de guardar el agregado para no sobrescribir datos de otros dispositivos
-      const { data: existingRemote, error: selectErr } = await supabase
-        .from(CLOUD_TABLE)
-        .select('key, value')
-        .eq('key', key)
-        .maybeSingle();
-
-      if (selectErr) {
-        handleSupabaseError(selectErr);
-        continue;
-      }
-
-      let finalValueToSave: unknown = localParsed;
-      if (existingRemote && existingRemote.value !== undefined) {
-        finalValueToSave = mergeKeyValueNonDestructive({
-          key,
-          remoteVal: existingRemote.value,
-          localVal: localParsed,
-          baselineVal: baselineParsed,
-          locallyDeletedEntityKeys,
-        });
-
-        const { error: updErr } = await supabase
-          .from(CLOUD_TABLE)
-          .update({ value: finalValueToSave, updated_at: now })
-          .eq('key', key);
-
-        if (updErr) {
-          handleSupabaseError(updErr);
-          console.warn('[Supabase] Error al actualizar registro:', updErr.message);
-          continue;
-        }
-      } else {
-        const { error: insErr } = await supabase.from(CLOUD_TABLE).insert({
-          key,
-          value: finalValueToSave,
-          updated_at: now,
-        });
-        if (insErr) {
-          if (insErr.code === '23505') {
-            await supabase
-              .from(CLOUD_TABLE)
-              .update({ value: finalValueToSave, updated_at: now })
-              .eq('key', key);
-          } else {
-            handleSupabaseError(insErr);
-            console.warn('[Supabase] Error al insertar registro:', insErr.message);
-            continue;
-          }
-        }
-      }
-
-      const finalSerialized = serializeValueSafely(finalValueToSave);
-      recordBaseline(key, finalSerialized);
-
-      // Si el merge incorporó registros remotos nuevos que no estaban en memoria local, actualizar UI inmediatamente
-      if (finalSerialized !== rawVal && externalApplyCallback) {
-        markRecentlyAppliedRemote(key);
-        externalApplyCallback(key, finalSerialized);
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent(SUPABASE_SYNC_EVENT, { detail: { keys: [key] } }));
-        }
-      }
-
-      syncInfo.status = 'connected';
-      syncInfo.lastSyncedAt = now;
-      syncInfo.lastError = null;
-    } catch (err) {
-      handleSupabaseError({ message: err instanceof Error ? err.message : 'Network error' });
-    }
-  }
+  await Promise.all(entries.map(([key, rawVal]) => executeUpsertEntry(key, rawVal, now)));
 }
 
 export function queueSupabaseUpsert(key: string, rawValue: string): void {
@@ -764,6 +799,11 @@ function integrateGranularRowsIntoRemoteMap(
       const recVal = rec.value;
       if (rec.collection === 'config' && isPlainObject(recVal)) {
         obj.config = { ...(isPlainObject(obj.config) ? obj.config : {}), ...recVal };
+      } else if (rec.collection === 'catalogSettings' && isPlainObject(recVal)) {
+        obj.catalogSettings = {
+          ...(isPlainObject(obj.catalogSettings) ? obj.catalogSettings : {}),
+          ...recVal,
+        };
       } else if (
         TENANT_ARRAY_COLLECTIONS.includes(rec.collection as any) &&
         isPlainObject(recVal) &&
@@ -785,6 +825,112 @@ function integrateGranularRowsIntoRemoteMap(
   return aggregateMap;
 }
 
+function collectHydrationTargetScopes(localEntries: Map<string, string>): string[] {
+  const scopes = new Set<string>();
+
+  const activeTenantId = localEntries.get('saas_distribuidoras_active_tenant_id_v2_zero');
+  if (activeTenantId && activeTenantId.trim()) {
+    scopes.add(activeTenantId.trim());
+  }
+
+  const sessionRaw = localEntries.get('saas_distribuidoras_session_user_v2_zero');
+  if (sessionRaw) {
+    try {
+      const parsed = JSON.parse(sessionRaw);
+      if (parsed && typeof parsed.tenantId === 'string' && parsed.tenantId && parsed.tenantId !== 'all') {
+        scopes.add(parsed.tenantId);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  localEntries.forEach((_, key) => {
+    if (key.startsWith(TENANT_DATA_PREFIX)) {
+      const tId = key.slice(TENANT_DATA_PREFIX.length);
+      if (tId) scopes.add(tId);
+    }
+  });
+
+  return Array.from(scopes).slice(0, 10);
+}
+
+type CloudKeyValueRow = { key: string; value: unknown };
+
+async function fetchExactCloudKeys(
+  exactKeys: string[]
+): Promise<{ rows: CloudKeyValueRow[]; error: { code?: string; message?: string } | null }> {
+  const supabase = getSupabaseClient();
+  const cleanKeys = Array.from(new Set(exactKeys.filter(Boolean)));
+  if (!supabase || cleanKeys.length === 0) return { rows: [], error: null };
+
+  const collected: CloudKeyValueRow[] = [];
+  const chunkSize = 100;
+  for (let i = 0; i < cleanKeys.length; i += chunkSize) {
+    const chunk = cleanKeys.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from(CLOUD_TABLE)
+      .select('key, value')
+      .in('key', chunk);
+
+    if (error) {
+      return { rows: collected, error };
+    }
+    if (Array.isArray(data)) {
+      collected.push(...(data as CloudKeyValueRow[]));
+    }
+  }
+  return { rows: collected, error: null };
+}
+
+async function fetchPrefixCloudRows(
+  likePattern: string,
+  pageSize = 1000,
+  maxPages = 5
+): Promise<{ rows: CloudKeyValueRow[]; error: { code?: string; message?: string } | null }> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !likePattern) return { rows: [], error: null };
+
+  const collected: CloudKeyValueRow[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from(CLOUD_TABLE)
+      .select('key, value')
+      .like('key', likePattern)
+      .range(from, to);
+
+    if (error) {
+      return { rows: collected, error };
+    }
+    const batch = (data || []) as CloudKeyValueRow[];
+    collected.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return { rows: collected, error: null };
+}
+
+async function fetchParallelExactAndPrefixes(
+  exactKeys: string[],
+  likePatterns: string[],
+  pageSize = 1000,
+  maxPages = 5
+): Promise<{ rows: CloudKeyValueRow[]; error: { code?: string; message?: string } | null }> {
+  const uniquePatterns = Array.from(new Set(likePatterns.filter(Boolean)));
+  const results = await Promise.all([
+    fetchExactCloudKeys(exactKeys),
+    ...uniquePatterns.map((pattern) => fetchPrefixCloudRows(pattern, pageSize, maxPages)),
+  ]);
+
+  const firstErr = results.find((r) => r.error)?.error || null;
+  const rows: CloudKeyValueRow[] = [];
+  for (const r of results) {
+    if (r.rows.length > 0) rows.push(...r.rows);
+  }
+  return { rows, error: firstErr };
+}
+
 export async function hydrateFromSupabase(
   localEntries: Map<string, string>,
   applyRemoteEntry: (key: string, value: string) => void
@@ -799,10 +945,24 @@ export async function hydrateFromSupabase(
   }
 
   try {
-    const { data, error } = await supabase
-      .from(CLOUD_TABLE)
-      .select('key, value, updated_at')
-      .not('key', 'like', 'client_payment_order_%');
+    const catalogKeys = [
+      TENANTS_KEY,
+      USERS_KEY,
+      BILLING_KEY,
+      SUPPORT_KEY,
+      ANNOUNCEMENTS_KEY,
+      VERIFIED_PAYMENTS_KEY,
+    ];
+    const targetScopes = collectHydrationTargetScopes(localEntries);
+    const tenantAggregateKeys = targetScopes.map((s) => `${TENANT_DATA_PREFIX}${s}`);
+    const exactKeys = [...catalogKeys, ...tenantAggregateKeys];
+    const prefixPatterns = [
+      'rec:platform:%',
+      'merchant_mp_token_%',
+      ...targetScopes.map((scope) => `rec:${scope}:%`),
+    ];
+
+    const { rows, error } = await fetchParallelExactAndPrefixes(exactKeys, prefixPatterns, 1000, 5);
 
     if (error) {
       handleSupabaseError(error);
@@ -816,9 +976,7 @@ export async function hydrateFromSupabase(
     syncInfo.lastError = null;
 
     const localSnapshot = new Map(localEntries);
-    const remoteAggregateMap = integrateGranularRowsIntoRemoteMap(
-      (data || []) as Array<{ key: string; value: unknown }>
-    );
+    const remoteAggregateMap = integrateGranularRowsIntoRemoteMap(rows);
 
     const toPushUnmergedLocal: Array<[string, string]> = [];
 
@@ -873,7 +1031,8 @@ export async function hydrateFromSupabase(
     cloudHydratedFlag = true;
 
     if (toPushUnmergedLocal.length > 0) {
-      await executeUpsertBatch(toPushUnmergedLocal);
+      // Subir diferencias locales en segundo plano sin bloquear el montaje de la UI
+      void executeUpsertBatch(toPushUnmergedLocal);
     }
   } catch (err) {
     cloudHydratedFlag = true;
@@ -893,21 +1052,18 @@ export async function refreshKeysFromSupabase(
 
   const updatedKeys: string[] = [];
   try {
-    // Consultar también filas granulares `rec:<scope>:%` correspondientes a las claves pedidas
-    const orFilters: string[] = [`key.in.(${keys.map((k) => `"${k}"`).join(',')})`];
+    // Consultar clave exacta por PK + prefijos granulares `rec:<scope>:%` en paralelo (usando índice text_pattern_ops)
+    const prefixPatterns: string[] = [];
     for (const k of keys) {
       const meta = getEntityPrefixForAggregateKey(k);
       if (meta?.isTenantData) {
-        orFilters.push(`key.like.rec:${meta.scope}:%`);
+        prefixPatterns.push(`rec:${meta.scope}:%`);
       } else if (meta && !meta.isTenantData && meta.collection) {
-        orFilters.push(`key.like.rec:platform:${meta.collection}:%`);
+        prefixPatterns.push(`rec:platform:${meta.collection}:%`);
       }
     }
 
-    const { data, error } = await supabase
-      .from(CLOUD_TABLE)
-      .select('key, value')
-      .or(orFilters.join(','));
+    const { rows, error } = await fetchParallelExactAndPrefixes(keys, prefixPatterns, 1000, 5);
 
     if (error) {
       handleSupabaseError(error);
@@ -918,9 +1074,7 @@ export async function refreshKeysFromSupabase(
     syncInfo.lastSyncedAt = new Date().toISOString();
     syncInfo.lastError = null;
 
-    const remoteMap = integrateGranularRowsIntoRemoteMap(
-      (data || []) as Array<{ key: string; value: unknown }>
-    );
+    const remoteMap = integrateGranularRowsIntoRemoteMap(rows);
 
     remoteMap.forEach((remoteObj, key) => {
       if (!keys.includes(key)) return;
@@ -1013,6 +1167,11 @@ export function startSupabaseRealtimeSubscription(
       const obj = { ...currentObj } as Record<string, any>;
       if (parsedKey.collection === 'config' && !isDelete && isPlainObject(newVal)) {
         obj.config = { ...(isPlainObject(obj.config) ? obj.config : {}), ...newVal };
+      } else if (parsedKey.collection === 'catalogSettings' && !isDelete && isPlainObject(newVal)) {
+        obj.catalogSettings = {
+          ...(isPlainObject(obj.catalogSettings) ? obj.catalogSettings : {}),
+          ...newVal,
+        };
       } else if (TENANT_ARRAY_COLLECTIONS.includes(parsedKey.collection as any)) {
         const arr: IdEntity[] = Array.isArray(obj[parsedKey.collection])
           ? [...obj[parsedKey.collection]]
@@ -1120,29 +1279,25 @@ export async function saveClientPaymentOrderToSupabase(order: ClientPaymentOrder
   const key = `client_payment_order_${order.token}`;
   const now = new Date().toISOString();
   try {
-    const { data: existing } = await supabase
+    const { data: updatedRows, error: updErr } = await supabase
       .from(CLOUD_TABLE)
-      .select('key')
+      .update({ value: order, updated_at: now })
       .eq('key', key)
-      .maybeSingle();
+      .select('key');
 
-    if (existing) {
+    if (updErr) return;
+    if (updatedRows && updatedRows.length > 0) return;
+
+    const { error: insErr } = await supabase.from(CLOUD_TABLE).insert({
+      key,
+      value: order,
+      updated_at: now,
+    });
+    if (insErr?.code === '23505') {
       await supabase
         .from(CLOUD_TABLE)
         .update({ value: order, updated_at: now })
         .eq('key', key);
-    } else {
-      const { error: insErr } = await supabase.from(CLOUD_TABLE).insert({
-        key,
-        value: order,
-        updated_at: now,
-      });
-      if (insErr?.code === '23505') {
-        await supabase
-          .from(CLOUD_TABLE)
-          .update({ value: order, updated_at: now })
-          .eq('key', key);
-      }
     }
   } catch {
     // Non-blocking fallback

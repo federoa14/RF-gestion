@@ -1,0 +1,248 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+    if (!supabaseUrl || !serviceRoleKey) {
+      return jsonResponse({ ok: false, fallbackReason: 'missing_supabase_service_role' });
+    }
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey);
+    const body = await req.json();
+    const scope = body?.scope === 'client_order' ? 'client_order' : 'tenant_subscription';
+
+    if (scope === 'tenant_subscription') {
+      const tenantId = String(body?.tenantId || '').trim();
+      const tenantName = String(body?.tenantName || 'Empresa').trim();
+      const monthKey = String(body?.monthKey || '').trim();
+      const planType = body?.planType === 'annual' ? 'annual' : 'monthly';
+      const amount = Number(body?.amount || 0);
+      const payerEmail = String(body?.payerEmail || '').trim();
+      const returnUrl = String(body?.returnUrl || '').trim();
+
+      if (!tenantId || !monthKey || amount <= 0) {
+        return jsonResponse({ ok: false, error: 'Datos de suscripción inválidos.' }, 400);
+      }
+
+      let accessToken = (Deno.env.get('MERCADOPAGO_ACCESS_TOKEN') || '').trim();
+      if (!accessToken) {
+        const { data: secretRow } = await supabase
+          .from('app_cloud_store')
+          .select('value')
+          .eq('key', 'rec:secret:platform_mp_access_token')
+          .maybeSingle();
+        accessToken = String(secretRow?.value?.accessToken || '').trim();
+      }
+
+      if (!accessToken) {
+        return jsonResponse({ ok: false, fallbackReason: 'missing_access_token' });
+      }
+
+      const extRef = `sub::${tenantId}::${monthKey}::${planType}`;
+      const baseReturn = returnUrl ? returnUrl.split('?')[0] : '';
+      const successUrl = baseReturn
+        ? `${baseReturn}?mp_status=approved&tenantId=${encodeURIComponent(tenantId)}&monthKey=${encodeURIComponent(monthKey)}&planType=${planType}&amount=${amount}`
+        : undefined;
+      const pendingUrl = baseReturn
+        ? `${baseReturn}?mp_status=pending&tenantId=${encodeURIComponent(tenantId)}&monthKey=${encodeURIComponent(monthKey)}`
+        : undefined;
+      const failureUrl = baseReturn
+        ? `${baseReturn}?mp_status=failure&tenantId=${encodeURIComponent(tenantId)}&monthKey=${encodeURIComponent(monthKey)}`
+        : undefined;
+
+      const notificationUrl = `${supabaseUrl}/functions/v1/mp-webhook?scope=tenant_subscription`;
+
+      const mpRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              id: `sub-${monthKey}-${planType}`,
+              title:
+                planType === 'annual'
+                  ? `Suscripción Anual (12 meses) - ${tenantName}`
+                  : `Abono Mensual (${monthKey}) - ${tenantName}`,
+              quantity: 1,
+              currency_id: 'ARS',
+              unit_price: Math.round(amount * 100) / 100,
+            },
+          ],
+          ...(payerEmail ? { payer: { email: payerEmail } } : {}),
+          external_reference: extRef,
+          notification_url: notificationUrl,
+          ...(successUrl
+            ? {
+                back_urls: {
+                  success: successUrl,
+                  pending: pendingUrl,
+                  failure: failureUrl,
+                },
+                auto_return: 'approved',
+              }
+            : {}),
+        }),
+      });
+
+      const mpData = await mpRes.json();
+      if (!mpRes.ok || !mpData?.init_point) {
+        return jsonResponse({
+          ok: false,
+          fallbackReason: 'mp_api_error',
+          error: mpData?.message || 'Mercado Pago rechazó la creación de la preferencia.',
+        });
+      }
+
+      return jsonResponse({
+        ok: true,
+        mode: 'mercadopago_api',
+        initPoint: mpData.init_point,
+        sandboxInitPoint: mpData.sandbox_init_point,
+        preferenceId: mpData.id,
+      });
+    }
+
+    // scope === 'client_order'
+    const orderToken = String(body?.orderToken || '').trim();
+    const returnUrl = String(body?.returnUrl || '').trim();
+    if (!orderToken) {
+      return jsonResponse({ ok: false, error: 'Falta orderToken.' }, 400);
+    }
+
+    const orderKey = `client_payment_order_${orderToken}`;
+    const { data: orderRow } = await supabase
+      .from('app_cloud_store')
+      .select('value')
+      .eq('key', orderKey)
+      .maybeSingle();
+
+    const order = orderRow?.value;
+    if (!order) {
+      return jsonResponse({ ok: false, error: 'Orden de pago no encontrada.' }, 404);
+    }
+
+    const tenantId = String(order.tenantId || '').trim();
+    let accessToken = '';
+    if (tenantId) {
+      const { data: merchantRow } = await supabase
+        .from('app_cloud_store')
+        .select('value')
+        .eq('key', `merchant_mp_token_${tenantId}`)
+        .maybeSingle();
+      accessToken = String(merchantRow?.value?.accessToken || '').trim();
+    }
+    if (!accessToken) {
+      accessToken = (Deno.env.get('MERCADOPAGO_ACCESS_TOKEN') || '').trim();
+    }
+
+    if (!accessToken) {
+      return jsonResponse({ ok: false, fallbackReason: 'missing_access_token' });
+    }
+
+    const baseReturn = returnUrl ? returnUrl.split('?')[0] : '';
+    const successUrl = baseReturn
+      ? `${baseReturn}?pay_client=${encodeURIComponent(orderToken)}&mp_status=approved`
+      : undefined;
+    const notificationUrl = `${supabaseUrl}/functions/v1/mp-webhook?scope=client_order&token=${encodeURIComponent(orderToken)}&tenantId=${encodeURIComponent(tenantId)}`;
+
+    const boletasLabel =
+      Array.isArray(order.boletaNumbers) && order.boletaNumbers.length > 0
+        ? order.boletaNumbers.map((n: string) => `#${n}`).join(', ')
+        : 'Saldo pendiente';
+
+    const mpRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        items: [
+          {
+            id: orderToken,
+            title: `${order.distributorName || 'Comercio'} · Boletas ${boletasLabel} (${order.clientName})`,
+            quantity: 1,
+            currency_id: 'ARS',
+            unit_price: Math.round(Number(order.amount || 0) * 100) / 100,
+          },
+        ],
+        external_reference: `cpay::${orderToken}`,
+        notification_url: notificationUrl,
+        ...(successUrl
+          ? {
+              back_urls: {
+                success: successUrl,
+                pending: `${baseReturn}?pay_client=${encodeURIComponent(orderToken)}&mp_status=pending`,
+                failure: `${baseReturn}?pay_client=${encodeURIComponent(orderToken)}&mp_status=failure`,
+              },
+              auto_return: 'approved',
+            }
+          : {}),
+      }),
+    });
+
+    const mpData = await mpRes.json();
+    if (!mpRes.ok || !mpData?.init_point) {
+      return jsonResponse({
+        ok: false,
+        fallbackReason: 'mp_api_error',
+        error: mpData?.message || 'Error al generar link Checkout Pro en Mercado Pago.',
+      });
+    }
+
+    const updatedOrder = {
+      ...order,
+      mpInitPoint: mpData.init_point,
+      mpPreferenceId: mpData.id,
+    };
+
+    await supabase
+      .from('app_cloud_store')
+      .update({ value: updatedOrder, updated_at: new Date().toISOString() })
+      .eq('key', orderKey);
+
+    try {
+      await supabase
+        .from('client_payment_orders')
+        .update({ mp_init_point: mpData.init_point, mp_preference_id: mpData.id })
+        .eq('token', orderToken);
+    } catch {
+      // Optional relational mirror
+    }
+
+    return jsonResponse({
+      ok: true,
+      mode: 'mercadopago_api',
+      initPoint: mpData.init_point,
+      sandboxInitPoint: mpData.sandbox_init_point,
+      preferenceId: mpData.id,
+      order: updatedOrder,
+    });
+  } catch (err) {
+    return jsonResponse(
+      { ok: false, error: err instanceof Error ? err.message : 'Unexpected error' },
+      500
+    );
+  }
+});

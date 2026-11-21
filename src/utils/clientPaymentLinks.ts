@@ -1,7 +1,10 @@
 import { Boleta, Client, ClientPaymentOrder, DistributorConfig } from '../types';
 import { getBoletaBalance } from './alerts';
 import { createWhatsAppUrl, generateClientPaymentLinkWhatsAppMessage } from './whatsapp';
-import { saveClientPaymentOrderEverywhere } from './supabaseServices';
+import {
+  createMercadoPagoPreferenceViaEdgeFunction,
+  saveClientPaymentOrderEverywhere,
+} from './supabaseServices';
 import { isSupabaseConfigured } from './supabaseClient';
 
 export interface CreateClientPaymentLinkResult {
@@ -40,7 +43,7 @@ export async function createClientPaymentLink(params: {
   const originUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const token = `CPAY-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 
-  const order: ClientPaymentOrder = {
+  let order: ClientPaymentOrder = {
     token,
     tenantId: config.tenantId || 'default-tenant',
     distributorName: config.distributorName || 'Comercio',
@@ -62,6 +65,23 @@ export async function createClientPaymentLink(params: {
   };
 
   await saveClientPaymentOrderEverywhere(order);
+
+  // Generar preferencia real de Mercado Pago Checkout Pro en Supabase Edge Function si está disponible
+  if (config.hasMerchantMpAccessToken) {
+    const pref = await createMercadoPagoPreferenceViaEdgeFunction({
+      scope: 'client_order',
+      orderToken: token,
+      returnUrl: originUrl,
+    });
+    if (pref.ok && pref.initPoint) {
+      order = {
+        ...order,
+        mpInitPoint: pref.initPoint,
+        mpPreferenceId: pref.preferenceId,
+      };
+    }
+  }
+
   const payUrl = `${originUrl}/?pay_client=${encodeURIComponent(token)}`;
   return {
     token,

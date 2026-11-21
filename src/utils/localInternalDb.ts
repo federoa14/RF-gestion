@@ -10,6 +10,8 @@ import {
   queueSupabaseDelete,
   refreshKeysFromSupabase,
   startSupabaseRealtimeSubscription,
+  flushSupabaseSync,
+  isCloudSyncedKey,
 } from './supabaseSync';
 
 const IDB_NAME = 'cobranzas_base_interna_v1';
@@ -152,11 +154,22 @@ function deleteSingleFromIdb(key: string): void {
   }
 }
 
+let cloudSyncStarted = false;
+
+export async function ensureCloudHydrated(): Promise<void> {
+  if (cloudSyncStarted) return;
+  cloudSyncStarted = true;
+  await hydrateFromSupabase(memoryStore, applyExternalSyncedRecord);
+  startSupabaseRealtimeSubscription(applyExternalSyncedRecord, deleteExternalSyncedRecord, dbGetItem);
+}
+
 /**
  * Inicializa la base interna IndexedDB antes de montar la interfaz React.
  * Migra automáticamente cualquier dato previo de localStorage hacia IndexedDB.
  */
-export async function initInternalDatabase(): Promise<void> {
+export async function initInternalDatabase(options?: {
+  deferCloudHydration?: boolean;
+}): Promise<void> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
@@ -205,9 +218,10 @@ export async function initInternalDatabase(): Promise<void> {
       await writeBatchToIdb(db, toMigrate);
     }
 
-    // Hidratar y sincronizar con Supabase (si está configurado en variables de entorno)
-    await hydrateFromSupabase(memoryStore, applyExternalSyncedRecord);
-    startSupabaseRealtimeSubscription(applyExternalSyncedRecord, deleteExternalSyncedRecord, dbGetItem);
+    // Hidratar y sincronizar con Supabase (omitir bloqueo en rutas públicas de catálogo o link de cobro)
+    if (!options?.deferCloudHydration) {
+      await ensureCloudHydrated();
+    }
   })();
 
   return initPromise;
@@ -468,6 +482,13 @@ export async function importInternalDatabaseBackup(rawJson: string): Promise<{
       await writeBatchToIdb(idbInstance, batch);
     }
 
+    for (const rec of batch) {
+      if (isCloudSyncedKey(rec.key)) {
+        queueSupabaseUpsert(rec.key, rec.value);
+      }
+    }
+    void flushSupabaseSync();
+
     return {
       success: true,
       importedCount: batch.length,
@@ -483,4 +504,91 @@ export async function importInternalDatabaseBackup(rawJson: string): Promise<{
       error: 'No se pudo leer el archivo JSON de respaldo.',
     };
   }
+}
+
+export function downloadTenantCsvBackup(tenantId?: string, companyName = 'Empresa'): {
+  filename: string;
+  rowCount: number;
+} {
+  const key = tenantId ? `saas_distribuidora_data_v2_${tenantId}` : '';
+  const raw = key ? dbGetItem(key) : null;
+  let boletas: any[] = [];
+  let paidBoletas: any[] = [];
+  let clients: any[] = [];
+
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      boletas = Array.isArray(parsed?.boletas) ? parsed.boletas : [];
+      paidBoletas = Array.isArray(parsed?.paidBoletas) ? parsed.paidBoletas : [];
+      clients = Array.isArray(parsed?.clients) ? parsed.clients : [];
+    } catch {
+      // ignore
+    }
+  } else {
+    try {
+      const pRaw = dbGetItem('distribuidora_boletas_v2_zero');
+      const paidRaw = dbGetItem('distribuidora_paid_boletas_v2_zero');
+      const cRaw = dbGetItem('distribuidora_clients_v2_zero');
+      if (pRaw) boletas = JSON.parse(pRaw);
+      if (paidRaw) paidBoletas = JSON.parse(paidRaw);
+      if (cRaw) clients = JSON.parse(cRaw);
+    } catch {
+      // ignore
+    }
+  }
+
+  const clientPhoneMap = new Map<string, string>();
+  clients.forEach((c) => {
+    if (c?.id) clientPhoneMap.set(String(c.id), String(c.phone || ''));
+  });
+
+  const escapeCsv = (val: unknown) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+  const headers = [
+    'Estado',
+    'Numero Boleta',
+    'Cliente',
+    'Telefono',
+    'Vendedor',
+    'Fecha Venta',
+    'Vencimiento',
+    'Fecha Pago',
+    'Monto Total',
+    'Medio de Pago',
+  ];
+
+  const allRows = [...boletas, ...paidBoletas];
+  const csvLines = [
+    headers.join(','),
+    ...allRows.map((b) =>
+      [
+        escapeCsv(b.status === 'paid' ? 'PAGADA' : 'PENDIENTE'),
+        escapeCsv(b.boletaNumber),
+        escapeCsv(b.clientName),
+        escapeCsv(b.clientPhone || clientPhoneMap.get(String(b.clientId)) || ''),
+        escapeCsv(b.salespersonName),
+        escapeCsv(b.saleDate),
+        escapeCsv(b.dueDate),
+        escapeCsv(b.paidAt || ''),
+        Number(b.amount || 0),
+        escapeCsv(b.paymentMethod || ''),
+      ].join(',')
+    ),
+  ];
+
+  const content = '\uFEFF' + csvLines.join('\n');
+  const dateTag = new Date().toISOString().split('T')[0];
+  const safeName = companyName.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32) || 'Cobranzas';
+  const filename = `Respaldo_${safeName}_${dateTag}.csv`;
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2500);
+
+  return { filename, rowCount: allRows.length };
 }

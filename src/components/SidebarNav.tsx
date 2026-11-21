@@ -18,6 +18,7 @@ import {
   CalendarClock,
   Headphones,
   ClipboardCheck,
+  Store,
 } from 'lucide-react';
 import { DistributorConfig, Boleta } from '../types';
 import { calculateAlertStatus, formatCurrency } from '../utils/alerts';
@@ -39,6 +40,7 @@ interface SidebarNavProps {
   onOpenSubscriptionPay?: () => void;
   isPaidCurrentMonth?: boolean;
   currentDateRef?: string;
+  catalogEnabled?: boolean;
 }
 
 interface NavGroup {
@@ -68,6 +70,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   onOpenSubscriptionPay,
   isPaidCurrentMonth,
   currentDateRef,
+  catalogEnabled = true,
 }) => {
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
   const graceDays = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
@@ -183,6 +186,16 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     {
       title: 'Empresa y Ajustes',
       items: [
+        ...(catalogEnabled !== false
+          ? [
+              {
+                id: 'catalogo',
+                label: 'Catálogo Online',
+                hint: 'Productos y pedidos WhatsApp',
+                icon: Store,
+              },
+            ]
+          : []),
         {
           id: 'promociones',
           label: 'Estudio de Flyers',

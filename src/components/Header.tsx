@@ -90,6 +90,11 @@ const TAB_META: Record<string, { section: string; title: string; subtitle: strin
     title: 'Estudio de Flyers',
     subtitle: 'Piezas visuales promocionales para clientes y vendedores',
   },
+  catalogo: {
+    section: 'Tienda Web',
+    title: 'Catálogo Online',
+    subtitle: 'Publicá fotos, precios y descripciones para recibir pedidos por WhatsApp y retirar',
+  },
   administradores: {
     section: 'Configuración',
     title: 'Ajustes y Dueños',

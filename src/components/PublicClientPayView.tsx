@@ -18,6 +18,7 @@ import {
 import { ClientPaymentOrder } from '../types';
 import { formatCurrency } from '../utils/alerts';
 import {
+  createMercadoPagoPreferenceViaEdgeFunction,
   getClientPaymentOrderFromCloud,
   verifyClientPaymentOrderInSupabase,
   verifyClientReceiptImageInSupabase,
@@ -147,12 +148,61 @@ export const PublicClientPayView: React.FC<PublicClientPayViewProps> = ({
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleOpenMercadoPagoCheckout = () => {
+  // Poll automático cada 5s por si el Webhook oficial de Mercado Pago acredita el pago en Supabase
+  useEffect(() => {
+    if (!order || order.status === 'approved') return;
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const refreshed = await getClientPaymentOrderFromCloud(order.token);
+        if (!cancelled && refreshed && refreshed.status === 'approved') {
+          setOrder(refreshed);
+          setSuccessNote(
+            refreshed.verificationSummary ||
+              'Tu pago fue confirmado por Mercado Pago y guardado en Supabase. Tu cuenta ya figura PAGADA.'
+          );
+        }
+      } catch {
+        // silent
+      }
+    }, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [order?.token, order?.status]);
+
+  const handleOpenMercadoPagoCheckout = async () => {
     if (!order) return;
-    const url =
-      order.mpInitPoint ||
-      order.mpCheckoutLink ||
-      'https://www.mercadopago.com.ar/';
+    if (order.mpInitPoint) {
+      window.open(order.mpInitPoint, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const pref = await createMercadoPagoPreferenceViaEdgeFunction({
+        scope: 'client_order',
+        orderToken: order.token,
+        returnUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+      });
+      if (pref.ok && pref.initPoint) {
+        setOrder((prev) =>
+          prev
+            ? { ...prev, mpInitPoint: pref.initPoint, mpPreferenceId: pref.preferenceId }
+            : prev
+        );
+        window.open(pref.initPoint, '_blank', 'noopener,noreferrer');
+        return;
+      }
+    } catch {
+      // Fallback al link fijo configurado
+    } finally {
+      setIsProcessing(false);
+    }
+
+    const url = order.mpCheckoutLink || 'https://www.mercadopago.com.ar/';
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 

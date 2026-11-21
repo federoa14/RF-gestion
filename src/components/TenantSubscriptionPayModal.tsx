@@ -32,7 +32,11 @@ import {
   loadPlatformBillingConfig,
   fetchPlatformBillingConfigFromServer,
 } from '../utils/multiTenantStorage';
-import { verifyAndRecordTenantPaymentInSupabase } from '../utils/supabaseServices';
+import {
+  createMercadoPagoPreferenceViaEdgeFunction,
+  fetchVerifiedTenantPaymentStatusFromSupabase,
+  verifyAndRecordTenantPaymentInSupabase,
+} from '../utils/supabaseServices';
 
 interface TenantSubscriptionPayModalProps {
   isOpen: boolean;
@@ -176,7 +180,40 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
     }
   };
 
-  // Al hacer clic en "Pagar con Mercado Pago" -> Deriva directamente a pagos de Mercado Pago
+  // Poll automático cada 5s mientras espera confirmación del Webhook oficial de Mercado Pago
+  useEffect(() => {
+    if (!isOpen || step !== 'mp_checkout_waiting') return;
+    let cancelled = false;
+    const mInfo = getCurrentMonthInfo();
+    const timer = setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const res = await fetchVerifiedTenantPaymentStatusFromSupabase(tenant.id, mInfo.monthKey);
+        if (!cancelled && res.approved && res.payment) {
+          setStep('success');
+          onPaymentApproved({
+            monthKey: mInfo.monthKey,
+            amount: res.payment.amount || amountToPay,
+            planType: res.payment.planType || selectedPlan,
+            monthsCount: res.payment.monthsCount || monthsCount,
+            paymentMethod: res.payment.paymentMethod || 'mercadopago',
+            mpPaymentId: res.payment.mpPaymentId,
+            mpPreferenceId: res.payment.mpPreferenceId,
+            receiptAlias: billingConfig.alias,
+            verificationNote: res.payment.verificationSummary,
+          });
+        }
+      } catch {
+        // silent poll
+      }
+    }, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isOpen, step, tenant.id]);
+
+  // Al hacer clic en "Pagar con Mercado Pago" -> Genera preferencia Checkout Pro vía Edge Function o deriva al link configurado
   const handleStartMercadoPagoCheckout = async () => {
     setIsProcessing(true);
     setErrorMsg(null);
@@ -184,6 +221,29 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
     try {
       const freshBilling = await fetchPlatformBillingConfigFromServer();
       setBillingConfig((prev) => ({ ...prev, ...freshBilling }));
+
+      const edgePref = await createMercadoPagoPreferenceViaEdgeFunction({
+        scope: 'tenant_subscription',
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        monthKey: monthInfo.monthKey,
+        planType: selectedPlan,
+        amount: amountToPay,
+        payerEmail: payerEmail || tenant.email,
+        returnUrl: typeof window !== 'undefined' ? window.location.href : undefined,
+      });
+
+      if (edgePref.ok && edgePref.initPoint) {
+        setCheckoutInfo({
+          mode: 'mercadopago_api',
+          initPoint: edgePref.initPoint,
+          mpCheckoutLink: freshBilling.mpCheckoutLink || billingConfig.mpCheckoutLink,
+          preferenceId: edgePref.preferenceId,
+        });
+        window.open(edgePref.initPoint, '_blank', 'noopener,noreferrer');
+        setStep('mp_checkout_waiting');
+        return;
+      }
 
       const targetMpUrl =
         freshBilling.mpCheckoutLink ||

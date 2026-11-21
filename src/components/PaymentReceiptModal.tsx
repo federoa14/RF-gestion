@@ -94,9 +94,13 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
     efectivo: 'Efectivo',
     transferencia: 'Transferencia / MP',
     cheque: 'Cheque',
+    link_pago: 'Link de Pago / MP',
+    fiado: 'Cuenta Corriente / Fiado',
+    acordar: 'A coordinar por WhatsApp',
     otro: 'Otro medio',
   };
-  const methodLabel = methodLabels[receipt.paymentMethod] || receipt.paymentMethod;
+  const methodLabel =
+    receipt.paymentMethodLabel || methodLabels[receipt.paymentMethod] || receipt.paymentMethod;
 
   const handleSendWhatsApp = () => {
     if (canOfferSavePhone && client?.id && onSaveClientPhone && !phoneSavedNotice) {
@@ -303,9 +307,18 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
                     </strong>
                   </div>
                   <div className="text-right">
-                    <span className="text-slate-500 dark:text-[#94A3B8]">Medio:</span>{' '}
+                    <span className="text-slate-500 dark:text-[#94A3B8]">Forma de pago:</span>{' '}
                     <strong className="text-[#0B1933] dark:text-white">{methodLabel}</strong>
                   </div>
+                  {receipt.dispatchModalityLabel && (
+                    <div className="col-span-2">
+                      <span className="text-slate-500 dark:text-[#94A3B8]">Despacho:</span>{' '}
+                      <strong className="text-[#0B1933] dark:text-white">
+                        {receipt.dispatchModalityLabel}
+                        {receipt.deliveryAddress ? ` · ${receipt.deliveryAddress}` : ''}
+                      </strong>
+                    </div>
+                  )}
                   {receipt.receivedBy && (
                     <div>
                       <span className="text-slate-500 dark:text-[#94A3B8]">Atendido por:</span>{' '}
@@ -336,12 +349,17 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
                             {item.quantity}x {item.name}
                           </span>
                           <span className="text-[11px] text-slate-500 dark:text-[#94A3B8] font-mono">
-                            Unit: {formatCurrency(item.unitPrice, config.currencySymbol)} ·{' '}
-                            {item.paymentMode === 'contado_hoy'
-                              ? '1 Pago Hoy'
-                              : item.paymentMode === 'un_pago_fiado'
-                              ? '1 Pago Fiado'
-                              : 'En Cuotas'}
+                            Precio unit: {formatCurrency(item.unitPrice, config.currencySymbol)}
+                            {!receipt.hideUnitModeTag && (
+                              <>
+                                {' · '}
+                                {item.paymentMode === 'contado_hoy'
+                                  ? '1 Pago Hoy'
+                                  : item.paymentMode === 'un_pago_fiado'
+                                  ? '1 Pago Fiado'
+                                  : 'En Cuotas'}
+                              </>
+                            )}
                           </span>
                         </div>
                         <span className="font-mono font-bold text-[#0B1933] dark:text-white shrink-0">
@@ -359,11 +377,16 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
                   <div className="flex items-center gap-2">
                     <Receipt className="w-4 h-4 text-[#CBD5E1]" />
                     <span className="text-xs font-semibold text-[#E2E8F0]">
-                      Importe Abonado en este Comprobante
+                      {receipt.isDispatchReceipt
+                        ? 'Valor Final del Despacho'
+                        : 'Importe Abonado en este Comprobante'}
                     </span>
                   </div>
                   <span className="text-lg font-black font-mono tabular-nums text-emerald-400">
-                    {formatCurrency(receipt.amountPaidNow, config.currencySymbol)}
+                    {formatCurrency(
+                      receipt.isDispatchReceipt ? receipt.originalAmount : receipt.amountPaidNow,
+                      config.currencySymbol
+                    )}
                   </span>
                 </div>
 

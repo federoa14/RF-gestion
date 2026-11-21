@@ -84,6 +84,19 @@ export async function renderVisualReceiptToDataUrl(
   const items = receipt.items || [];
   const summaryLines = receipt.basketSummaryLines || [];
   const hasAliasBlock = !isCompleted && Boolean(config.merchantPaymentAlias);
+  const methodDisplay =
+    receipt.paymentMethodLabel ||
+    (receipt.paymentMethod === 'efectivo'
+      ? 'Efectivo'
+      : receipt.paymentMethod === 'transferencia'
+      ? 'Transferencia / MP'
+      : receipt.paymentMethod === 'cheque'
+      ? 'Cheque'
+      : receipt.paymentMethod === 'link_pago'
+      ? 'Link de Pago / MP'
+      : receipt.paymentMethod === 'fiado'
+      ? 'Cuenta Corriente / Fiado'
+      : receipt.paymentMethod || 'A coordinar');
 
   const width = 920;
   const padX = 48;
@@ -98,7 +111,8 @@ export async function renderVisualReceiptToDataUrl(
   const wrappedNotes = receipt.notes ? wrapTextLines(pCtx, `Obs: ${receipt.notes}`, innerW - 36) : [];
 
   const headerH = 154;
-  const clientCardH = receipt.clientAddress ? 148 : 122;
+  const hasDispatchMeta = Boolean(receipt.dispatchModalityLabel);
+  const clientCardH = receipt.clientAddress || hasDispatchMeta ? 156 : 126;
   const itemsSectionH =
     items.length > 0 ? 74 + items.length * 52 + 20 : 0;
   const financeCardH = 224 + (wrappedNotes.length > 0 ? wrappedNotes.length * 26 + 18 : 0);
@@ -229,15 +243,17 @@ export async function renderVisualReceiptToDataUrl(
   ctx.fillStyle = '#475569';
   ctx.font = '500 18px "Plus Jakarta Sans", system-ui, sans-serif';
   if (receipt.clientAddress) {
-    ctx.fillText(`Dir: ${receipt.clientAddress}`, padX + 24, cursorY + 98);
+    ctx.fillText(`Dir: ${receipt.clientAddress}`.slice(0, 62), padX + 24, cursorY + 98);
   }
-  const metaRight = receipt.salespersonName
+  const metaRight = receipt.isDispatchReceipt
+    ? `Pago: ${methodDisplay}${receipt.dispatchModalityLabel ? ` · ${receipt.dispatchModalityLabel}` : ''}`
+    : receipt.salespersonName
     ? `Atendió: ${receipt.receivedBy || receipt.salespersonName}`
     : receipt.receivedBy
     ? `Recibió: ${receipt.receivedBy}`
     : '';
   if (metaRight) {
-    ctx.fillText(metaRight, padX + 24, cursorY + (receipt.clientAddress ? 128 : 102));
+    ctx.fillText(metaRight.slice(0, 68), padX + 24, cursorY + (receipt.clientAddress ? 130 : 102));
   }
 
   cursorY += clientCardH + 22;
@@ -282,14 +298,15 @@ export async function renderVisualReceiptToDataUrl(
 
       ctx.fillStyle = '#64748B';
       ctx.font = '500 15px "JetBrains Mono", monospace';
+      const unitModeSuffix = receipt.hideUnitModeTag ? '' : ` · ${getItemModeText(item.paymentMode)}`;
       ctx.fillText(
-        `Unit: ${formatCurrency(item.unitPrice, sym)} · ${getItemModeText(item.paymentMode)}`,
+        `Precio unit: ${formatCurrency(item.unitPrice, sym)}${unitModeSuffix}`,
         padX + 20,
         rowY + 14
       );
 
       ctx.textAlign = 'right';
-      ctx.fillStyle = item.paymentMode === 'contado_hoy' ? '#047857' : '#0B1933';
+      ctx.fillStyle = item.paymentMode === 'contado_hoy' || receipt.isDispatchReceipt ? '#047857' : '#0B1933';
       ctx.font = '700 20px "JetBrains Mono", monospace';
       ctx.fillText(formatCurrency(item.subtotal, sym), width - padX - 20, rowY + 4);
       ctx.textAlign = 'left';
@@ -316,31 +333,47 @@ export async function renderVisualReceiptToDataUrl(
 
   ctx.fillStyle = '#E2E8F0';
   ctx.font = '700 19px "Plus Jakarta Sans", system-ui, sans-serif';
-  ctx.fillText('Importe Abonado en este Comprobante', padX + 24, cursorY + 40);
+  ctx.fillText(
+    receipt.isDispatchReceipt ? 'Valor Final del Despacho' : 'Importe Abonado en este Comprobante',
+    padX + 24,
+    cursorY + 40
+  );
   ctx.textAlign = 'right';
   ctx.fillStyle = '#34D399';
   ctx.font = '800 30px "JetBrains Mono", monospace';
-  ctx.fillText(formatCurrency(receipt.amountPaidNow, sym), width - padX - 24, cursorY + 43);
+  ctx.fillText(
+    formatCurrency(receipt.isDispatchReceipt ? receipt.originalAmount : receipt.amountPaidNow, sym),
+    width - padX - 24,
+    cursorY + 43
+  );
   ctx.textAlign = 'left';
 
   // Breakdown rows
   ctx.fillStyle = '#475569';
   ctx.font = '600 19px "Plus Jakarta Sans", system-ui, sans-serif';
-  ctx.fillText('Total de la operación / boleta', padX + 24, cursorY + 106);
+  ctx.fillText(
+    receipt.isDispatchReceipt ? 'Forma de pago acordada' : 'Total de la operación / boleta',
+    padX + 24,
+    cursorY + 106
+  );
   ctx.textAlign = 'right';
   ctx.fillStyle = '#0B1933';
-  ctx.font = '700 21px "JetBrains Mono", monospace';
-  ctx.fillText(formatCurrency(receipt.originalAmount, sym), width - padX - 24, cursorY + 106);
+  ctx.font = '700 20px "JetBrains Mono", monospace';
+  ctx.fillText(
+    receipt.isDispatchReceipt ? methodDisplay.slice(0, 32) : formatCurrency(receipt.originalAmount, sym),
+    width - padX - 24,
+    cursorY + 106
+  );
   ctx.textAlign = 'left';
 
   ctx.fillStyle = '#475569';
   ctx.font = '600 19px "Plus Jakarta Sans", system-ui, sans-serif';
-  ctx.fillText('Total abonado acumulado', padX + 24, cursorY + 142);
+  ctx.fillText('Total abonado / confirmado', padX + 24, cursorY + 142);
   ctx.textAlign = 'right';
   ctx.fillStyle = '#047857';
   ctx.font = '700 21px "JetBrains Mono", monospace';
   ctx.fillText(
-    `-${formatCurrency(receipt.totalPaidAccumulated, sym)}`,
+    formatCurrency(receipt.totalPaidAccumulated, sym),
     width - padX - 24,
     cursorY + 142
   );
@@ -357,7 +390,7 @@ export async function renderVisualReceiptToDataUrl(
   ctx.fillStyle = '#0B1933';
   ctx.font = '800 21px "Plus Jakarta Sans", system-ui, sans-serif';
   ctx.fillText(
-    isCompleted ? 'Estado final' : 'Saldo pendiente a cobrar',
+    isCompleted ? 'Estado final' : 'Saldo pendiente a abonar',
     padX + 24,
     cursorY + 200
   );
@@ -365,7 +398,11 @@ export async function renderVisualReceiptToDataUrl(
   if (isCompleted) {
     ctx.fillStyle = '#047857';
     ctx.font = '800 24px "Plus Jakarta Sans", system-ui, sans-serif';
-    ctx.fillText('CANCELADO AL 100%', width - padX - 24, cursorY + 200);
+    ctx.fillText(
+      receipt.isDispatchReceipt ? 'DESPACHADO · ABONADO' : 'CANCELADO AL 100%',
+      width - padX - 24,
+      cursorY + 200
+    );
   } else {
     ctx.fillStyle = '#991B1B';
     ctx.font = '800 28px "JetBrains Mono", monospace';

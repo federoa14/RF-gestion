@@ -438,6 +438,7 @@ export interface Tenant {
   notes?: string;
   config: DistributorConfig;
   subscription?: TenantSubscription; // Monetización y control de pago mensual
+  catalogEnabled?: boolean; // Servicio de catálogo online (habilitado para todas las empresas por defecto; reversible desde SuperGestión)
 }
 
 export interface PlatformUser {
@@ -525,3 +526,103 @@ export interface SalespersonRendicion {
   notes?: string;
   appliedToBoletas: boolean;
 }
+
+// ============================================================================
+// CATÁLOGO ONLINE Y PEDIDOS PARA RETIRAR POR WHATSAPP
+// ============================================================================
+
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: string;
+  unitLabel?: string;
+  imageUrl?: string;
+  available: boolean;
+  featured?: boolean;
+  sku?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OnlineCatalogSettings {
+  published: boolean;
+  storeName?: string;
+  tagline?: string;
+  slug?: string;
+  whatsappPhone?: string;
+  allowPickup?: boolean;
+  allowDelivery?: boolean;
+  deliveryNote?: string;
+  pickupAddress?: string;
+  pickupHours?: string;
+  pickupInstructions?: string;
+  paymentNote?: string;
+  currencySymbol?: string;
+  updatedAt?: string;
+}
+
+export interface CatalogPickupOrderItem {
+  productId: string;
+  productName: string;
+  unitLabel?: string;
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+}
+
+export interface CatalogPickupOrder {
+  id: string;
+  orderNumber: string;
+  tenantId: string;
+  tenantCode?: string;
+  storeName: string;
+  customerName: string;
+  customerPhone: string;
+  deliveryMethod?: 'retiro' | 'envio';
+  deliveryAddress?: string;
+  preferredPickupWindow?: string;
+  preferredPaymentMethod?: 'efectivo' | 'transferencia' | 'link_pago' | 'acordar';
+  confirmedPaymentMethod?: 'efectivo' | 'transferencia' | 'link_pago' | 'fiado' | 'acordar';
+  notes?: string;
+  items: CatalogPickupOrderItem[];
+  totalAmount: number;
+  currencySymbol: string;
+  status: 'pendiente_retiro' | 'listo_para_retirar' | 'en_camino' | 'retirado' | 'cancelado';
+  linkedBoletaId?: string;
+  linkedBoletaNumber?: string;
+  dispatchReceiptNumber?: string;
+  dispatchedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface PublishedPublicCatalog {
+  tenantId: string;
+  tenantCode?: string;
+  slug?: string;
+  enabledBySuperAdmin: boolean;
+  published: boolean;
+  storeName: string;
+  tagline: string;
+  logoUrl?: string;
+  icon?: string;
+  whatsappPhone: string;
+  allowPickup?: boolean;
+  allowDelivery?: boolean;
+  deliveryNote?: string;
+  pickupAddress: string;
+  pickupHours: string;
+  pickupInstructions?: string;
+  paymentNote?: string;
+  merchantPaymentAlias?: string;
+  merchantPaymentCvu?: string;
+  merchantPaymentBank?: string;
+  merchantPaymentHolder?: string;
+  merchantMpCheckoutLink?: string;
+  currencySymbol: string;
+  products: CatalogProduct[];
+  updatedAt: string;
+}
+

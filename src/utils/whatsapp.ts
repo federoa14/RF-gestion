@@ -491,12 +491,17 @@ export interface ReceiptWhatsAppPayload {
   paymentDate: string;
   amountPaidNow: number;
   paymentMethod: string;
+  paymentMethodLabel?: string;
   originalAmount: number;
   totalPaidAccumulated: number;
   remainingBalance: number;
   receivedBy?: string;
   notes?: string;
   isFullSettlement?: boolean;
+  isDispatchReceipt?: boolean;
+  dispatchModalityLabel?: string;
+  deliveryAddress?: string;
+  hideUnitModeTag?: boolean;
   items?: SaleLineItem[];
   basketSummaryLines?: string[];
   saleModeLabel?: string;
@@ -506,35 +511,75 @@ export function generatePaymentReceiptWhatsAppMessage(
   receipt: ReceiptWhatsAppPayload,
   config: DistributorConfig
 ): string {
+  const sym = config.currencySymbol || '$';
   const methodLabels: Record<string, string> = {
     efectivo: 'Efectivo',
     transferencia: 'Transferencia / MP',
     cheque: 'Cheque',
+    link_pago: 'Link de Pago / MP',
+    fiado: 'Cuenta Corriente / Fiado',
+    acordar: 'A coordinar por WhatsApp',
     otro: 'Otro medio',
   };
-  const methodLabel = methodLabels[receipt.paymentMethod] || receipt.paymentMethod;
+  const methodLabel =
+    receipt.paymentMethodLabel || methodLabels[receipt.paymentMethod] || receipt.paymentMethod;
   const isCompleted = receipt.isFullSettlement || receipt.remainingBalance <= 0;
-
-  const statusLine = isCompleted
-    ? `✅ *Estado del Comprobante:* *CANCELADO AL 100% (SALDO $0,00)*`
-    : `📌 *Saldo Restante Pendiente:* *${formatCurrency(receipt.remainingBalance, config.currencySymbol)}*`;
 
   const itemsBlock =
     receipt.items && receipt.items.length > 0
       ? `\n🛍️ *Detalle de productos:*\n` +
         receipt.items
           .map((item) => {
-            const modeTag =
-              item.paymentMode === 'contado_hoy'
-                ? '1 Pago Hoy'
-                : item.paymentMode === 'un_pago_fiado'
-                ? '1 Pago Fiado'
-                : 'En Cuotas';
-            return `• ${item.quantity}x *${item.name}* [${modeTag}] — ${formatCurrency(item.subtotal, config.currencySymbol)}`;
+            const modeTag = receipt.hideUnitModeTag
+              ? ''
+              : item.paymentMode === 'contado_hoy'
+              ? ' [1 Pago Hoy]'
+              : item.paymentMode === 'un_pago_fiado'
+              ? ' [1 Pago Fiado]'
+              : ' [En Cuotas]';
+            return `• ${item.quantity} × *${item.name}* (${formatCurrency(item.unitPrice, sym)} c/u)${modeTag} — *${formatCurrency(item.subtotal, sym)}*`;
           })
           .join('\n') +
         '\n'
       : '';
+
+  const noteLine = receipt.notes ? `\n📝 *Observación:* ${receipt.notes}` : '';
+
+  if (receipt.isDispatchReceipt) {
+    const modalityLine = receipt.dispatchModalityLabel
+      ? `\n🚚 *Modalidad de despacho:* ${receipt.dispatchModalityLabel}`
+      : '';
+    const addressLine = receipt.deliveryAddress
+      ? `\n📍 *Dirección:* ${receipt.deliveryAddress}`
+      : '';
+    const paymentStatusLine = isCompleted
+      ? `✅ *Estado de pago:* *ABONADO / CONFIRMADO*`
+      : `📌 *Valor pendiente a abonar:* *${formatCurrency(receipt.remainingBalance, sym)}*`;
+    const aliasSection = !isCompleted ? buildMerchantAliasFooter(config) : '';
+    const mpLinkLine =
+      !isCompleted && config.merchantMpCheckoutLink?.trim()
+        ? `\n🔗 *Link de pago:* ${config.merchantMpCheckoutLink.trim()}`
+        : '';
+
+    return `📦 *COMPROBANTE DE DESPACHO - ${receipt.receiptNumber}*
+🏢 *${config.distributorName}*
+
+Estimado/a *${receipt.clientName}*, te enviamos el comprobante oficial de tu compra (*#${receipt.boletaNumber}*):
+
+📅 *Fecha de despacho:* ${formatDateEs(receipt.paymentDate)}${modalityLine}${addressLine}
+💳 *Forma de pago:* *${methodLabel}*
+${itemsBlock}
+━━━━━━━━━━━━━━━━━━━━
+💰 *VALOR FINAL:* *${formatCurrency(receipt.originalAmount, sym)}*
+${paymentStatusLine}${noteLine}${aliasSection}${mpLinkLine}
+${receipt.receivedBy ? `\n👤 *Despachado / Atendido por:* ${receipt.receivedBy}` : ''}
+
+¡Muchas gracias por tu compra! Guardá este comprobante.`;
+  }
+
+  const statusLine = isCompleted
+    ? `✅ *Estado del Comprobante:* *CANCELADO AL 100% (SALDO $0,00)*`
+    : `📌 *Saldo Restante Pendiente:* *${formatCurrency(receipt.remainingBalance, sym)}*`;
 
   const scheduleBlock =
     receipt.basketSummaryLines && receipt.basketSummaryLines.length > 0
@@ -542,7 +587,6 @@ export function generatePaymentReceiptWhatsAppMessage(
         receipt.basketSummaryLines.map((l) => `• ${l}`).join('\n')
       : '';
 
-  const noteLine = receipt.notes ? `\n📝 *Observación:* ${receipt.notes}` : '';
   const aliasSection = !isCompleted ? buildMerchantAliasFooter(config) : '';
 
   return `🧾 *COMPROBANTE OFICIAL - ${receipt.receiptNumber}*
@@ -551,12 +595,12 @@ export function generatePaymentReceiptWhatsAppMessage(
 Estimado/a *${receipt.clientName}*, detallamos su operación correspondiente a *#${receipt.boletaNumber}*:
 
 📅 *Fecha:* ${formatDateEs(receipt.paymentDate)}
-💳 *Medio:* ${methodLabel}
-💵 *Monto abonado hoy:* *${formatCurrency(receipt.amountPaidNow, config.currencySymbol)}*
+💳 *Forma de pago:* ${methodLabel}
+💵 *Monto abonado hoy:* *${formatCurrency(receipt.amountPaidNow, sym)}*
 ${itemsBlock}
 ━━━━━━━━━━━━━━━━━━━━
-📄 *Total operación:* ${formatCurrency(receipt.originalAmount, config.currencySymbol)}
-✔️ *Total abonado a la fecha:* ${formatCurrency(receipt.totalPaidAccumulated, config.currencySymbol)}
+📄 *Valor final operación:* ${formatCurrency(receipt.originalAmount, sym)}
+✔️ *Total abonado a la fecha:* ${formatCurrency(receipt.totalPaidAccumulated, sym)}
 ${statusLine}${scheduleBlock}${noteLine}${aliasSection}
 ${receipt.receivedBy ? `\n👤 *Atendido / Recibido por:* ${receipt.receivedBy}` : ''}
 

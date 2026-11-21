@@ -13,6 +13,9 @@ import {
   PlatformAnnouncement,
   SalespersonRendicion,
   BusinessRubro,
+  OnlineCatalogSettings,
+  CatalogProduct,
+  CatalogPickupOrder,
 } from '../types';
 import { applyRubroProfileToConfig, getRubroProfile } from './businessMode';
 import {
@@ -37,6 +40,7 @@ import {
   mirrorPlatformAnnouncementToSupabaseTable,
   mirrorPlatformBillingToSupabaseTable,
   mirrorPlatformSupportToSupabaseTable,
+  savePlatformMpAccessTokenSecret,
 } from './supabaseServices';
 import { getSupabaseClient } from './supabaseClient';
 
@@ -180,6 +184,9 @@ export interface TenantData {
   broadcasts: BroadcastMessage[];
   autoLogs: AutoDispatchLog[];
   rendiciones?: SalespersonRendicion[];
+  catalogSettings?: OnlineCatalogSettings;
+  catalogProducts?: CatalogProduct[];
+  catalogOrders?: CatalogPickupOrder[];
 }
 
 // TENANTS STORAGE
@@ -259,7 +266,9 @@ export async function fetchPlatformBillingConfigFromServer(): Promise<PlatformBi
     try {
       const { data } = await supabase
         .from('platform_billing_config')
-        .select('*')
+        .select(
+          'alias, cvu, account_holder_name, bank_or_wallet_name, default_monthly_fee, annual_discount_percent, mp_checkout_link, mp_public_key, has_mp_access_token, updated_at'
+        )
         .eq('id', 'default')
         .maybeSingle();
       if (data) {
@@ -300,8 +309,11 @@ export async function persistPlatformBillingConfigToServer(
     updatedAt: new Date().toISOString(),
   };
   savePlatformBillingConfig(nextConfig);
-  await flushSupabaseSync();
-  await mirrorPlatformBillingToSupabaseTable(nextConfig);
+  await Promise.all([
+    mpAccessToken?.trim() ? savePlatformMpAccessTokenSecret(mpAccessToken.trim()) : Promise.resolve(false),
+    flushSupabaseSync(),
+    mirrorPlatformBillingToSupabaseTable(nextConfig),
+  ]);
   return loadPlatformBillingConfig();
 }
 
@@ -343,7 +355,7 @@ export async function fetchPlatformSupportConfigFromServer(): Promise<PlatformSu
     try {
       const { data } = await supabase
         .from('platform_support_config')
-        .select('*')
+        .select('contact_name, whatsapp_phone, email, attention_hours, welcome_message, updated_at')
         .eq('id', 'default')
         .maybeSingle();
       if (data) {
@@ -374,8 +386,7 @@ export async function persistPlatformSupportConfigToServer(
   config: PlatformSupportConfig
 ): Promise<PlatformSupportConfig> {
   savePlatformSupportConfig(config);
-  await flushSupabaseSync();
-  await mirrorPlatformSupportToSupabaseTable(config);
+  await Promise.all([flushSupabaseSync(), mirrorPlatformSupportToSupabaseTable(config)]);
   return loadPlatformSupportConfig();
 }
 
@@ -413,7 +424,7 @@ export async function fetchPlatformAnnouncementsFromServer(params?: {
     try {
       const { data } = await supabase
         .from('platform_announcements')
-        .select('*')
+        .select('id, title, message, category, audience, cta_type, cta_label, cta_url, active, created_at, expires_at, author_name')
         .order('created_at', { ascending: false });
       if (Array.isArray(data) && data.length > 0) {
         local = data.map((row) => ({
@@ -461,8 +472,10 @@ export async function savePlatformAnnouncementToServer(
     ? current.map((x) => (x.id === newItem.id ? newItem : x))
     : [newItem, ...current];
   savePlatformAnnouncements(updated);
-  await flushSupabaseSync();
-  await mirrorPlatformAnnouncementToSupabaseTable(newItem);
+  await Promise.all([
+    flushSupabaseSync(),
+    mirrorPlatformAnnouncementToSupabaseTable(newItem),
+  ]);
   return updated;
 }
 
@@ -472,19 +485,21 @@ export async function togglePlatformAnnouncementOnServer(
 ): Promise<PlatformAnnouncement[]> {
   const updated = loadPlatformAnnouncements().map((x) => (x.id === id ? { ...x, active } : x));
   savePlatformAnnouncements(updated);
-  await flushSupabaseSync();
   const target = updated.find((x) => x.id === id);
-  if (target) {
-    await mirrorPlatformAnnouncementToSupabaseTable(target);
-  }
+  await Promise.all([
+    flushSupabaseSync(),
+    target ? mirrorPlatformAnnouncementToSupabaseTable(target) : Promise.resolve(),
+  ]);
   return updated;
 }
 
 export async function deletePlatformAnnouncementFromServer(id: string): Promise<PlatformAnnouncement[]> {
   const updated = loadPlatformAnnouncements().filter((x) => x.id !== id);
   savePlatformAnnouncements(updated);
-  await flushSupabaseSync();
-  await deletePlatformAnnouncementFromSupabaseTable(id);
+  await Promise.all([
+    flushSupabaseSync(),
+    deletePlatformAnnouncementFromSupabaseTable(id),
+  ]);
   return updated;
 }
 
@@ -614,6 +629,43 @@ export function loadTenantData(tenantId: string): TenantData {
       broadcasts: [],
       autoLogs: [],
       rendiciones: [],
+      catalogSettings: {
+        published: true,
+        storeName: currentTenant?.name || 'Mi Empresa',
+        tagline: 'Elegí tus productos, armá tu carrito y envianos tu pedido por WhatsApp.',
+        whatsappPhone: currentTenant?.phone || '',
+        allowPickup: true,
+        allowDelivery: true,
+        deliveryNote: 'Coordinamos envío a domicilio y medio de pago por WhatsApp.',
+        pickupAddress: currentTenant?.address || (currentTenant?.city ? `${currentTenant.city}${currentTenant.province ? `, ${currentTenant.province}` : ''}` : ''),
+        pickupHours: 'Lunes a Sábado · 9:00 a 19:00 hs',
+        pickupInstructions: 'Coordinamos por WhatsApp cuando tu pedido esté preparado para retirar.',
+        paymentNote: 'Efectivo, transferencia o link de pago',
+        currencySymbol: '$',
+      },
+      catalogProducts: [],
+      catalogOrders: [],
+    };
+  }
+
+  if (!data.catalogProducts) data.catalogProducts = [];
+  if (!data.catalogOrders) data.catalogOrders = [];
+  if (!data.catalogSettings) {
+    const tenants = loadTenants();
+    const currentTenant = tenants.find((t) => t.id === tenantId);
+    data.catalogSettings = {
+      published: true,
+      storeName: data.config?.distributorName || currentTenant?.name || 'Mi Empresa',
+      tagline: 'Elegí tus productos, armá tu carrito y envianos tu pedido por WhatsApp.',
+      whatsappPhone: data.config?.senderPhone || data.config?.distributorPhone || currentTenant?.phone || '',
+      allowPickup: true,
+      allowDelivery: true,
+      deliveryNote: 'Coordinamos envío a domicilio y medio de pago por WhatsApp.',
+      pickupAddress: currentTenant?.address || (currentTenant?.city ? `${currentTenant.city}${currentTenant.province ? `, ${currentTenant.province}` : ''}` : ''),
+      pickupHours: 'Lunes a Sábado · 9:00 a 19:00 hs',
+      pickupInstructions: 'Coordinamos por WhatsApp cuando tu pedido esté preparado para retirar.',
+      paymentNote: 'Efectivo, transferencia o link de pago',
+      currencySymbol: data.config?.currencySymbol || '$',
     };
   }
 
@@ -824,6 +876,7 @@ export function registerSelfServiceTrialTenant(
     createdAt: todayStr,
     notes: `Registro autónomo (${profile.shortLabel}) con prueba gratuita de 30 días (vence el ${trialEndsStr}).`,
     config: newConfig,
+    catalogEnabled: true,
     subscription: {
       monthlyFee: billingCfg.defaultMonthlyFee || 25000,
       currency: '$',
@@ -888,6 +941,24 @@ export function registerSelfServiceTrialTenant(
     paidBoletas: [],
     broadcasts: [],
     autoLogs: [],
+    catalogSettings: {
+      published: true,
+      storeName: companyName,
+      tagline: 'Elegí tus productos, armá tu carrito y envianos tu pedido por WhatsApp.',
+      whatsappPhone: cleanPhone,
+      allowPickup: true,
+      allowDelivery: true,
+      deliveryNote: 'Coordinamos envío a domicilio y medio de pago por WhatsApp.',
+      pickupAddress: input.city?.trim()
+        ? `${input.city.trim()}${input.province ? `, ${input.province}` : ''}`
+        : '',
+      pickupHours: 'Lunes a Sábado · 9:00 a 19:00 hs',
+      pickupInstructions: 'Coordinamos por WhatsApp cuando tu pedido esté preparado para retirar.',
+      paymentNote: 'Efectivo, transferencia o link de pago',
+      currencySymbol: '$',
+    },
+    catalogProducts: [],
+    catalogOrders: [],
   });
 
   saveTenants([...tenants, newTenant]);

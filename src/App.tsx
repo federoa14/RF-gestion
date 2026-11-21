@@ -43,6 +43,11 @@ import {
   PlatformAnnouncement,
   SalespersonRendicion,
   RendicionRouteItem,
+  OnlineCatalogSettings,
+  CatalogProduct,
+  CatalogPickupOrder,
+  PublishedPublicCatalog,
+  SaleLineItem,
 } from './types';
 import {
   loadConfig,
@@ -139,6 +144,12 @@ const PublicClientPayView = lazy(() =>
 const SalespersonRendicionView = lazy(() =>
   import('./components/SalespersonRendicionView').then((m) => ({ default: m.SalespersonRendicionView }))
 );
+const CatalogManager = lazy(() =>
+  import('./components/CatalogManager').then((m) => ({ default: m.CatalogManager }))
+);
+const PublicCatalogView = lazy(() =>
+  import('./components/PublicCatalogView').then((m) => ({ default: m.PublicCatalogView }))
+);
 
 const LazyViewFallback = () => (
   <div className="flex items-center justify-center py-16 text-xs font-semibold text-slate-500 dark:text-slate-400">
@@ -161,10 +172,14 @@ import {
   syncAuthCatalogFromSupabase,
 } from './utils/multiTenantStorage';
 import { SUPABASE_SYNC_EVENT } from './utils/supabaseSync';
+import { ensureCloudHydrated } from './utils/localInternalDb';
 import {
+  fetchCatalogOrdersForTenantFromSupabase,
   fetchPendingReconciliationOrdersFromSupabase,
   fetchVerifiedTenantPaymentStatusFromSupabase,
   markClientPaymentOrderReconciledInSupabase,
+  publishPublicCatalogToSupabase,
+  saveMerchantMpAccessTokenSecret,
   verifyAndRecordTenantPaymentInSupabase,
 } from './utils/supabaseServices';
 import {
@@ -186,6 +201,13 @@ export default function App() {
     if (typeof window === 'undefined') return null;
     const token = new URLSearchParams(window.location.search).get('pay_client');
     return token && token.trim() ? token.trim() : null;
+  });
+
+  // Public Online Catalog mode (?catalog=handle) - No login required for buyers
+  const [publicCatalogHandle, setPublicCatalogHandle] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const handle = new URLSearchParams(window.location.search).get('catalog');
+    return handle && handle.trim() ? handle.trim() : null;
   });
 
   // User Session & Multi-Tenant Platform State
@@ -218,6 +240,27 @@ export default function App() {
   const [broadcasts, setBroadcasts] = useState<BroadcastMessage[]>(loadBroadcastMessages);
   const [autoLogs, setAutoLogs] = useState<AutoDispatchLog[]>(loadAutoDispatchLogs);
   const [rendiciones, setRendiciones] = useState<SalespersonRendicion[]>(loadRendiciones);
+  const [catalogSettings, setCatalogSettings] = useState<OnlineCatalogSettings>(() => {
+    const user = getCurrentSessionUser();
+    if (user && user.role !== 'superadmin' && user.tenantId) {
+      return loadTenantData(user.tenantId).catalogSettings || { published: true };
+    }
+    return { published: true };
+  });
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>(() => {
+    const user = getCurrentSessionUser();
+    if (user && user.role !== 'superadmin' && user.tenantId) {
+      return loadTenantData(user.tenantId).catalogProducts || [];
+    }
+    return [];
+  });
+  const [catalogOrders, setCatalogOrders] = useState<CatalogPickupOrder[]>(() => {
+    const user = getCurrentSessionUser();
+    if (user && user.role !== 'superadmin' && user.tenantId) {
+      return loadTenantData(user.tenantId).catalogOrders || [];
+    }
+    return [];
+  });
 
   // Helper to load complete dataset for a specific tenant
   const loadDataForTenant = (tenantId: string) => {
@@ -231,6 +274,9 @@ export default function App() {
     setBroadcasts(data.broadcasts);
     setAutoLogs(data.autoLogs);
     setRendiciones(data.rendiciones || []);
+    setCatalogSettings(data.catalogSettings || { published: true });
+    setCatalogProducts(data.catalogProducts || []);
+    setCatalogOrders(data.catalogOrders || []);
   };
 
   // Sync data whenever selected tenant changes (local cache + Supabase cloud refresh)
@@ -309,7 +355,16 @@ export default function App() {
     if (activeTab === 'rendicion' && effectiveRubro !== 'distribuidora') {
       setActiveTab('boletas');
     }
-  }, [config.businessRubro, activeTab]);
+    if (activeTab === 'catalogo' && selectedTenant?.catalogEnabled === false) {
+      setActiveTab('boletas');
+    }
+  }, [config.businessRubro, activeTab, selectedTenant?.catalogEnabled]);
+
+  useEffect(() => {
+    if (activeTab === 'catalogo' && selectedTenant) {
+      void handleRefreshCatalogOrders();
+    }
+  }, [activeTab, selectedTenant?.id]);
 
   // Modal States
   const [isNewBoletaOpen, setIsNewBoletaOpen] = useState(false);
@@ -483,7 +538,7 @@ export default function App() {
   // Detect Mercado Pago return parameters or server-verified webhook payments automatically
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (clientPayToken) return; // Enlaces públicos de clientes son manejados por PublicClientPayView
+    if (clientPayToken || publicCatalogHandle) return; // Enlaces públicos manejados por vistas dedicadas
     const params = new URLSearchParams(window.location.search);
     const mpStatus = params.get('mp_status') || params.get('collection_status') || params.get('status');
     const mpPaymentId = params.get('payment_id') || params.get('collection_id') || undefined;
@@ -776,6 +831,237 @@ export default function App() {
     saveRendiciones(updated);
   };
 
+  const publishCatalogSnapshot = (
+    nextSettings: OnlineCatalogSettings,
+    nextProducts: CatalogProduct[],
+    overrideConfig?: DistributorConfig
+  ) => {
+    if (!selectedTenant) return;
+    const cfg = overrideConfig || config;
+    const snapshot: PublishedPublicCatalog = {
+      tenantId: selectedTenant.id,
+      tenantCode: cfg.tenantCode || selectedTenant.tenantCode,
+      slug: nextSettings.slug,
+      enabledBySuperAdmin:
+        selectedTenant.catalogEnabled !== false &&
+        selectedTenant.status !== 'suspended' &&
+        !selectedTenant.subscription?.isPaused,
+      published: nextSettings.published !== false,
+      storeName: nextSettings.storeName || cfg.distributorName || selectedTenant.name,
+      tagline:
+        nextSettings.tagline ||
+        'Armá tu carrito de compras, elegí retiro en tienda o envío a domicilio y envialo por WhatsApp.',
+      logoUrl: cfg.distributorLogoUrl || selectedTenant.logoUrl,
+      icon: cfg.distributorIcon || selectedTenant.icon,
+      whatsappPhone:
+        nextSettings.whatsappPhone ||
+        cfg.senderPhone ||
+        cfg.distributorPhone ||
+        selectedTenant.phone ||
+        '',
+      allowPickup: nextSettings.allowPickup !== false,
+      allowDelivery: nextSettings.allowDelivery !== false,
+      deliveryNote: nextSettings.deliveryNote,
+      pickupAddress: nextSettings.pickupAddress || selectedTenant.address || '',
+      pickupHours: nextSettings.pickupHours || 'Lunes a Sábado · 9:00 a 19:00 hs',
+      pickupInstructions: nextSettings.pickupInstructions,
+      paymentNote: nextSettings.paymentNote,
+      merchantPaymentAlias: cfg.merchantPaymentAlias,
+      merchantPaymentCvu: cfg.merchantPaymentCvu,
+      merchantPaymentBank: cfg.merchantPaymentBank,
+      merchantPaymentHolder: cfg.merchantPaymentHolder,
+      merchantMpCheckoutLink: cfg.merchantMpCheckoutLink,
+      currencySymbol: nextSettings.currencySymbol || cfg.currencySymbol || '$',
+      products: nextProducts,
+      updatedAt: new Date().toISOString(),
+    };
+    void publishPublicCatalogToSupabase(snapshot);
+  };
+
+  const handleSaveCatalogSettings = (updated: OnlineCatalogSettings) => {
+    setCatalogSettings(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.catalogSettings = updated;
+      saveTenantData(selectedTenant.id, cur);
+      publishCatalogSnapshot(updated, cur.catalogProducts || catalogProducts);
+    }
+  };
+
+  const handleSaveCatalogProducts = (updated: CatalogProduct[]) => {
+    setCatalogProducts(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.catalogProducts = updated;
+      saveTenantData(selectedTenant.id, cur);
+      publishCatalogSnapshot(cur.catalogSettings || catalogSettings, updated);
+    }
+  };
+
+  const handleSaveCatalogOrders = (updated: CatalogPickupOrder[]) => {
+    setCatalogOrders(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.catalogOrders = updated;
+      saveTenantData(selectedTenant.id, cur);
+    }
+  };
+
+  const handleRefreshCatalogOrders = async () => {
+    if (!selectedTenant) return;
+    const remoteOrders = await fetchCatalogOrdersForTenantFromSupabase(selectedTenant.id);
+    if (remoteOrders.length === 0) return;
+    const mergedMap = new Map<string, CatalogPickupOrder>();
+    for (const o of catalogOrders) mergedMap.set(o.id, o);
+    for (const r of remoteOrders) {
+      const existing = mergedMap.get(r.id);
+      if (!existing || ((r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt))) {
+        mergedMap.set(r.id, r);
+      }
+    }
+    const merged = Array.from(mergedMap.values()).sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
+    handleSaveCatalogOrders(merged);
+  };
+
+  const handleBillCatalogOrder = (order: CatalogPickupOrder) => {
+    if (order.linkedBoletaNumber) {
+      showToast(`Este pedido ya fue facturado en la boleta #${order.linkedBoletaNumber}.`);
+      return;
+    }
+
+    const normalizeDigits = (val: string) => (val || '').replace(/[^0-9]/g, '');
+    const orderDigits = normalizeDigits(order.customerPhone);
+    const orderNameLower = order.customerName.trim().toLowerCase();
+
+    let targetClient = clients.find((c) => {
+      const cDigits = normalizeDigits(c.phone);
+      if (orderDigits.length >= 6 && cDigits.length >= 6) {
+        return cDigits.endsWith(orderDigits.slice(-8)) || orderDigits.endsWith(cDigits.slice(-8));
+      }
+      return c.name.trim().toLowerCase() === orderNameLower;
+    });
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const nowIso = new Date().toISOString();
+
+    if (!targetClient) {
+      const nextNum = clients.length + 1;
+      targetClient = {
+        id: `cli-web-${Date.now()}`,
+        clientNumber: `WEB-${String(nextNum).padStart(3, '0')}`,
+        name: order.customerName.trim(),
+        contactPerson: order.customerName.trim(),
+        phone: order.customerPhone.trim(),
+        email: '',
+        address: order.deliveryAddress?.trim() || 'Retiro en tienda (Catálogo Online)',
+        zone: order.deliveryMethod === 'envio' ? 'Envío Domicilio' : 'Mostrador / Web',
+        notes: `Cliente registrado desde pedido online #${order.orderNumber}`,
+        creditHistory: {
+          reputationStatus: 'confiable',
+          totalHistoricalBoletas: 1,
+          totalPaidOnTime: 0,
+          totalLatePayments: 0,
+          totalPurgedUnpaid: 0,
+          totalPurgedDebtAmount: 0,
+          purgedBoletas: [],
+          lastEvaluatedAt: nowIso,
+        },
+        createdAt: todayStr,
+      };
+      handleSaveClients([targetClient, ...clients]);
+    } else {
+      const updatedClients = clients.map((c) => {
+        if (c.id !== targetClient!.id) return c;
+        const h = ensureClientCreditHistory(c);
+        return {
+          ...c,
+          address:
+            order.deliveryMethod === 'envio' && order.deliveryAddress?.trim() && !c.address
+              ? order.deliveryAddress.trim()
+              : c.address,
+          creditHistory: {
+            ...h,
+            totalHistoricalBoletas: h.totalHistoricalBoletas + 1,
+            lastEvaluatedAt: nowIso,
+          },
+        };
+      });
+      handleSaveClients(updatedClients);
+    }
+
+    const defaultSalesperson = salespeople.find((s) => s.active) || salespeople[0];
+    const termDays = config.defaultTermDays || 7;
+    const dueDate = addDaysToDate(todayStr, termDays);
+    const boletaNumber = `WEB-${Date.now().toString().slice(-6)}`;
+
+    const lineItems: SaleLineItem[] = order.items.map((it, idx) => ({
+      id: `item-${Date.now()}-${idx}`,
+      name: it.unitLabel ? `${it.productName} (${it.unitLabel})` : it.productName,
+      quantity: it.quantity,
+      unitPrice: it.unitPrice,
+      subtotal: it.subtotal,
+      paymentMode: 'contado_hoy',
+    }));
+
+    const itemSummary = order.items
+      .map((it) => `${it.quantity}x ${it.productName}`)
+      .join(', ');
+
+    const modalityLabel =
+      order.deliveryMethod === 'envio'
+        ? `Envío a domicilio: ${order.deliveryAddress || 'A coordinar'}`
+        : 'Retiro en tienda';
+
+    const newBoleta: Boleta = {
+      id: `bol-${Date.now()}`,
+      boletaNumber,
+      clientId: targetClient.id,
+      clientName: targetClient.name,
+      clientAddress:
+        order.deliveryMethod === 'envio'
+          ? order.deliveryAddress || targetClient.address
+          : targetClient.address || 'Retira en tienda',
+      clientPhone: targetClient.phone || order.customerPhone,
+      salespersonId: defaultSalesperson?.id || 'mostrador',
+      salespersonName: defaultSalesperson?.name || 'Catálogo Online / Dueño',
+      salespersonPhone: defaultSalesperson?.phone || config.senderPhone || config.distributorPhone,
+      saleDate: todayStr,
+      amount: order.totalAmount,
+      termDays,
+      dueDate,
+      notes: `Pedido Catálogo #${order.orderNumber} (${modalityLabel})${
+        order.notes ? ` · ${order.notes}` : ''
+      }`,
+      isSigned: false,
+      status: 'pending',
+      remindersLog: [],
+      createdAt: todayStr,
+      saleMode: 'standard',
+      itemSummary,
+      items: lineItems,
+    };
+
+    handleSaveBoletas([newBoleta, ...boletas]);
+
+    const updatedOrders = catalogOrders.map((o) =>
+      o.id === order.id
+        ? {
+            ...o,
+            linkedBoletaId: newBoleta.id,
+            linkedBoletaNumber: newBoleta.boletaNumber,
+            updatedAt: nowIso,
+          }
+        : o
+    );
+    handleSaveCatalogOrders(updatedOrders);
+
+    showToast(
+      `Boleta #${newBoleta.boletaNumber} facturada desde pedido #${order.orderNumber}. Ya podés cobrarla o enviarla por WhatsApp.`
+    );
+  };
+
   const handleConfirmRendicion = (rendicion: SalespersonRendicion) => {
     if (rendicion.appliedToBoletas) {
       const itemByBoleta = new Map<string, RendicionRouteItem>(
@@ -955,8 +1241,14 @@ export default function App() {
 
   const persistConfigUpdate = (updated: DistributorConfig, customToast?: string) => {
     const nextRubro: BusinessRubro = updated.businessRubro || config.businessRubro || 'distribuidora';
+    const rawMpToken = updated.merchantMpAccessToken?.trim();
+    const { merchantMpAccessToken: _stripped, ...cleanUpdated } = updated;
+    if (rawMpToken && selectedTenant) {
+      void saveMerchantMpAccessTokenSecret(selectedTenant.id, rawMpToken);
+    }
     const normalizedConfig: DistributorConfig = {
-      ...updated,
+      ...cleanUpdated,
+      hasMerchantMpAccessToken: Boolean(rawMpToken || updated.hasMerchantMpAccessToken),
       businessRubro: nextRubro,
     };
     const nextProfile = getRubroProfile(nextRubro);
@@ -1004,6 +1296,11 @@ export default function App() {
       if (updatedCurrentTenant) {
         setSelectedTenant(updatedCurrentTenant);
       }
+      publishCatalogSnapshot(
+        cur.catalogSettings || catalogSettings,
+        cur.catalogProducts || catalogProducts,
+        normalizedConfig
+      );
     }
     saveConfig(normalizedConfig);
     showToast(customToast || 'Configuración y perfil operativo actualizados correctamente');
@@ -2186,7 +2483,7 @@ export default function App() {
   latestClientsRef.current = clients;
 
   useEffect(() => {
-    if (clientPayToken || !currentUser || currentUser.role === 'superadmin') return;
+    if (clientPayToken || publicCatalogHandle || !currentUser || currentUser.role === 'superadmin') return;
     const activeTenantId = selectedTenant?.id || config.tenantId || 'default-tenant';
     let cancelled = false;
 
@@ -2344,7 +2641,26 @@ export default function App() {
             if (typeof window !== 'undefined') {
               window.history.replaceState({}, document.title, window.location.pathname);
             }
+            void ensureCloudHydrated();
             setClientPayToken(null);
+          }}
+        />
+      </Suspense>
+    );
+  }
+
+  // 0b. If public catalog storefront (?catalog=<handle>) -> Standalone storefront (no login needed)
+  if (publicCatalogHandle) {
+    return (
+      <Suspense fallback={<LazyViewFallback />}>
+        <PublicCatalogView
+          catalogHandle={publicCatalogHandle}
+          onExitToApp={() => {
+            if (typeof window !== 'undefined') {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            void ensureCloudHydrated();
+            setPublicCatalogHandle(null);
           }}
         />
       </Suspense>
@@ -2581,6 +2897,7 @@ export default function App() {
         onOpenSubscriptionPay={selectedTenant ? () => setIsSubscriptionPayOpen(true) : undefined}
         isPaidCurrentMonth={tenantSubscriptionStatus?.isPaidForCurrentMonth}
         currentDateRef={currentDateRef}
+        catalogEnabled={selectedTenant?.catalogEnabled !== false}
       />
 
       {/* Right Main Column */}
@@ -3598,6 +3915,34 @@ export default function App() {
                 handleSaveSalespeople(updated);
                 showToast('Vendedor eliminado.');
               }}
+            />
+          </Suspense>
+        )}
+
+        {/* TAB 5B: CATÁLOGO ONLINE Y PEDIDOS PARA RETIRAR */}
+        {activeTab === 'catalogo' && (
+          <Suspense fallback={<LazyViewFallback />}>
+            <CatalogManager
+              config={config}
+              tenant={selectedTenant}
+              settings={catalogSettings}
+              products={catalogProducts}
+              orders={catalogOrders}
+              activeUserName={activeAdmin?.name || currentUser?.fullName || 'Administración'}
+              onSaveSettings={handleSaveCatalogSettings}
+              onSaveProducts={handleSaveCatalogProducts}
+              onSaveOrders={handleSaveCatalogOrders}
+              onRefreshOrders={handleRefreshCatalogOrders}
+              onBillOrder={handleBillCatalogOrder}
+              onOpenReceipt={(receipt) => setActiveReceiptData(receipt)}
+              onOpenPublicPreview={(handle) => {
+                publishCatalogSnapshot(catalogSettings, catalogProducts);
+                if (typeof window !== 'undefined') {
+                  window.history.pushState({}, '', `?catalog=${encodeURIComponent(handle)}`);
+                }
+                setPublicCatalogHandle(handle);
+              }}
+              showToast={showToast}
             />
           </Suspense>
         )}
