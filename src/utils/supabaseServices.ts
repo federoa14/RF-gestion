@@ -1,5 +1,7 @@
 import type {
+  BusinessRubro,
   CatalogPickupOrder,
+  CatalogProduct,
   CatalogStockAlertRequest,
   ClientPaymentOrder,
   PlatformAnnouncement,
@@ -798,16 +800,39 @@ export async function publishPublicCatalogToSupabase(
 
 export async function setPublicCatalogSuperAdminEnabledInSupabase(
   tenant: Tenant,
-  enabled: boolean
+  enabled: boolean,
+  overrides?: {
+    catalogRubro?: BusinessRubro;
+    rubroFilters?: string[];
+    customSubfilters?: string[];
+    products?: CatalogProduct[];
+  }
 ): Promise<void> {
   if (!tenant?.id) return;
   const key = `public_catalog_${tenant.id}`;
-  const existing = await readCloudJsonRecord<PublishedPublicCatalog>(key);
+  let existing: PublishedPublicCatalog | null = null;
+  try {
+    const localRaw = dbGetItem(key);
+    if (localRaw) existing = JSON.parse(localRaw) as PublishedPublicCatalog;
+  } catch {
+    existing = null;
+  }
+  if (!existing) {
+    existing = await readCloudJsonRecord<PublishedPublicCatalog>(key);
+  }
+
+  const nowIso = new Date().toISOString();
   if (existing) {
     const updated: PublishedPublicCatalog = {
       ...existing,
       enabledBySuperAdmin: enabled,
-      updatedAt: new Date().toISOString(),
+      logoUrl: tenant.config?.distributorLogoUrl || tenant.logoUrl || existing.logoUrl,
+      icon: tenant.config?.distributorIcon || tenant.icon || existing.icon,
+      catalogRubro: overrides?.catalogRubro ?? tenant.catalogRubro ?? existing.catalogRubro,
+      rubroFilters: overrides?.rubroFilters ?? existing.rubroFilters,
+      customSubfilters: overrides?.customSubfilters ?? existing.customSubfilters,
+      products: overrides?.products ?? existing.products,
+      updatedAt: nowIso,
     };
     try {
       dbSetItem(key, JSON.stringify(updated));
@@ -815,6 +840,31 @@ export async function setPublicCatalogSuperAdminEnabledInSupabase(
       // ignore
     }
     await insertOrUpdateCloudStoreKey(key, updated);
+  } else if (enabled) {
+    const createdSnapshot: PublishedPublicCatalog = {
+      tenantId: tenant.id,
+      tenantCode: tenant.tenantCode,
+      enabledBySuperAdmin: true,
+      published: true,
+      catalogRubro: overrides?.catalogRubro ?? tenant.catalogRubro ?? tenant.businessRubro ?? 'distribuidora',
+      rubroFilters: overrides?.rubroFilters,
+      customSubfilters: overrides?.customSubfilters,
+      storeName: tenant.name,
+      tagline:
+        'Armá tu carrito de compras, elegí retiro en tienda o envío a domicilio y envialo por WhatsApp.',
+      logoUrl: tenant.config?.distributorLogoUrl || tenant.logoUrl,
+      icon: tenant.config?.distributorIcon || tenant.icon,
+      whatsappPhone: tenant.phone || '',
+      allowPickup: true,
+      allowDelivery: true,
+      pickupAddress: tenant.address || '',
+      pickupHours: 'Lunes a Sábado · 9:00 a 19:00 hs',
+      paymentNote: 'Efectivo, transferencia o link de pago',
+      currencySymbol: tenant.config?.currencySymbol || '$',
+      products: overrides?.products || [],
+      updatedAt: nowIso,
+    };
+    await publishPublicCatalogToSupabase(createdSnapshot);
   }
 }
 
@@ -987,6 +1037,19 @@ export async function fetchPublicCatalogFromSupabase(
     if (resolvedTenantObj) {
       resolvedCatalog = {
         ...resolvedCatalog,
+        logoUrl:
+          resolvedTenantObj.config?.distributorLogoUrl ||
+          resolvedTenantObj.logoUrl ||
+          resolvedCatalog.logoUrl,
+        icon:
+          resolvedTenantObj.config?.distributorIcon ||
+          resolvedTenantObj.icon ||
+          resolvedCatalog.icon,
+        catalogRubro:
+          resolvedTenantObj.catalogRubro ||
+          resolvedCatalog.catalogRubro ||
+          resolvedTenantObj.businessRubro ||
+          resolvedTenantObj.config?.businessRubro,
         enabledBySuperAdmin:
           resolvedTenantObj.catalogEnabled !== false &&
           resolvedTenantObj.status !== 'suspended' &&

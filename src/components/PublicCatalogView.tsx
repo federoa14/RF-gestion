@@ -18,6 +18,7 @@ import {
   Star,
   Truck,
   Bell,
+  Tag,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
@@ -31,6 +32,7 @@ import {
   submitPublicCatalogOrderToSupabase,
 } from '../utils/supabaseServices';
 import { formatCurrency } from '../utils/alerts';
+import { getCatalogRubroPreset, normalizeFilterList } from '../utils/catalogRubros';
 import { createWhatsAppUrl } from '../utils/whatsapp';
 import { BrandMark } from './BrandMark';
 
@@ -94,6 +96,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Todas');
+  const [selectedSubfilter, setSelectedSubfilter] = useState('Todos');
   const [cart, setCart] = useState<Record<string, CartEntry>>({});
   const [isCartOpen, setIsCartOpen] = useState(false);
 
@@ -148,18 +151,38 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     };
   }, [catalogHandle]);
 
+  const rubroPreset = useMemo(
+    () => (catalog?.catalogRubro ? getCatalogRubroPreset(catalog.catalogRubro) : null),
+    [catalog?.catalogRubro]
+  );
+
   const activeProducts = useMemo(() => {
     if (!catalog?.products) return [];
-    return catalog.products.filter((p) => p.available);
+    const targetRubro = catalog.catalogRubro;
+    return catalog.products.filter(
+      (p) => p.available && (!targetRubro || !p.rubro || p.rubro === targetRubro)
+    );
   }, [catalog]);
 
   const categories = useMemo(() => {
-    const set = new Set<string>(['Todas']);
+    const primaryFilters = normalizeFilterList(
+      catalog?.rubroFilters && catalog.rubroFilters.length > 0
+        ? catalog.rubroFilters
+        : rubroPreset?.defaultFilters
+    );
+    const set = new Set<string>(['Todas', ...primaryFilters]);
     activeProducts.forEach((p) => {
       if (p.category?.trim()) set.add(p.category.trim());
     });
     return Array.from(set);
-  }, [activeProducts]);
+  }, [activeProducts, catalog?.rubroFilters, rubroPreset]);
+
+  const availableSubfilters = useMemo(() => {
+    return normalizeFilterList([
+      ...(catalog?.customSubfilters || []),
+      ...activeProducts.flatMap((p) => p.subfilters || []),
+    ]);
+  }, [catalog?.customSubfilters, activeProducts]);
 
   const normalizeSearchText = (text: string): string =>
     text
@@ -174,14 +197,22 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     return activeProducts
       .filter((p) => {
         if (selectedCategory !== 'Todas' && p.category !== selectedCategory) return false;
+        if (
+          selectedSubfilter !== 'Todos' &&
+          !(p.subfilters || []).some(
+            (sf) => sf.trim().toLowerCase() === selectedSubfilter.trim().toLowerCase()
+          )
+        ) {
+          return false;
+        }
         if (tokens.length === 0) return true;
         const searchable = normalizeSearchText(
-          `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.unitLabel || ''} ${p.sku || ''}`
+          `${p.name || ''} ${p.description || ''} ${p.category || ''} ${(p.subfilters || []).join(' ')} ${p.unitLabel || ''} ${p.sku || ''}`
         );
         return tokens.every((token) => searchable.includes(token));
       })
       .sort((a, b) => Number(Boolean(b.featured)) - Number(Boolean(a.featured)));
-  }, [activeProducts, searchTerm, selectedCategory]);
+  }, [activeProducts, searchTerm, selectedCategory, selectedSubfilter]);
 
   const cartItems = useMemo(() => Object.values(cart), [cart]);
   const totalCartUnits = useMemo(
@@ -527,7 +558,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                 {catalog.storeName}
               </h1>
               <p className="text-[11px] text-slate-500 truncate">
-                Catálogo Online · Carrito por WhatsApp
+                {rubroPreset ? `${rubroPreset.shortLabel} · ` : ''}Catálogo Online · Carrito por WhatsApp
               </p>
             </div>
           </div>
@@ -585,27 +616,42 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       {/* Storefront Hero Strip */}
       <section className="bg-[#0B1933] text-white">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-7 sm:py-9 flex flex-col md:flex-row md:items-center justify-between gap-5">
-          <div className="space-y-2 max-w-2xl">
-            <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
-              {catalog.storeName}
-            </h2>
-            <p className="text-sm text-slate-300 leading-relaxed">
-              {catalog.tagline ||
-                'Armá tu carrito de compras, elegí retiro en tienda o envío a domicilio y envialo por WhatsApp.'}
-            </p>
-            <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-300">
-              {catalog.allowPickup !== false && (
-                <span className="inline-flex items-center gap-1.5">
-                  <Store className="w-3.5 h-3.5 text-sky-300" />
-                  <span>Retiro en tienda disponible</span>
-                </span>
+          <div className="flex items-start gap-4 sm:gap-5 max-w-2xl">
+            <div className="shrink-0 bg-white/95 rounded-2xl p-1 shadow-md">
+              <BrandMark
+                logoUrl={catalog.logoUrl}
+                icon={catalog.icon}
+                name={catalog.storeName}
+                size="lg"
+              />
+            </div>
+            <div className="space-y-2 min-w-0">
+              {rubroPreset && (
+                <div className="text-[11px] font-bold uppercase tracking-wider text-sky-300">
+                  {rubroPreset.shortLabel}
+                </div>
               )}
-              {catalog.allowDelivery !== false && (
-                <span className="inline-flex items-center gap-1.5">
-                  <Truck className="w-3.5 h-3.5 text-emerald-300" />
-                  <span>Envío a domicilio disponible</span>
-                </span>
-              )}
+              <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">
+                {catalog.storeName}
+              </h2>
+              <p className="text-sm text-slate-300 leading-relaxed">
+                {catalog.tagline ||
+                  'Armá tu carrito de compras, elegí retiro en tienda o envío a domicilio y envialo por WhatsApp.'}
+              </p>
+              <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-slate-300">
+                {catalog.allowPickup !== false && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5 text-sky-300" />
+                    <span>Retiro en tienda disponible</span>
+                  </span>
+                )}
+                {catalog.allowDelivery !== false && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <Truck className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>Envío a domicilio disponible</span>
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -689,10 +735,46 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
             </div>
           </div>
 
+          {availableSubfilters.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 pt-1 border-t border-slate-200/70">
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 mr-1 shrink-0">
+                <Tag className="w-3 h-3 text-[#0B1933]" />
+                <span>Subfiltros:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedSubfilter('Todos')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer whitespace-nowrap ${
+                  selectedSubfilter === 'Todos'
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                Todos
+              </button>
+              {availableSubfilters.map((sf) => (
+                <button
+                  key={sf}
+                  type="button"
+                  onClick={() => setSelectedSubfilter(sf)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                    selectedSubfilter.toLowerCase() === sf.toLowerCase()
+                      ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {sf}
+                </button>
+              ))}
+            </div>
+          )}
+
           {activeProducts.length > 0 && (
             <div className="flex items-center justify-between text-xs text-slate-500">
               <span className="font-mono tabular-nums">
-                {searchTerm.trim() || selectedCategory !== 'Todas' ? (
+                {searchTerm.trim() ||
+                selectedCategory !== 'Todas' ||
+                selectedSubfilter !== 'Todos' ? (
                   <>
                     Mostrando <strong className="text-slate-800">{filteredProducts.length}</strong> de{' '}
                     <strong className="text-slate-800">{activeProducts.length}</strong> productos
@@ -704,12 +786,15 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                 )}
               </span>
 
-              {(searchTerm.trim() || selectedCategory !== 'Todas') && (
+              {(searchTerm.trim() ||
+                selectedCategory !== 'Todas' ||
+                selectedSubfilter !== 'Todos') && (
                 <button
                   type="button"
                   onClick={() => {
                     setSearchTerm('');
                     setSelectedCategory('Todas');
+                    setSelectedSubfilter('Todos');
                   }}
                   className="text-xs font-semibold text-[#0B1933] hover:underline cursor-pointer"
                 >
@@ -736,19 +821,23 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                   : 'Probá con otra palabra clave o limpiá los filtros activos.'}
               </p>
             </div>
-            {activeProducts.length > 0 && (searchTerm.trim() || selectedCategory !== 'Todas') && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchTerm('');
-                  setSelectedCategory('Todas');
-                }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Ver todos los productos</span>
-              </button>
-            )}
+            {activeProducts.length > 0 &&
+              (searchTerm.trim() ||
+                selectedCategory !== 'Todas' ||
+                selectedSubfilter !== 'Todos') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setSelectedCategory('Todas');
+                    setSelectedSubfilter('Todos');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Ver todos los productos</span>
+                </button>
+              )}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -814,6 +903,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       <h3 className="text-base font-bold text-slate-900 leading-snug">
                         {product.name}
                       </h3>
+                      {product.subfilters && product.subfilters.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {product.subfilters.map((sf) => (
+                            <span
+                              key={sf}
+                              className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-semibold"
+                            >
+                              {sf}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {product.description && (
                         <p className="text-xs text-slate-600 leading-relaxed line-clamp-3">
                           {product.description}

@@ -29,6 +29,9 @@ import {
   Barcode,
   Bell,
   Minus,
+  Tag,
+  SlidersHorizontal,
+  Palette,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
@@ -45,6 +48,11 @@ import {
   generatePaymentReceiptWhatsAppMessage,
 } from '../utils/whatsapp';
 import { buildPublicCatalogHandle } from '../utils/supabaseServices';
+import {
+  getCatalogRubroPreset,
+  normalizeFilterList,
+} from '../utils/catalogRubros';
+import { BrandMark } from './BrandMark';
 import type { ReceiptModalData } from './PaymentReceiptModal';
 import { WebOrderDetailModal } from './WebOrderDetailModal';
 
@@ -65,18 +73,11 @@ interface CatalogManagerProps {
   onBillOrder?: (order: CatalogPickupOrder) => void;
   onOpenReceipt?: (receipt: ReceiptModalData) => void;
   onOpenPublicPreview: (handle: string) => void;
+  onOpenEditBrand?: () => void;
   showToast: (msg: string) => void;
 }
 
-const DEFAULT_CATEGORIES = [
-  'Destacados',
-  'Bebidas',
-  'Almacén',
-  'Indumentaria',
-  'Limpieza',
-  'Combos y Ofertas',
-  'General',
-];
+
 
 async function compressProductImageFile(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -133,11 +134,16 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   onBillOrder,
   onOpenReceipt,
   onOpenPublicPreview,
+  onOpenEditBrand,
   showToast,
 }) => {
   const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'avisos_stock' | 'configuracion'>('productos');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
+  const [selectedSubfilter, setSelectedSubfilter] = useState<string>('Todos');
+  const [newSubfilterInput, setNewSubfilterInput] = useState('');
+  const [settingsFilterInput, setSettingsFilterInput] = useState('');
+  const [settingsSubfilterInput, setSettingsSubfilterInput] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isRefreshingOrders, setIsRefreshingOrders] = useState(false);
   const [isRefreshingAlerts, setIsRefreshingAlerts] = useState(false);
@@ -146,9 +152,22 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     () => settings.whatsappPhone || config.senderPhone || config.distributorPhone || ''
   );
 
+  const activeCatalogRubro =
+    tenant?.catalogRubro || settings.catalogRubro || config.businessRubro || 'distribuidora';
+  const rubroPreset = useMemo(
+    () => getCatalogRubroPreset(activeCatalogRubro),
+    [activeCatalogRubro]
+  );
+
   // Store settings local draft
   const [draftSettings, setDraftSettings] = useState<OnlineCatalogSettings>(() => ({
     published: settings.published !== false,
+    catalogRubro: activeCatalogRubro,
+    rubroFilters:
+      normalizeFilterList(settings.rubroFilters).length > 0
+        ? normalizeFilterList(settings.rubroFilters)
+        : rubroPreset.defaultFilters,
+    customSubfilters: normalizeFilterList(settings.customSubfilters),
     storeName: settings.storeName || config.distributorName || tenant?.name || 'Mi Catálogo',
     tagline:
       settings.tagline ||
@@ -175,9 +194,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   useEffect(() => {
     const resolvedPhone =
       settings.whatsappPhone || config.senderPhone || config.distributorPhone || '';
+    const presetForSync = getCatalogRubroPreset(
+      tenant?.catalogRubro || settings.catalogRubro || config.businessRubro || 'distribuidora'
+    );
+    const resolvedFilters =
+      normalizeFilterList(settings.rubroFilters).length > 0
+        ? normalizeFilterList(settings.rubroFilters)
+        : presetForSync.defaultFilters;
+
     setInlineWhatsappDraft(resolvedPhone);
     setDraftSettings({
       published: settings.published !== false,
+      catalogRubro:
+        tenant?.catalogRubro || settings.catalogRubro || config.businessRubro || 'distribuidora',
+      rubroFilters: resolvedFilters,
+      customSubfilters: normalizeFilterList(settings.customSubfilters),
       storeName: settings.storeName || config.distributorName || tenant?.name || 'Mi Catálogo',
       tagline:
         settings.tagline ||
@@ -200,7 +231,16 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
       currencySymbol: settings.currencySymbol || config.currencySymbol || '$',
     });
-  }, [settings, tenant?.id, config.distributorName, config.senderPhone, config.distributorPhone, config.currencySymbol]);
+  }, [
+    settings,
+    tenant?.id,
+    tenant?.catalogRubro,
+    config.distributorName,
+    config.senderPhone,
+    config.distributorPhone,
+    config.currencySymbol,
+    config.businessRubro,
+  ]);
 
   // Product Form Modal
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -210,6 +250,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [productPrice, setProductPrice] = useState('');
   const [productStockQuantity, setProductStockQuantity] = useState('');
   const [productCategory, setProductCategory] = useState('General');
+  const [productSubfilters, setProductSubfilters] = useState<string[]>([]);
+  const [modalNewSubfilter, setModalNewSubfilter] = useState('');
   const [productUnitLabel, setProductUnitLabel] = useState('Unidad');
   const [productDescription, setProductDescription] = useState('');
   const [productImageUrl, setProductImageUrl] = useState('');
@@ -237,27 +279,73 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     return `${window.location.origin}/?catalog=${encodeURIComponent(catalogHandle)}`;
   }, [catalogHandle]);
 
+  // Strictly isolate products loaded into this catalog's exclusive rubro
+  const rubroProducts = useMemo(
+    () => products.filter((p) => (p.rubro || activeCatalogRubro) === activeCatalogRubro),
+    [products, activeCatalogRubro]
+  );
+
+  const activeRubroFilters = useMemo(() => {
+    const custom = normalizeFilterList(settings.rubroFilters);
+    return custom.length > 0 ? custom : rubroPreset.defaultFilters;
+  }, [settings.rubroFilters, rubroPreset]);
+
+  const savedCustomSubfilters = useMemo(
+    () => normalizeFilterList(settings.customSubfilters),
+    [settings.customSubfilters]
+  );
+
+  const activeSubfilters = useMemo(
+    () =>
+      normalizeFilterList([
+        ...savedCustomSubfilters,
+        ...rubroProducts.flatMap((p) => p.subfilters || []),
+      ]),
+    [savedCustomSubfilters, rubroProducts]
+  );
+
   const availableCategories = useMemo(() => {
-    const set = new Set<string>(['Todas']);
-    products.forEach((p) => {
+    const set = new Set<string>(['Todas', ...activeRubroFilters]);
+    rubroProducts.forEach((p) => {
       if (p.category?.trim()) set.add(p.category.trim());
     });
     return Array.from(set);
-  }, [products]);
+  }, [rubroProducts, activeRubroFilters]);
+
+  useEffect(() => {
+    if (selectedCategory !== 'Todas' && !availableCategories.includes(selectedCategory)) {
+      setSelectedCategory('Todas');
+    }
+  }, [availableCategories, selectedCategory]);
+
+  useEffect(() => {
+    if (selectedSubfilter !== 'Todos' && !activeSubfilters.includes(selectedSubfilter)) {
+      setSelectedSubfilter('Todos');
+    }
+  }, [activeSubfilters, selectedSubfilter]);
 
   const filteredProducts = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
-    return products.filter((p) => {
+    return rubroProducts.filter((p) => {
       if (selectedCategory !== 'Todas' && p.category !== selectedCategory) return false;
+      if (
+        selectedSubfilter !== 'Todos' &&
+        !(p.subfilters || []).some(
+          (sf) => sf.trim().toLowerCase() === selectedSubfilter.trim().toLowerCase()
+        )
+      ) {
+        return false;
+      }
       if (!q) return true;
       return (
         p.name.toLowerCase().includes(q) ||
         p.description.toLowerCase().includes(q) ||
         p.category.toLowerCase().includes(q) ||
-        (p.sku || '').toLowerCase().includes(q)
+        (p.sku || '').toLowerCase().includes(q) ||
+        (p.subfilters || []).some((sf) => sf.toLowerCase().includes(q))
       );
     });
-  }, [products, searchTerm, selectedCategory]);
+  }, [rubroProducts, searchTerm, selectedCategory, selectedSubfilter]);
 
   const productMap = useMemo(() => {
     const byId = new Map<string, CatalogProduct>();
@@ -275,8 +363,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   }, [orders, selectedOrderForDetail]);
 
   const activeProductsCount = useMemo(
-    () => products.filter((p) => p.available).length,
-    [products]
+    () => rubroProducts.filter((p) => p.available).length,
+    [rubroProducts]
   );
 
   const pendingPickupOrdersCount = useMemo(
@@ -316,10 +404,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
   const outOfStockProductsCount = useMemo(
     () =>
-      products.filter(
+      rubroProducts.filter(
         (p) => p.available && typeof p.stockQuantity === 'number' && p.stockQuantity <= 0
       ).length,
-    [products]
+    [rubroProducts]
   );
 
   const effectiveWhatsappPhone = (
@@ -385,14 +473,88 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     showToast(`WhatsApp del carrito web actualizado a ${cleaned} y publicado.`);
   };
 
+  const handleAddCustomSubfilter = (rawValue: string) => {
+    const clean = rawValue.trim();
+    if (!clean) return;
+    const nextSubfilters = normalizeFilterList([...savedCustomSubfilters, clean]);
+    const nextSettings: OnlineCatalogSettings = {
+      ...draftSettings,
+      ...settings,
+      catalogRubro: activeCatalogRubro,
+      rubroFilters: activeRubroFilters,
+      customSubfilters: nextSubfilters,
+      updatedAt: new Date().toISOString(),
+    };
+    setDraftSettings((prev) => ({ ...prev, customSubfilters: nextSubfilters }));
+    onSaveSettings(nextSettings);
+    setNewSubfilterInput('');
+    showToast(`Subfiltro "${clean}" agregado al catálogo.`);
+  };
+
+  const handleRemoveCustomSubfilter = (targetName: string) => {
+    const targetLower = targetName.trim().toLowerCase();
+    const nextSubfilters = savedCustomSubfilters.filter(
+      (sf) => sf.toLowerCase() !== targetLower
+    );
+    const nextSettings: OnlineCatalogSettings = {
+      ...draftSettings,
+      ...settings,
+      catalogRubro: activeCatalogRubro,
+      rubroFilters: activeRubroFilters,
+      customSubfilters: nextSubfilters,
+      updatedAt: new Date().toISOString(),
+    };
+    setDraftSettings((prev) => ({ ...prev, customSubfilters: nextSubfilters }));
+    onSaveSettings(nextSettings);
+    if (selectedSubfilter.toLowerCase() === targetLower) {
+      setSelectedSubfilter('Todos');
+    }
+    showToast(`Subfiltro "${targetName}" quitado de la lista.`);
+  };
+
+  const handleToggleProductSubfilter = (sf: string) => {
+    const lower = sf.trim().toLowerCase();
+    setProductSubfilters((prev) => {
+      const exists = prev.some((x) => x.trim().toLowerCase() === lower);
+      if (exists) return prev.filter((x) => x.trim().toLowerCase() !== lower);
+      return normalizeFilterList([...prev, sf]);
+    });
+  };
+
+  const handleAddModalSubfilter = () => {
+    const clean = modalNewSubfilter.trim();
+    if (!clean) return;
+    setProductSubfilters((prev) => normalizeFilterList([...prev, clean]));
+    if (!savedCustomSubfilters.some((sf) => sf.toLowerCase() === clean.toLowerCase())) {
+      const nextSubfilters = normalizeFilterList([...savedCustomSubfilters, clean]);
+      const nextSettings: OnlineCatalogSettings = {
+        ...draftSettings,
+        ...settings,
+        catalogRubro: activeCatalogRubro,
+        rubroFilters: activeRubroFilters,
+        customSubfilters: nextSubfilters,
+        updatedAt: new Date().toISOString(),
+      };
+      setDraftSettings((prev) => ({ ...prev, customSubfilters: nextSubfilters }));
+      onSaveSettings(nextSettings);
+    }
+    setModalNewSubfilter('');
+  };
+
   const openNewProductModal = () => {
     setEditingProduct(null);
     setProductName('');
     setProductSku('');
     setProductPrice('');
     setProductStockQuantity('');
-    setProductCategory('General');
-    setProductUnitLabel('Unidad');
+    setProductCategory(
+      selectedCategory !== 'Todas'
+        ? selectedCategory
+        : activeRubroFilters[0] || rubroPreset.defaultFilters[0] || 'General'
+    );
+    setProductSubfilters(selectedSubfilter !== 'Todos' ? [selectedSubfilter] : []);
+    setModalNewSubfilter('');
+    setProductUnitLabel(rubroPreset.defaultUnitLabel || 'Unidad');
     setProductDescription('');
     setProductImageUrl('');
     setProductAvailable(true);
@@ -408,8 +570,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductStockQuantity(
       typeof product.stockQuantity === 'number' ? String(product.stockQuantity) : ''
     );
-    setProductCategory(product.category || 'General');
-    setProductUnitLabel(product.unitLabel || 'Unidad');
+    setProductCategory(product.category || activeRubroFilters[0] || 'General');
+    setProductSubfilters(normalizeFilterList(product.subfilters));
+    setModalNewSubfilter('');
+    setProductUnitLabel(product.unitLabel || rubroPreset.defaultUnitLabel || 'Unidad');
     setProductDescription(product.description || '');
     setProductImageUrl(product.imageUrl || '');
     setProductAvailable(product.available);
@@ -457,8 +621,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       parsedStock = Math.floor(numericStock);
     }
 
+    const cleanSubfilters = normalizeFilterList(productSubfilters);
+    const cleanCategory = productCategory.trim() || activeRubroFilters[0] || 'General';
     const now = new Date().toISOString();
     const cleanSku = productSku.trim() || undefined;
+
     if (editingProduct) {
       const wasOutOfStock =
         typeof editingProduct.stockQuantity === 'number' && editingProduct.stockQuantity <= 0;
@@ -473,8 +640,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               sku: cleanSku,
               price: numericPrice,
               stockQuantity: parsedStock,
-              category: productCategory.trim() || 'General',
-              unitLabel: productUnitLabel.trim() || 'Unidad',
+              rubro: activeCatalogRubro,
+              category: cleanCategory,
+              subfilters: cleanSubfilters,
+              unitLabel: productUnitLabel.trim() || rubroPreset.defaultUnitLabel || 'Unidad',
               description: productDescription.trim(),
               imageUrl: productImageUrl.trim() || undefined,
               available: productAvailable,
@@ -489,7 +658,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           `Stock repuesto en "${cleanName}". Tenés ${waitingCount} cliente(s) para avisar en "Avisos de Stock".`
         );
       } else {
-        showToast(`Producto "${cleanName}" actualizado en el catálogo.`);
+        showToast(`Producto "${cleanName}" actualizado en el rubro ${rubroPreset.shortLabel}.`);
       }
     } else {
       const created: CatalogProduct = {
@@ -498,8 +667,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         sku: cleanSku,
         price: numericPrice,
         stockQuantity: parsedStock,
-        category: productCategory.trim() || 'General',
-        unitLabel: productUnitLabel.trim() || 'Unidad',
+        rubro: activeCatalogRubro,
+        category: cleanCategory,
+        subfilters: cleanSubfilters,
+        unitLabel: productUnitLabel.trim() || rubroPreset.defaultUnitLabel || 'Unidad',
         description: productDescription.trim(),
         imageUrl: productImageUrl.trim() || undefined,
         available: productAvailable,
@@ -508,7 +679,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         updatedAt: now,
       };
       onSaveProducts([created, ...products]);
-      showToast(`Producto "${cleanName}" publicado en tu catálogo online.`);
+      showToast(`Producto "${cleanName}" cargado exclusivamente en ${rubroPreset.shortLabel}.`);
     }
     setIsProductModalOpen(false);
   };
@@ -602,8 +773,13 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       showToast('Activá al menos una modalidad: Retiro en tienda o Envío a domicilio.');
       return;
     }
+    const cleanRubroFilters = normalizeFilterList(draftSettings.rubroFilters);
     const next: OnlineCatalogSettings = {
       ...draftSettings,
+      catalogRubro: activeCatalogRubro,
+      rubroFilters:
+        cleanRubroFilters.length > 0 ? cleanRubroFilters : rubroPreset.defaultFilters,
+      customSubfilters: normalizeFilterList(draftSettings.customSubfilters),
       allowPickup: draftSettings.allowPickup !== false,
       allowDelivery: draftSettings.allowDelivery !== false,
       storeName: draftSettings.storeName?.trim() || config.distributorName || 'Mi Catálogo',
@@ -621,7 +797,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     };
     setDraftSettings(next);
     onSaveSettings(next);
-    showToast('Configuración y enlace del catálogo guardados y publicados.');
+    showToast('Configuración, filtros y enlace del catálogo guardados y publicados.');
   };
 
   const resolveOrderPaymentLabel = (
@@ -894,11 +1070,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-[#0B1933] text-white flex items-center justify-center shrink-0">
-              <Store className="w-5 h-5" />
-            </div>
+            <BrandMark
+              logoUrl={config.distributorLogoUrl || tenant?.logoUrl}
+              icon={config.distributorIcon || tenant?.icon}
+              name={settings.storeName || config.distributorName || tenant?.name || 'Catálogo'}
+              size="md"
+            />
             <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg font-bold text-slate-900 tracking-tight">
                   Tu Catálogo Online para Pedidos y Retiro
                 </h2>
@@ -911,9 +1090,23 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 >
                   {settings.published !== false ? 'Publicado en la página' : 'En borrador'}
                 </span>
+                <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-[#0B1933]/8 text-[#0B1933] border border-[#0B1933]/20">
+                  Rubro: {rubroPreset.shortLabel}
+                </span>
+                {onOpenEditBrand && (
+                  <button
+                    type="button"
+                    onClick={onOpenEditBrand}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+                    title="El logo del sistema se muestra automáticamente en tu página web pública"
+                  >
+                    <Palette className="w-3 h-3 text-[#0B1933]" />
+                    <span>Logo web sincronizado</span>
+                  </button>
+                )}
               </div>
               <p className="text-xs text-slate-500 mt-1">
-                Cargá fotos, precio y descripción. Compartí el enlace para que tus clientes armen su pedido y lo envíen a tu WhatsApp para pasar a retirar.
+                Cada producto que cargues se guarda exclusivamente en <strong>{rubroPreset.label}</strong> con el logo de tu empresa y tus filtros/subfiltros personalizados.
               </p>
             </div>
           </div>
@@ -1091,7 +1284,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Productos ({products.length})
+              Productos ({rubroProducts.length})
             </button>
             <button
               type="button"
@@ -1165,35 +1358,144 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       {/* SUB-TAB 1: PRODUCTOS */}
       {subTab === 'productos' && (
         <div className="space-y-4">
-          {/* Search & Category Filter */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative flex-1 max-w-md">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar producto por nombre, código o descripción..."
-                className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
-              />
+          {/* Search & Primary Rubro Filters */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder={`Buscar en ${rubroPreset.shortLabel} por nombre, código o subfiltro...`}
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
+                />
+              </div>
+
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                {availableCategories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                      selectedCategory === cat
+                        ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-              {availableCategories.map((cat) => (
+            {/* Client Custom Subfilters Bar */}
+            <div className="pt-2.5 border-t border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600 mr-1">
+                  <Tag className="w-3.5 h-3.5 text-[#0B1933]" />
+                  <span>Subfiltros:</span>
+                </span>
                 <button
-                  key={cat}
                   type="button"
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
-                    selectedCategory === cat
-                      ? 'bg-[#0B1933] text-white border-[#0B1933]'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  onClick={() => setSelectedSubfilter('Todos')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-colors cursor-pointer ${
+                    selectedSubfilter === 'Todos'
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  {cat}
+                  Todos
                 </button>
-              ))}
+                {activeSubfilters.map((sf) => {
+                  const isSaved = savedCustomSubfilters.some(
+                    (x) => x.toLowerCase() === sf.toLowerCase()
+                  );
+                  const isSelected = selectedSubfilter.toLowerCase() === sf.toLowerCase();
+                  return (
+                    <div
+                      key={sf}
+                      className={`inline-flex items-center rounded-md border text-[11px] font-semibold overflow-hidden ${
+                        isSelected
+                          ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                          : 'bg-slate-50 text-slate-700 border-slate-200'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSubfilter(sf)}
+                        className="px-2.5 py-1 hover:opacity-90 cursor-pointer"
+                      >
+                        {sf}
+                      </button>
+                      {isSaved && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCustomSubfilter(sf)}
+                          title={`Quitar subfiltro "${sf}"`}
+                          className={`px-1.5 py-1 border-l cursor-pointer ${
+                            isSelected
+                              ? 'border-white/20 hover:bg-white/15 text-white'
+                              : 'border-slate-200 hover:bg-rose-50 text-slate-400 hover:text-rose-600'
+                          }`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleAddCustomSubfilter(newSubfilterInput);
+                }}
+                className="flex items-center gap-1.5 shrink-0"
+              >
+                <input
+                  type="text"
+                  value={newSubfilterInput}
+                  onChange={(e) => setNewSubfilterInput(e.target.value)}
+                  placeholder="Nuevo subfiltro (ej. Remeras, Ofertas...)"
+                  className="w-52 sm:w-56 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
+                />
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer whitespace-nowrap"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Agregar</span>
+                </button>
+              </form>
             </div>
+
+            {/* Suggested subfilters for quick 1-click addition */}
+            {rubroPreset.suggestedSubfilters.some(
+              (s) => !activeSubfilters.some((ex) => ex.toLowerCase() === s.toLowerCase())
+            ) && (
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500">
+                <span className="font-semibold">Sugeridos para {rubroPreset.shortLabel}:</span>
+                {rubroPreset.suggestedSubfilters
+                  .filter(
+                    (s) => !activeSubfilters.some((ex) => ex.toLowerCase() === s.toLowerCase())
+                  )
+                  .slice(0, 6)
+                  .map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => handleAddCustomSubfilter(s)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                      <span>{s}</span>
+                    </button>
+                  ))}
+              </div>
+            )}
           </div>
 
           {filteredProducts.length === 0 ? (
@@ -1203,17 +1505,17 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               </div>
               <div className="space-y-1 max-w-md mx-auto">
                 <h3 className="text-sm font-bold text-slate-900">
-                  {products.length === 0
-                    ? 'Todavía no cargaste productos en tu catálogo'
-                    : 'No hay productos que coincidan con tu búsqueda'}
+                  {rubroProducts.length === 0
+                    ? `Todavía no cargaste productos en ${rubroPreset.shortLabel}`
+                    : 'No hay productos que coincidan con los filtros'}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  {products.length === 0
-                    ? 'Agregá tu primer artículo con imagen, precio y descripción para publicar tu catálogo online y recibir pedidos por WhatsApp.'
-                    : 'Probá cambiando el texto o la categoría seleccionada.'}
+                  {rubroProducts.length === 0
+                    ? `Agregá tu primer artículo en ${rubroPreset.shortLabel} (${activeRubroFilters.join(', ')}) para publicar tu catálogo online.`
+                    : 'Probá cambiando el texto, el filtro principal o el subfiltro seleccionado.'}
                 </p>
               </div>
-              {products.length === 0 && (
+              {rubroProducts.length === 0 ? (
                 <button
                   type="button"
                   onClick={openNewProductModal}
@@ -1221,6 +1523,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 >
                   <Plus className="w-4 h-4" />
                   <span>Cargar Primer Producto</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setSelectedCategory('Todas');
+                    setSelectedSubfilter('Todos');
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-slate-900 text-white cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Limpiar filtros</span>
                 </button>
               )}
             </div>
@@ -1296,6 +1611,18 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         <h3 className="text-sm font-bold text-slate-900 leading-snug line-clamp-2">
                           {product.name}
                         </h3>
+                        {product.subfilters && product.subfilters.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {product.subfilters.map((sf) => (
+                              <span
+                                key={sf}
+                                className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-700 text-[10px] font-semibold"
+                              >
+                                {sf}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
                           {product.description || 'Sin descripción cargada.'}
                         </p>
@@ -2115,6 +2442,176 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               />
             </div>
 
+            <div className="sm:col-span-2 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-[#0B1933]" />
+                    <span>Rubro asignado y Filtros del Catálogo</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Rubro activo: <strong>{rubroPreset.label}</strong> (definido desde SuperGestión). Todos los productos se cargan en este rubro.
+                  </p>
+                </div>
+                {onOpenEditBrand && (
+                  <button
+                    type="button"
+                    onClick={onOpenEditBrand}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 cursor-pointer shrink-0 self-start sm:self-auto"
+                  >
+                    <Palette className="w-3.5 h-3.5 text-[#0B1933]" />
+                    <span>Cambiar Logo del Sistema / Web</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Primary Rubro Filters Editor */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-700">
+                  Filtros principales del rubro ({rubroPreset.shortLabel})
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {normalizeFilterList(draftSettings.rubroFilters).map((f) => (
+                    <span
+                      key={f}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#0B1933] text-white text-[11px] font-semibold"
+                    >
+                      <span>{f}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDraftSettings((prev) => ({
+                            ...prev,
+                            rubroFilters: (prev.rubroFilters || []).filter((x) => x !== f),
+                          }))
+                        }
+                        className="hover:text-rose-200 cursor-pointer"
+                        title={`Quitar ${f}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={settingsFilterInput}
+                    onChange={(e) => setSettingsFilterInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const clean = settingsFilterInput.trim();
+                        if (!clean) return;
+                        setDraftSettings((prev) => ({
+                          ...prev,
+                          rubroFilters: normalizeFilterList([...(prev.rubroFilters || []), clean]),
+                        }));
+                        setSettingsFilterInput('');
+                      }
+                    }}
+                    placeholder="Agregar filtro principal (ej. Niños, Hombres, Mujeres...)"
+                    className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = settingsFilterInput.trim();
+                      if (!clean) return;
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        rubroFilters: normalizeFilterList([...(prev.rubroFilters || []), clean]),
+                      }));
+                      setSettingsFilterInput('');
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white cursor-pointer whitespace-nowrap"
+                  >
+                    + Agregar filtro
+                  </button>
+                </div>
+              </div>
+
+              {/* Client Custom Subfilters Editor */}
+              <div className="space-y-1.5 pt-2 border-t border-slate-200/80">
+                <label className="text-[11px] font-bold text-slate-700">
+                  Subfiltros personalizados
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {normalizeFilterList(draftSettings.customSubfilters).length === 0 ? (
+                    <span className="text-[11px] text-slate-500">
+                      Todavía no definiste subfiltros. Agregá los que necesites abajo.
+                    </span>
+                  ) : (
+                    normalizeFilterList(draftSettings.customSubfilters).map((sf) => (
+                      <span
+                        key={sf}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white border border-slate-300 text-slate-800 text-[11px] font-semibold"
+                      >
+                        <span>{sf}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDraftSettings((prev) => ({
+                              ...prev,
+                              customSubfilters: (prev.customSubfilters || []).filter(
+                                (x) => x !== sf
+                              ),
+                            }))
+                          }
+                          className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                          title={`Quitar ${sf}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={settingsSubfilterInput}
+                    onChange={(e) => setSettingsSubfilterInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const clean = settingsSubfilterInput.trim();
+                        if (!clean) return;
+                        setDraftSettings((prev) => ({
+                          ...prev,
+                          customSubfilters: normalizeFilterList([
+                            ...(prev.customSubfilters || []),
+                            clean,
+                          ]),
+                        }));
+                        setSettingsSubfilterInput('');
+                      }
+                    }}
+                    placeholder="Agregar subfiltro (ej. Remeras, Jeans, Invierno...)"
+                    className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const clean = settingsSubfilterInput.trim();
+                      if (!clean) return;
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        customSubfilters: normalizeFilterList([
+                          ...(prev.customSubfilters || []),
+                          clean,
+                        ]),
+                      }));
+                      setSettingsSubfilterInput('');
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white cursor-pointer whitespace-nowrap"
+                  >
+                    + Agregar subfiltro
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="sm:col-span-2 p-3 rounded-xl bg-sky-50 border border-sky-200 text-xs text-slate-700">
               <strong>Datos para cobrar por WhatsApp:</strong>{' '}
               {config.merchantPaymentAlias?.trim() || config.merchantMpCheckoutLink?.trim() ? (
@@ -2161,6 +2658,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
 
             <form onSubmit={handleSubmitProduct} className="p-5 space-y-4">
+              {/* Locked Rubro Notice */}
+              <div className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-700 flex items-center justify-between gap-2">
+                <span>
+                  Cargando exclusivamente en rubro:{' '}
+                  <strong className="text-[#0B1933]">{rubroPreset.label}</strong>
+                </span>
+              </div>
+
               {/* Photo Upload + Preview */}
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-700 block">
@@ -2231,7 +2736,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     required
                     value={productName}
                     onChange={(e) => setProductName(e.target.value)}
-                    placeholder="Ej. Pack Gaseosa 2.25L x 6 unidades"
+                    placeholder={rubroPreset.productPlaceholder}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900"
                   />
                 </div>
@@ -2334,15 +2839,17 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   />
                 </div>
 
-                <div className="sm:col-span-2 space-y-1">
-                  <label className="text-xs font-semibold text-slate-700">Categoría</label>
-                  <div className="flex flex-wrap gap-1.5 mb-1.5">
-                    {DEFAULT_CATEGORIES.map((cat) => (
+                <div className="sm:col-span-2 space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Filtro principal ({rubroPreset.shortLabel})
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {activeRubroFilters.map((cat) => (
                       <button
                         key={cat}
                         type="button"
                         onClick={() => setProductCategory(cat)}
-                        className={`px-2 py-1 rounded-md text-[11px] font-semibold border cursor-pointer ${
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border cursor-pointer ${
                           productCategory === cat
                             ? 'bg-[#0B1933] text-white border-[#0B1933]'
                             : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
@@ -2356,9 +2863,64 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     type="text"
                     value={productCategory}
                     onChange={(e) => setProductCategory(e.target.value)}
-                    placeholder="Categoría personalizada"
+                    placeholder={`Categoría dentro de ${rubroPreset.shortLabel}`}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900"
                   />
+                </div>
+
+                <div className="sm:col-span-2 space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                    <Tag className="w-3.5 h-3.5 text-[#0B1933]" />
+                    <span>Subfiltros del producto (opcional — podés elegir o crear)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {normalizeFilterList([
+                      ...activeSubfilters,
+                      ...productSubfilters,
+                      ...rubroPreset.suggestedSubfilters,
+                    ]).map((sf) => {
+                      const active = productSubfilters.some(
+                        (x) => x.toLowerCase() === sf.toLowerCase()
+                      );
+                      return (
+                        <button
+                          key={sf}
+                          type="button"
+                          onClick={() => handleToggleProductSubfilter(sf)}
+                          className={`px-2.5 py-1 rounded-md text-[11px] font-semibold border cursor-pointer transition-colors ${
+                            active
+                              ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {active ? `✓ ${sf}` : sf}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <input
+                      type="text"
+                      value={modalNewSubfilter}
+                      onChange={(e) => setModalNewSubfilter(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddModalSubfilter();
+                        }
+                      }}
+                      placeholder="Crear nuevo subfiltro para este producto..."
+                      className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddModalSubfilter}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer whitespace-nowrap"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Crear subfiltro</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="sm:col-span-2 space-y-1">

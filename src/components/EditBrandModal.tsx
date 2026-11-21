@@ -57,17 +57,55 @@ export const EditBrandModal: React.FC<EditBrandModalProps> = ({
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert('Por favor selecciona una imagen menor a 5MB.');
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Por favor selecciona una imagen menor a 5MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawDataUrl = String(reader.result || '');
+      if (file.type === 'image/svg+xml' || !rawDataUrl.startsWith('data:image/')) {
+        setLogoUrl(rawDataUrl);
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        setLogoUrl(reader.result as string);
+      const img = new Image();
+      img.onerror = () => setLogoUrl(rawDataUrl);
+      img.onload = () => {
+        try {
+          const maxSide = 400;
+          let { width, height } = img;
+          if (width <= maxSide && height <= maxSide && rawDataUrl.length < 180_000) {
+            setLogoUrl(rawDataUrl);
+            return;
+          }
+          if (width > maxSide || height > maxSide) {
+            if (width >= height) {
+              height = Math.max(1, Math.round((height * maxSide) / width));
+              width = maxSide;
+            } else {
+              width = Math.max(1, Math.round((width * maxSide) / height));
+              height = maxSide;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            setLogoUrl(rawDataUrl);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const outputType = file.type === 'image/png' || file.type === 'image/webp' ? 'image/png' : 'image/jpeg';
+          setLogoUrl(canvas.toDataURL(outputType, 0.88));
+        } catch {
+          setLogoUrl(rawDataUrl);
+        }
       };
-      reader.readAsDataURL(file);
-    }
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleRemoveLogo = () => {
@@ -112,7 +150,7 @@ export const EditBrandModal: React.FC<EditBrandModalProps> = ({
                 Editar Nombre y Logo
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Personalizá la identidad y marca de tu distribuidora
+                Personalizá la identidad de tu sistema y de tu página web pública
               </p>
             </div>
           </div>

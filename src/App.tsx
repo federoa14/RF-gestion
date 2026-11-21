@@ -280,7 +280,12 @@ export default function App() {
   // Helper to load complete dataset for a specific tenant
   const loadDataForTenant = (tenantId: string) => {
     const data = loadTenantData(tenantId);
-    setConfig(data.config);
+    const tenantMeta = loadTenants().find((t) => t.id === tenantId);
+    const syncedConfig =
+      tenantMeta && !data.config.distributorLogoUrl && tenantMeta.logoUrl
+        ? { ...data.config, distributorLogoUrl: tenantMeta.logoUrl }
+        : data.config;
+    setConfig(syncedConfig);
     setClients(data.clients);
     setSalespeople(data.salespeople);
     setAdmins(data.admins);
@@ -289,7 +294,12 @@ export default function App() {
     setBroadcasts(data.broadcasts);
     setAutoLogs(data.autoLogs);
     setRendiciones(data.rendiciones || []);
-    setCatalogSettings(data.catalogSettings || { published: true });
+    const baseCatalogSettings = data.catalogSettings || { published: true };
+    setCatalogSettings(
+      tenantMeta?.catalogRubro
+        ? { ...baseCatalogSettings, catalogRubro: tenantMeta.catalogRubro }
+        : baseCatalogSettings
+    );
     setCatalogProducts(data.catalogProducts || []);
     setCatalogOrders(data.catalogOrders || []);
     setCatalogStockAlerts(data.catalogStockAlerts || []);
@@ -864,6 +874,17 @@ export default function App() {
   ) => {
     if (!selectedTenant) return;
     const cfg = overrideConfig || config;
+    const activeCatalogRubro =
+      selectedTenant.catalogRubro ||
+      nextSettings.catalogRubro ||
+      cfg.businessRubro ||
+      'distribuidora';
+    const scopedProducts = nextProducts.filter(
+      (p) => (p.rubro || activeCatalogRubro) === activeCatalogRubro
+    );
+    const resolvedLogoUrl = overrideConfig
+      ? overrideConfig.distributorLogoUrl
+      : cfg.distributorLogoUrl ?? selectedTenant.logoUrl;
     const snapshot: PublishedPublicCatalog = {
       tenantId: selectedTenant.id,
       tenantCode: cfg.tenantCode || selectedTenant.tenantCode,
@@ -873,11 +894,14 @@ export default function App() {
         selectedTenant.status !== 'suspended' &&
         !selectedTenant.subscription?.isPaused,
       published: nextSettings.published !== false,
+      catalogRubro: activeCatalogRubro,
+      rubroFilters: nextSettings.rubroFilters,
+      customSubfilters: nextSettings.customSubfilters,
       storeName: nextSettings.storeName || cfg.distributorName || selectedTenant.name,
       tagline:
         nextSettings.tagline ||
         'Armá tu carrito de compras, elegí retiro en tienda o envío a domicilio y envialo por WhatsApp.',
-      logoUrl: cfg.distributorLogoUrl || selectedTenant.logoUrl,
+      logoUrl: resolvedLogoUrl,
       icon: cfg.distributorIcon || selectedTenant.icon,
       whatsappPhone:
         nextSettings.whatsappPhone ||
@@ -898,7 +922,7 @@ export default function App() {
       merchantPaymentHolder: cfg.merchantPaymentHolder,
       merchantMpCheckoutLink: cfg.merchantMpCheckoutLink,
       currencySymbol: nextSettings.currencySymbol || cfg.currencySymbol || '$',
-      products: nextProducts,
+      products: scopedProducts,
       updatedAt: new Date().toISOString(),
     };
     void publishPublicCatalogToSupabase(snapshot);
@@ -1478,7 +1502,7 @@ export default function App() {
           businessRubro: nextRubro,
           businessCategory: nextProfile.label,
           icon: normalizedConfig.distributorIcon || t.icon,
-          logoUrl: normalizedConfig.distributorLogoUrl || t.logoUrl,
+          logoUrl: normalizedConfig.distributorLogoUrl,
           config: normalizedConfig,
         };
         return updatedCurrentTenant;
@@ -4291,6 +4315,7 @@ export default function App() {
                 }
                 setPublicCatalogHandle(handle);
               }}
+              onOpenEditBrand={() => setIsEditBrandModalOpen(true)}
               showToast={showToast}
             />
           </Suspense>

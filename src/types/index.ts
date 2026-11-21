@@ -439,6 +439,7 @@ export interface Tenant {
   config: DistributorConfig;
   subscription?: TenantSubscription; // Monetización y control de pago mensual
   catalogEnabled?: boolean; // Servicio de catálogo online (habilitado para todas las empresas por defecto; reversible desde SuperGestión)
+  catalogRubro?: BusinessRubro; // Rubro exclusivo asignado al catálogo online desde la gestión del cliente
 }
 
 export interface PlatformUser {
@@ -537,6 +538,8 @@ export interface CatalogProduct {
   description: string;
   price: number;
   category: string;
+  rubro?: BusinessRubro; // Rubro exclusivo del producto (sincronizado con catalogRubro)
+  subfilters?: string[]; // Subfiltros asignados al producto (ej. Remeras, Jeans, Invierno)
   unitLabel?: string;
   imageUrl?: string;
   available: boolean;
@@ -563,6 +566,9 @@ export interface CatalogStockAlertRequest {
 
 export interface OnlineCatalogSettings {
   published: boolean;
+  catalogRubro?: BusinessRubro;
+  rubroFilters?: string[];
+  customSubfilters?: string[];
   storeName?: string;
   tagline?: string;
   slug?: string;
@@ -622,6 +628,9 @@ export interface PublishedPublicCatalog {
   slug?: string;
   enabledBySuperAdmin: boolean;
   published: boolean;
+  catalogRubro?: BusinessRubro;
+  rubroFilters?: string[];
+  customSubfilters?: string[];
   storeName: string;
   tagline: string;
   logoUrl?: string;
