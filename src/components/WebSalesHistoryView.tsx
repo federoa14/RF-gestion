@@ -12,18 +12,23 @@ import {
   CheckCircle2,
   Clock,
   TrendingUp,
+  Eye,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
+  CatalogProduct,
   DistributorConfig,
   SaleLineItem,
 } from '../types';
 import { formatCurrency } from '../utils/alerts';
 import type { ReceiptModalData } from './PaymentReceiptModal';
+import { WebOrderDetailModal } from './WebOrderDetailModal';
 
 interface WebSalesHistoryViewProps {
   config: DistributorConfig;
   orders: CatalogPickupOrder[];
+  products?: CatalogProduct[];
   activeUserName?: string;
   onRefreshOrders?: () => Promise<void>;
   onOpenCatalogManager: () => void;
@@ -31,6 +36,10 @@ interface WebSalesHistoryViewProps {
   onOpenReceipt?: (receipt: ReceiptModalData) => void;
   onBillOrder?: (order: CatalogPickupOrder) => void;
   onMarkOrderAsRetirado?: (order: CatalogPickupOrder) => void;
+  onChangeOrderPaymentMethod?: (
+    orderId: string,
+    method: NonNullable<CatalogPickupOrder['confirmedPaymentMethod']>
+  ) => void;
   showToast: (msg: string) => void;
 }
 
@@ -118,6 +127,7 @@ function getEffectiveOrderDateKey(order: CatalogPickupOrder): string {
 export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   config,
   orders,
+  products = [],
   activeUserName,
   onRefreshOrders,
   onOpenCatalogManager,
@@ -125,6 +135,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   onOpenReceipt,
   onBillOrder,
   onMarkOrderAsRetirado,
+  onChangeOrderPaymentMethod,
   showToast,
 }) => {
   const todayKey = useMemo(() => getTodayDateKey(), []);
@@ -134,8 +145,24 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   const [modalityFilter, setModalityFilter] = useState<'all' | 'retiro' | 'envio'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<CatalogPickupOrder | null>(null);
 
   const currency = config.currencySymbol || '$';
+
+  const productMap = useMemo(() => {
+    const byId = new Map<string, CatalogProduct>();
+    const byName = new Map<string, CatalogProduct>();
+    products.forEach((p) => {
+      if (p.id) byId.set(p.id, p);
+      if (p.name) byName.set(p.name.trim().toLowerCase(), p);
+    });
+    return { byId, byName };
+  }, [products]);
+
+  const activeOrderForDetail = useMemo(() => {
+    if (!selectedOrderForDetail) return null;
+    return orders.find((o) => o.id === selectedOrderForDetail.id) || selectedOrderForDetail;
+  }, [orders, selectedOrderForDetail]);
 
   const rangeBounds = useMemo(() => {
     if (periodPreset === 'specific_day') {
@@ -193,7 +220,13 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
       if (modalityFilter !== 'all' && mod !== modalityFilter) return false;
 
       if (!q) return true;
-      const inItems = o.items.some((it) => it.productName.toLowerCase().includes(q));
+      const inItems = o.items.some((it) => {
+        const matched =
+          productMap.byId.get(it.productId) ||
+          productMap.byName.get(it.productName.trim().toLowerCase());
+        const code = (it.sku || matched?.sku || '').toLowerCase();
+        return it.productName.toLowerCase().includes(q) || code.includes(q);
+      });
       return (
         o.orderNumber.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q) ||
@@ -203,7 +236,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
         inItems
       );
     });
-  }, [periodOrders, statusScope, modalityFilter, searchTerm]);
+  }, [periodOrders, statusScope, modalityFilter, searchTerm, productMap]);
 
   const metrics = useMemo(() => {
     const activePeriodOrders = periodOrders.filter((o) => o.status !== 'cancelado');
@@ -543,7 +576,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar cliente, #pedido o producto..."
+                placeholder="Buscar cliente, #pedido, código o producto..."
                 className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-[#CBD5E1] dark:border-[#B6C2D2]/25 bg-slate-50 dark:bg-[#071021] text-xs text-[#0B1933] dark:text-white placeholder-slate-400"
               />
             </div>
@@ -813,20 +846,51 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                       </td>
 
                       <td className="py-3 px-4 align-top max-w-xs">
-                        <div className="space-y-0.5 text-slate-700 dark:text-[#CBD5E1]">
-                          {order.items.map((it, idx) => (
-                            <div key={`${order.id}-${idx}`} className="truncate">
-                              <span className="font-mono tabular-nums font-semibold">
-                                {it.quantity}×
-                              </span>{' '}
-                              {it.productName}
-                              <span className="text-slate-400 dark:text-[#8D9CB0]">
-                                {' '}
-                                ({formatCurrency(it.subtotal, order.currencySymbol || currency)})
-                              </span>
-                            </div>
-                          ))}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOrderForDetail(order)}
+                          className="w-full text-left space-y-1.5 text-slate-700 dark:text-[#CBD5E1] cursor-pointer group"
+                          title="Clic para abrir la venta y ver fotos y códigos"
+                        >
+                          {order.items.map((it, idx) => {
+                            const matched =
+                              productMap.byId.get(it.productId) ||
+                              productMap.byName.get(it.productName.trim().toLowerCase());
+                            const thumb = matched?.imageUrl || it.imageUrl;
+                            const skuCode = (it.sku || matched?.sku || '').trim();
+                            return (
+                              <div key={`${order.id}-${idx}`} className="flex items-center gap-2 min-w-0">
+                                {thumb ? (
+                                  <img
+                                    src={thumb}
+                                    alt={it.productName}
+                                    referrerPolicy="no-referrer"
+                                    className="w-7 h-7 rounded-md object-cover border border-slate-200 dark:border-[#B6C2D2]/20 shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-7 h-7 rounded-md border border-slate-200 dark:border-[#B6C2D2]/20 bg-slate-100 dark:bg-[#071021] flex items-center justify-center text-slate-400 shrink-0">
+                                    <ImageIcon className="w-3.5 h-3.5" />
+                                  </div>
+                                )}
+                                <div className="min-w-0 truncate group-hover:underline">
+                                  <span className="font-mono tabular-nums font-semibold">
+                                    {it.quantity}×
+                                  </span>{' '}
+                                  {it.productName}
+                                  {skuCode && (
+                                    <span className="ml-1 font-mono text-[10px] text-slate-500 dark:text-sky-300">
+                                      [Cód: {skuCode}]
+                                    </span>
+                                  )}
+                                  <span className="text-slate-400 dark:text-[#8D9CB0]">
+                                    {' '}
+                                    ({formatCurrency(it.subtotal, order.currencySymbol || currency)})
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </button>
                       </td>
 
                       <td className="py-3 px-4 align-top whitespace-nowrap">
@@ -863,6 +927,15 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
 
                       <td className="py-3 px-4 align-top text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedOrderForDetail(order)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold border border-[#CBD5E1] dark:border-[#B6C2D2]/25 bg-white dark:bg-[#071021] text-[#0B1933] dark:text-white hover:bg-slate-50 dark:hover:bg-[#13264A] cursor-pointer"
+                            title="Abrir venta y ver fotos y códigos de los productos"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Abrir Venta</span>
+                          </button>
                           {onMarkOrderAsRetirado &&
                             order.status !== 'retirado' &&
                             order.status !== 'cancelado' && (
@@ -905,6 +978,19 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Modal Detalle de Venta Web (Fotos Ampliables + Códigos) */}
+      <WebOrderDetailModal
+        isOpen={Boolean(activeOrderForDetail)}
+        onClose={() => setSelectedOrderForDetail(null)}
+        order={activeOrderForDetail}
+        products={products}
+        config={config}
+        onMarkAsRetirado={onMarkOrderAsRetirado}
+        onOpenReceipt={onOpenReceipt ? handleOpenOrderReceipt : undefined}
+        onBillOrder={onBillOrder}
+        onChangePaymentMethod={onChangeOrderPaymentMethod}
+      />
     </div>
   );
 };

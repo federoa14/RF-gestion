@@ -24,6 +24,7 @@ import {
   X,
   ExternalLink,
   ShoppingBag,
+  Eye,
 } from 'lucide-react';
 import {
   Boleta,
@@ -102,6 +103,7 @@ import { PaymentReceiptModal, ReceiptModalData } from './components/PaymentRecei
 import { ReturnCreditNoteModal } from './components/ReturnCreditNoteModal';
 import { ContactChannelsModal } from './components/ContactChannelsModal';
 import { ClientStatementQuickShareModal } from './components/ClientStatementQuickShareModal';
+import { WebOrderDetailModal } from './components/WebOrderDetailModal';
 
 const NewBoletaModal = lazy(() =>
   import('./components/NewBoletaModal').then((m) => ({ default: m.NewBoletaModal }))
@@ -399,6 +401,7 @@ export default function App() {
   const [isEditBrandModalOpen, setIsEditBrandModalOpen] = useState(false);
   const [isContactChannelsOpen, setIsContactChannelsOpen] = useState(false);
   const [activeReceiptData, setActiveReceiptData] = useState<ReceiptModalData | null>(null);
+  const [selectedWebOrderDetail, setSelectedWebOrderDetail] = useState<CatalogPickupOrder | null>(null);
   const [statementShareTarget, setStatementShareTarget] = useState<{
     client: Client;
     sourceBoletaNumber?: string;
@@ -940,6 +943,80 @@ export default function App() {
     showToast(
       `Pedido #${order.orderNumber} marcado como Retirado / Pagado. Sumado al dinero generado en la web.`
     );
+  };
+
+  const handleUpdateWebOrderPaymentMethod = (
+    orderId: string,
+    method: NonNullable<CatalogPickupOrder['confirmedPaymentMethod']>
+  ) => {
+    const now = new Date().toISOString();
+    handleSaveCatalogOrders(
+      catalogOrders.map((o) =>
+        o.id === orderId ? { ...o, confirmedPaymentMethod: method, updatedAt: now } : o
+      )
+    );
+    showToast('Forma de pago del pedido web actualizada.');
+  };
+
+  const handleOpenReceiptForWebOrder = (order: CatalogPickupOrder) => {
+    const isDelivery = order.deliveryMethod === 'envio';
+    const paymentKey = order.confirmedPaymentMethod || order.preferredPaymentMethod || 'acordar';
+    const paymentMethodLabel =
+      paymentKey === 'transferencia'
+        ? 'Transferencia bancaria / Alias'
+        : paymentKey === 'link_pago'
+        ? 'Link de Pago / Mercado Pago'
+        : paymentKey === 'efectivo'
+        ? isDelivery
+          ? 'Efectivo contra entrega'
+          : 'Efectivo en el comercio'
+        : paymentKey === 'fiado'
+        ? 'Cuenta Corriente / Fiado'
+        : 'A coordinar por WhatsApp';
+    const receiptNumber =
+      order.dispatchReceiptNumber || `DESP-${order.orderNumber.replace(/^PED-/, '')}`;
+    const isPaidOnDispatch = order.status === 'retirado' && paymentKey !== 'fiado';
+    const addressForReceipt = isDelivery
+      ? order.deliveryAddress || 'Envío a domicilio'
+      : catalogSettings.pickupAddress || selectedTenant?.address || 'Retiro en tienda';
+
+    setActiveReceiptData({
+      receiptNumber,
+      boletaNumber: order.linkedBoletaNumber || order.orderNumber,
+      clientName: order.customerName,
+      clientAddress: addressForReceipt,
+      paymentDate: (order.dispatchedAt || order.createdAt || new Date().toISOString()).slice(0, 10),
+      amountPaidNow: isPaidOnDispatch ? order.totalAmount : 0,
+      paymentMethod:
+        paymentKey === 'transferencia'
+          ? 'transferencia'
+          : paymentKey === 'efectivo'
+          ? 'efectivo'
+          : paymentKey,
+      paymentMethodLabel,
+      originalAmount: order.totalAmount,
+      totalPaidAccumulated: isPaidOnDispatch ? order.totalAmount : 0,
+      remainingBalance: isPaidOnDispatch ? 0 : order.totalAmount,
+      receivedBy: activeAdmin?.name || currentUser?.fullName || 'Administración',
+      notes: order.notes,
+      isFullSettlement: isPaidOnDispatch,
+      isDispatchReceipt: true,
+      dispatchModalityLabel: isDelivery ? 'Envío a domicilio' : 'Retiro en tienda',
+      deliveryAddress: addressForReceipt,
+      hideUnitModeTag: true,
+      items: order.items.map((it, idx) => ({
+        id: `web-ord-rcpt-${order.id}-${idx}`,
+        name: it.unitLabel ? `${it.productName} (${it.unitLabel})` : it.productName,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        subtotal: it.subtotal,
+        paymentMode: paymentKey === 'fiado' ? 'un_pago_fiado' : 'contado_hoy',
+      })),
+      initialPhone: order.customerPhone,
+      saleModeLabel: isDelivery
+        ? 'COMPROBANTE VENTA WEB · ENVÍO A DOMICILIO'
+        : 'COMPROBANTE VENTA WEB · RETIRO EN COMERCIO',
+    });
   };
 
   const handleRefreshCatalogOrders = async () => {
@@ -2408,9 +2485,10 @@ export default function App() {
   }, 0);
 
   const paidWebOrders = catalogOrders.filter((o) => o.status === 'retirado');
-  const pendingWebOrdersCount = catalogOrders.filter(
-    (o) => o.status !== 'retirado' && o.status !== 'cancelado'
-  ).length;
+  const pendingWebOrders = catalogOrders
+    .filter((o) => o.status !== 'retirado' && o.status !== 'cancelado')
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const pendingWebOrdersCount = pendingWebOrders.length;
   const totalWebSalesRevenue = paidWebOrders.reduce(
     (acc, o) => acc + (Number(o.totalAmount) || 0),
     0
@@ -3378,6 +3456,114 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Incoming Pending Web Orders Strip: open directly to see product photos & codes */}
+              {selectedTenant?.catalogEnabled !== false && pendingWebOrders.length > 0 && (
+                <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/25 rounded-xl p-3.5 sm:p-4 shadow-2xs space-y-2.5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <ShoppingBag className="w-4 h-4 text-[#0B1933] dark:text-sky-300 shrink-0" />
+                      <h3 className="text-xs sm:text-sm font-bold text-[#0B1933] dark:text-white">
+                        Pedidos Web Entrantes por Entregar ({pendingWebOrders.length})
+                      </h3>
+                      <span className="text-[11px] text-slate-500 dark:text-[#94A3B8] hidden md:inline">
+                        · Abrí la venta para ver fotos y códigos de los artículos a entregar
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('ventas_web')}
+                      className="text-xs font-semibold text-[#0B1933] dark:text-sky-300 hover:underline cursor-pointer self-start sm:self-auto whitespace-nowrap"
+                    >
+                      Ver historial completo →
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-slate-100 dark:divide-[#B6C2D2]/15 border border-slate-200 dark:border-[#B6C2D2]/20 rounded-lg overflow-hidden">
+                    {pendingWebOrders.slice(0, 4).map((ord) => {
+                      const units = ord.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+                      const firstItem = ord.items[0];
+                      const matchedFirst = firstItem
+                        ? catalogProducts.find(
+                            (p) =>
+                              p.id === firstItem.productId ||
+                              p.name.trim().toLowerCase() === firstItem.productName.trim().toLowerCase()
+                          )
+                        : undefined;
+                      const firstThumb = matchedFirst?.imageUrl || firstItem?.imageUrl;
+                      const firstCode = (firstItem?.sku || matchedFirst?.sku || '').trim();
+                      const isDelivery = ord.deliveryMethod === 'envio';
+
+                      return (
+                        <div
+                          key={ord.id}
+                          className="px-3 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-50/50 dark:bg-[#071021]/60 hover:bg-slate-50 dark:hover:bg-[#13264A]/40 transition-colors"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setSelectedWebOrderDetail(ord)}
+                            className="flex items-center gap-3 min-w-0 text-left cursor-pointer flex-1"
+                          >
+                            {firstThumb ? (
+                              <img
+                                src={firstThumb}
+                                alt={firstItem?.productName || ord.orderNumber}
+                                referrerPolicy="no-referrer"
+                                className="w-10 h-10 rounded-lg object-cover border border-slate-200 dark:border-[#B6C2D2]/20 shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg border border-slate-200 dark:border-[#B6C2D2]/20 bg-white dark:bg-[#0B1933] flex items-center justify-center text-slate-400 shrink-0">
+                                <ShoppingBag className="w-4 h-4" />
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                                <span className="font-mono font-bold text-[#0B1933] dark:text-white">
+                                  #{ord.orderNumber}
+                                </span>
+                                <span className="font-bold text-[#0B1933] dark:text-white truncate">
+                                  {ord.customerName}
+                                </span>
+                                <span className="text-slate-400" aria-hidden="true">·</span>
+                                <span className="text-slate-600 dark:text-[#94A3B8]">
+                                  {isDelivery ? 'Envío' : 'Retiro'}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-[#94A3B8] truncate tabular-nums">
+                                {units} u. · {firstItem?.productName || 'Pedido'}
+                                {firstCode ? ` [Cód: ${firstCode}]` : ''}
+                                {ord.items.length > 1 ? ` (+${ord.items.length - 1} más)` : ''}
+                              </div>
+                            </div>
+                          </button>
+
+                          <div className="flex items-center gap-2 shrink-0 justify-end">
+                            <span className="font-mono tabular-nums text-xs font-black text-[#0B1933] dark:text-white">
+                              {formatCurrency(ord.totalAmount, ord.currencySymbol || config.currencySymbol)}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedWebOrderDetail(ord)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border border-[#CBD5E1] dark:border-[#B6C2D2]/25 bg-white dark:bg-[#0B1933] text-[#0B1933] dark:text-white hover:bg-slate-100 dark:hover:bg-[#13264A] cursor-pointer whitespace-nowrap"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Abrir Venta</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMarkWebOrderRetirado(ord)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>{isDelivery ? 'Entregado' : 'Retirado'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Filter, View Toggle, CSV Export & Optional Simulation Controls */}
               <div className="bg-white dark:bg-[#0B1933] p-4 rounded-xl border border-[#CBD5E1] dark:border-[#B6C2D2]/20 shadow-2xs space-y-3">
                 <div className="flex flex-col lg:flex-row gap-2.5">
@@ -4033,6 +4219,7 @@ export default function App() {
             <WebSalesHistoryView
               config={config}
               orders={catalogOrders}
+              products={catalogProducts}
               activeUserName={activeAdmin?.name || currentUser?.fullName || 'Administración'}
               onRefreshOrders={handleRefreshCatalogOrders}
               onOpenCatalogManager={() => setActiveTab('catalogo')}
@@ -4040,6 +4227,7 @@ export default function App() {
               onOpenReceipt={(receipt) => setActiveReceiptData(receipt)}
               onBillOrder={handleBillCatalogOrder}
               onMarkOrderAsRetirado={handleMarkWebOrderRetirado}
+              onChangeOrderPaymentMethod={handleUpdateWebOrderPaymentMethod}
               showToast={showToast}
             />
           </Suspense>
@@ -4306,6 +4494,24 @@ export default function App() {
         currentDateRef={currentDateRef}
         sourceBoletaNumber={statementShareTarget?.sourceBoletaNumber}
         onSaveClientPhone={handleSaveClientPhone}
+      />
+
+      {/* Detalle de Venta Web abierta desde Panel General (Fotos Ampliables y Códigos) */}
+      <WebOrderDetailModal
+        isOpen={Boolean(selectedWebOrderDetail)}
+        onClose={() => setSelectedWebOrderDetail(null)}
+        order={
+          selectedWebOrderDetail
+            ? catalogOrders.find((o) => o.id === selectedWebOrderDetail.id) || selectedWebOrderDetail
+            : null
+        }
+        products={catalogProducts}
+        config={config}
+        pickupAddressFallback={catalogSettings.pickupAddress || selectedTenant?.address}
+        onMarkAsRetirado={handleMarkWebOrderRetirado}
+        onOpenReceipt={handleOpenReceiptForWebOrder}
+        onBillOrder={handleBillCatalogOrder}
+        onChangePaymentMethod={handleUpdateWebOrderPaymentMethod}
       />
     </div>
   );

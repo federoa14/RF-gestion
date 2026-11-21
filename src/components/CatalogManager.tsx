@@ -26,6 +26,7 @@ import {
   CreditCard,
   AlertTriangle,
   Phone,
+  Barcode,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
@@ -42,6 +43,7 @@ import {
 } from '../utils/whatsapp';
 import { buildPublicCatalogHandle } from '../utils/supabaseServices';
 import type { ReceiptModalData } from './PaymentReceiptModal';
+import { WebOrderDetailModal } from './WebOrderDetailModal';
 
 interface CatalogManagerProps {
   config: DistributorConfig;
@@ -194,6 +196,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<CatalogProduct | null>(null);
   const [productName, setProductName] = useState('');
+  const [productSku, setProductSku] = useState('');
   const [productPrice, setProductPrice] = useState('');
   const [productCategory, setProductCategory] = useState('General');
   const [productUnitLabel, setProductUnitLabel] = useState('Unidad');
@@ -202,6 +205,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [productAvailable, setProductAvailable] = useState(true);
   const [productFeatured, setProductFeatured] = useState(false);
   const [isCompressingImage, setIsCompressingImage] = useState(false);
+  const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<CatalogPickupOrder | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isServiceEnabledBySuperAdmin = tenant?.catalogEnabled !== false;
@@ -238,10 +242,26 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       return (
         p.name.toLowerCase().includes(q) ||
         p.description.toLowerCase().includes(q) ||
-        p.category.toLowerCase().includes(q)
+        p.category.toLowerCase().includes(q) ||
+        (p.sku || '').toLowerCase().includes(q)
       );
     });
   }, [products, searchTerm, selectedCategory]);
+
+  const productMap = useMemo(() => {
+    const byId = new Map<string, CatalogProduct>();
+    const byName = new Map<string, CatalogProduct>();
+    products.forEach((p) => {
+      if (p.id) byId.set(p.id, p);
+      if (p.name) byName.set(p.name.trim().toLowerCase(), p);
+    });
+    return { byId, byName };
+  }, [products]);
+
+  const activeOrderForDetail = useMemo(() => {
+    if (!selectedOrderForDetail) return null;
+    return orders.find((o) => o.id === selectedOrderForDetail.id) || selectedOrderForDetail;
+  }, [orders, selectedOrderForDetail]);
 
   const activeProductsCount = useMemo(
     () => products.filter((p) => p.available).length,
@@ -325,6 +345,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const openNewProductModal = () => {
     setEditingProduct(null);
     setProductName('');
+    setProductSku('');
     setProductPrice('');
     setProductCategory('General');
     setProductUnitLabel('Unidad');
@@ -338,6 +359,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const openEditProductModal = (product: CatalogProduct) => {
     setEditingProduct(product);
     setProductName(product.name);
+    setProductSku(product.sku || '');
     setProductPrice(String(product.price));
     setProductCategory(product.category || 'General');
     setProductUnitLabel(product.unitLabel || 'Unidad');
@@ -378,12 +400,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     }
 
     const now = new Date().toISOString();
+    const cleanSku = productSku.trim() || undefined;
     if (editingProduct) {
       const updated = products.map((p) =>
         p.id === editingProduct.id
           ? {
               ...p,
               name: cleanName,
+              sku: cleanSku,
               price: numericPrice,
               category: productCategory.trim() || 'General',
               unitLabel: productUnitLabel.trim() || 'Unidad',
@@ -401,6 +425,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       const created: CatalogProduct = {
         id: `cat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         name: cleanName,
+        sku: cleanSku,
         price: numericPrice,
         category: productCategory.trim() || 'General',
         unitLabel: productUnitLabel.trim() || 'Unidad',
@@ -983,7 +1008,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar producto por nombre o descripción..."
+                placeholder="Buscar producto por nombre, código o descripción..."
                 className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
               />
             </div>
@@ -1072,6 +1097,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       <div className="text-[11px] font-medium text-slate-500 flex items-center justify-between gap-2">
                         <span className="truncate">
                           {product.category || 'General'} · {product.unitLabel || 'Unidad'}
+                          {product.sku ? ` · Cód: ${product.sku}` : ''}
                         </span>
                         <span
                           className={`font-semibold shrink-0 ${
@@ -1257,20 +1283,53 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         </div>
                       )}
 
-                      <div className="text-xs text-slate-700 space-y-0.5">
-                        {order.items.map((it, i) => (
-                          <div key={`${order.id}-${i}`} className="tabular-nums">
-                            {it.quantity} × <strong>{it.productName}</strong>{' '}
-                            <span className="text-slate-500">
-                              ({formatCurrency(it.unitPrice, order.currencySymbol || currency)} c/u ={' '}
-                              <strong className="text-slate-700">
-                                {formatCurrency(it.subtotal, order.currencySymbol || currency)}
-                              </strong>
-                              )
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedOrderForDetail(order)}
+                        className="w-full text-left group space-y-1.5 pt-0.5 cursor-pointer rounded-lg hover:bg-white/90 p-1.5 -m-1.5 transition-colors"
+                        title="Clic para abrir la venta y ver fotos y códigos grandes"
+                      >
+                        {order.items.map((it, i) => {
+                          const matched =
+                            productMap.byId.get(it.productId) ||
+                            productMap.byName.get(it.productName.trim().toLowerCase());
+                          const thumb = matched?.imageUrl || it.imageUrl;
+                          const skuCode = (it.sku || matched?.sku || '').trim();
+                          return (
+                            <div key={`${order.id}-${i}`} className="flex items-center gap-2.5 text-xs text-slate-700">
+                              {thumb ? (
+                                <img
+                                  src={thumb}
+                                  alt={it.productName}
+                                  referrerPolicy="no-referrer"
+                                  className="w-9 h-9 rounded-lg object-cover border border-slate-200 bg-white shrink-0"
+                                />
+                              ) : (
+                                <div className="w-9 h-9 rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">
+                                  <ImageIcon className="w-4 h-4" />
+                                </div>
+                              )}
+                              <div className="min-w-0 tabular-nums">
+                                <span className="font-bold text-slate-900">
+                                  {it.quantity} × {it.productName}
+                                </span>
+                                {skuCode && (
+                                  <span className="ml-1.5 font-mono text-[11px] font-semibold text-[#0B1933] bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded">
+                                    Cód: {skuCode}
+                                  </span>
+                                )}{' '}
+                                <span className="text-slate-500">
+                                  ({formatCurrency(it.unitPrice, order.currencySymbol || currency)} c/u ={' '}
+                                  <strong className="text-slate-700">
+                                    {formatCurrency(it.subtotal, order.currencySymbol || currency)}
+                                  </strong>
+                                  )
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </button>
 
                       <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 pt-0.5">
                         {order.preferredPickupWindow && (
@@ -1296,6 +1355,16 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         {formatCurrency(order.totalAmount, order.currencySymbol || currency)}
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOrderForDetail(order)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#0B1933]/30 bg-white hover:bg-slate-100 text-[#0B1933] cursor-pointer whitespace-nowrap"
+                          title="Abrir venta para ver fotos ampliadas, códigos y tildar productos a entregar"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Abrir Venta (Fotos / Cód.)</span>
+                        </button>
+
                         {order.status !== 'retirado' && order.status !== 'cancelado' && (
                           <button
                             type="button"
@@ -1746,6 +1815,20 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 </div>
 
                 <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                    <Barcode className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Código / SKU (opcional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={productSku}
+                    onChange={(e) => setProductSku(e.target.value)}
+                    placeholder="Ej. COD-104, ART-22, 779..."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                  />
+                </div>
+
+                <div className="sm:col-span-2 space-y-1">
                   <label className="text-xs font-semibold text-slate-700">
                     Presentación / Unidad
                   </label>
@@ -1840,6 +1923,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           </div>
         </div>
       )}
+
+      {/* MODAL DETALLE DE VENTA WEB (FOTOS AMPLIABLES Y CÓDIGOS) */}
+      <WebOrderDetailModal
+        isOpen={Boolean(activeOrderForDetail)}
+        onClose={() => setSelectedOrderForDetail(null)}
+        order={activeOrderForDetail}
+        products={products}
+        config={config}
+        pickupAddressFallback={settings.pickupAddress || tenant?.address}
+        onMarkAsRetirado={handleMarkOrderPaidPickedUp}
+        onOpenReceipt={(ord) => handleDispatchAndOpenReceipt(ord)}
+        onBillOrder={onBillOrder}
+        onChangePaymentMethod={handleUpdateOrderPaymentMethod}
+        onWhatsAppCollect={handleWhatsAppCustomerCollectPayment}
+      />
     </div>
   );
 };

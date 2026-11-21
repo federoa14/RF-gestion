@@ -41,6 +41,48 @@ interface CartEntry {
   quantity: number;
 }
 
+async function createCompactOrderThumbnail(src?: string): Promise<string | undefined> {
+  const clean = (src || '').trim();
+  if (!clean) return undefined;
+  if (!clean.startsWith('data:image/')) {
+    return clean;
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onerror = () => resolve(clean);
+    img.onload = () => {
+      try {
+        const maxSide = 240;
+        let { width, height } = img;
+        if (width > maxSide || height > maxSide) {
+          if (width >= height) {
+            height = Math.max(1, Math.round((height * maxSide) / width));
+            width = maxSide;
+          } else {
+            width = Math.max(1, Math.round((width * maxSide) / height));
+            height = maxSide;
+          }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(clean);
+          return;
+        }
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.72));
+      } catch {
+        resolve(clean);
+      }
+    };
+    img.src = clean;
+  });
+}
+
 export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   catalogHandle,
   onExitToApp,
@@ -123,7 +165,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         if (selectedCategory !== 'Todas' && p.category !== selectedCategory) return false;
         if (tokens.length === 0) return true;
         const searchable = normalizeSearchText(
-          `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.unitLabel || ''}`
+          `${p.name || ''} ${p.description || ''} ${p.category || ''} ${p.unitLabel || ''} ${p.sku || ''}`
         );
         return tokens.every((token) => searchable.includes(token));
       })
@@ -206,14 +248,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       const orderNumber = `PED-${Date.now().toString().slice(-4)}${Math.floor(Math.random() * 90 + 10)}`;
       const nowIso = new Date().toISOString();
 
-      const itemsPayload = cartItems.map((entry) => ({
-        productId: entry.product.id,
-        productName: entry.product.name,
-        unitLabel: entry.product.unitLabel,
-        unitPrice: entry.product.price,
-        quantity: entry.quantity,
-        subtotal: entry.product.price * entry.quantity,
-      }));
+      const itemsPayload = await Promise.all(
+        cartItems.map(async (entry) => ({
+          productId: entry.product.id,
+          productName: entry.product.name,
+          sku: entry.product.sku?.trim() || undefined,
+          imageUrl: await createCompactOrderThumbnail(entry.product.imageUrl),
+          unitLabel: entry.product.unitLabel,
+          unitPrice: entry.product.price,
+          quantity: entry.quantity,
+          subtotal: entry.product.price * entry.quantity,
+        }))
+      );
 
       const order: CatalogPickupOrder = {
         id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -243,7 +289,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
           (it) =>
             `• ${it.quantity} × ${it.productName}${
               it.unitLabel ? ` (${it.unitLabel})` : ''
-            } — ${formatCurrency(it.unitPrice, currency)} c/u = *${formatCurrency(it.subtotal, currency)}*`
+            }${it.sku ? ` [Cód: ${it.sku}]` : ''} — ${formatCurrency(it.unitPrice, currency)} c/u = *${formatCurrency(it.subtotal, currency)}*`
         )
         .join('\n');
 
@@ -640,6 +686,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                     <div className="space-y-1.5">
                       <div className="text-[11px] font-medium text-slate-500 truncate">
                         {product.category || 'General'} · {product.unitLabel || 'Unidad'}
+                        {product.sku ? ` · Cód: ${product.sku}` : ''}
                       </div>
                       <h3 className="text-base font-bold text-slate-900 leading-snug">
                         {product.name}

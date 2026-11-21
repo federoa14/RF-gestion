@@ -566,6 +566,8 @@ export interface OnlineCatalogSettings {
 export interface CatalogPickupOrderItem {
   productId: string;
   productName: string;
+  sku?: string;
+  imageUrl?: string;
   unitLabel?: string;
   unitPrice: number;
   quantity: number;
