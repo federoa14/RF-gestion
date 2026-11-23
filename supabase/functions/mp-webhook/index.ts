@@ -79,6 +79,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     const scopeParam = url.searchParams.get('scope') || '';
     const tokenParam = url.searchParams.get('token') || '';
+    const orderIdParam = url.searchParams.get('orderId') || '';
     const tenantIdParam = url.searchParams.get('tenantId') || '';
 
     let body: Record<string, any> = {};
@@ -119,7 +120,7 @@ Deno.serve(async (req) => {
 
     // Resolver Access Token del comercio o de plataforma
     let accessToken = '';
-    if (scopeParam === 'client_order' && tenantIdParam) {
+    if ((scopeParam === 'client_order' || scopeParam === 'catalog_order') && tenantIdParam) {
       const { data: merchantRow } = await supabase
         .from('app_cloud_store')
         .select('value')
@@ -206,6 +207,41 @@ Deno.serve(async (req) => {
       }
 
       return new Response(JSON.stringify({ received: true, approved: true, scope: 'client_order' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Caso 1B: Pago de pedido de catálogo web (?catalog=...&order_id=...)
+    if (extRef.startsWith('catord::') || (scopeParam === 'catalog_order' && orderIdParam)) {
+      const resolvedOrderId = extRef.startsWith('catord::') ? extRef.slice('catord::'.length) : orderIdParam;
+      const publicOrderKey = `catalog_order_${resolvedOrderId}`;
+      const { data: orderRow } = await supabase
+        .from('app_cloud_store')
+        .select('value')
+        .eq('key', publicOrderKey)
+        .maybeSingle();
+
+      if (orderRow?.value) {
+        const prev = orderRow.value;
+        const nextMethod =
+          prev.mpSubOption === 'dinero_en_cuenta' ? 'mercadopago_dinero_cuenta' : 'link_pago';
+        const nowIso = new Date().toISOString();
+        const updatedOrder = {
+          ...prev,
+          paymentStatus: 'acreditado',
+          confirmedPaymentMethod: nextMethod,
+          mpPaymentId: String(payment.id),
+          updatedAt: nowIso,
+        };
+        await upsertCloudKey(supabase, publicOrderKey, updatedOrder);
+        const effTenantId = String(prev.tenantId || tenantIdParam || '').trim();
+        if (effTenantId) {
+          await upsertCloudKey(supabase, `rec:${effTenantId}:catalogOrders:${resolvedOrderId}`, updatedOrder);
+        }
+      }
+
+      return new Response(JSON.stringify({ received: true, approved: true, scope: 'catalog_order' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });

@@ -91,6 +91,8 @@ function resolvePaymentLabel(
   switch (method) {
     case 'transferencia':
       return 'Transferencia / Alias';
+    case 'mercadopago_dinero_cuenta':
+      return 'Mercado Pago (Dinero en cuenta)';
     case 'link_pago':
       return 'Link de Pago / MP';
     case 'efectivo':
@@ -225,12 +227,18 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
           productMap.byId.get(it.productId) ||
           productMap.byName.get(it.productName.trim().toLowerCase());
         const code = (it.sku || matched?.sku || '').toLowerCase();
-        return it.productName.toLowerCase().includes(q) || code.includes(q);
+        const varLabel = (it.variantLabel || '').toLowerCase();
+        return (
+          it.productName.toLowerCase().includes(q) ||
+          code.includes(q) ||
+          varLabel.includes(q)
+        );
       });
       return (
         o.orderNumber.toLowerCase().includes(q) ||
         o.customerName.toLowerCase().includes(q) ||
         o.customerPhone.toLowerCase().includes(q) ||
+        (o.customerSpecificRequest || o.notes || '').toLowerCase().includes(q) ||
         (o.linkedBoletaNumber || '').toLowerCase().includes(q) ||
         (o.dispatchReceiptNumber || '').toLowerCase().includes(q) ||
         inItems
@@ -340,6 +348,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
       'Estado',
       'Boleta Vinculada',
       'Comprobante Despacho',
+      'Observaciones',
       'Total',
     ];
     const lines = [
@@ -348,7 +357,12 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
         const dk = toLocalDateKey(o.createdAt);
         const tk = formatTimeReadable(o.createdAt);
         const isDelivery = o.deliveryMethod === 'envio';
-        const itemsText = o.items.map((it) => `${it.quantity}x ${it.productName}`).join(' | ');
+        const itemsText = o.items
+          .map(
+            (it) =>
+              `${it.quantity}x ${it.productName}${it.variantLabel ? ` (${it.variantLabel})` : ''}`
+          )
+          .join(' | ');
         const units = o.items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
         const paymentLabel = resolvePaymentLabel(
           o.confirmedPaymentMethod || o.preferredPaymentMethod,
@@ -368,6 +382,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
           esc(resolveStatusLabel(o.status, isDelivery)),
           esc(o.linkedBoletaNumber || ''),
           esc(o.dispatchReceiptNumber || ''),
+          esc(o.customerSpecificRequest || o.notes || ''),
           Number(o.totalAmount || 0),
         ].join(',');
       }),
@@ -394,14 +409,18 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
       order.dispatchReceiptNumber || `DESP-${order.orderNumber.replace(/^PED-/, '')}`;
     const isPaidOnDispatch = order.status === 'retirado' && paymentKey !== 'fiado';
 
-    const lineItems: SaleLineItem[] = order.items.map((it, idx) => ({
-      id: `wh-it-${order.id}-${idx}`,
-      name: it.unitLabel ? `${it.productName} (${it.unitLabel})` : it.productName,
-      quantity: it.quantity,
-      unitPrice: it.unitPrice,
-      subtotal: it.subtotal,
-      paymentMode: paymentKey === 'fiado' ? 'un_pago_fiado' : 'contado_hoy',
-    }));
+    const lineItems: SaleLineItem[] = order.items.map((it, idx) => {
+      const variantSuffix = it.variantLabel ? ` · ${it.variantLabel}` : '';
+      const unitSuffix = it.unitLabel ? ` (${it.unitLabel})` : '';
+      return {
+        id: `wh-it-${order.id}-${idx}`,
+        name: `${it.productName}${variantSuffix}${unitSuffix}`,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        subtotal: it.subtotal,
+        paymentMode: paymentKey === 'fiado' ? 'un_pago_fiado' : 'contado_hoy',
+      };
+    });
 
     onOpenReceipt({
       receiptNumber,
@@ -423,7 +442,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
       totalPaidAccumulated: isPaidOnDispatch ? order.totalAmount : 0,
       remainingBalance: isPaidOnDispatch ? 0 : order.totalAmount,
       receivedBy: activeUserName || config.distributorName || 'Ventas Web',
-      notes: order.notes,
+      notes: order.customerSpecificRequest || order.notes,
       isFullSettlement: isPaidOnDispatch,
       isDispatchReceipt: true,
       dispatchModalityLabel: isDelivery ? 'Envío a domicilio' : 'Retiro en tienda',
@@ -877,6 +896,11 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                                     {it.quantity}×
                                   </span>{' '}
                                   {it.productName}
+                                  {it.variantLabel && (
+                                    <span className="ml-1 font-semibold text-indigo-700 dark:text-indigo-300">
+                                      ({it.variantLabel})
+                                    </span>
+                                  )}
                                   {skuCode && (
                                     <span className="ml-1 font-mono text-[10px] text-slate-500 dark:text-sky-300">
                                       [Cód: {skuCode}]
@@ -890,6 +914,11 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                               </div>
                             );
                           })}
+                          {(order.customerSpecificRequest || order.notes) && (
+                            <div className="text-[11px] text-amber-800 dark:text-amber-300 truncate pt-0.5">
+                              Obs: {order.customerSpecificRequest || order.notes}
+                            </div>
+                          )}
                         </button>
                       </td>
 
@@ -905,6 +934,13 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                         <div className="text-[11px] text-slate-500 dark:text-[#8D9CB0] mt-0.5">
                           {paymentLabel}
                         </div>
+                        {order.transferReceiptImageUrl && (
+                          <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 mt-0.5">
+                            {order.paymentStatus === 'acreditado'
+                              ? 'Comprobante confirmado'
+                              : 'Comprobante adjuntado'}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-4 align-top whitespace-nowrap">

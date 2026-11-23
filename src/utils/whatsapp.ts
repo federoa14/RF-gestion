@@ -1,4 +1,4 @@
-import { Boleta, Client, Salesperson, Administrator, DistributorConfig, SaleLineItem } from '../types';
+import { Boleta, Client, Salesperson, Administrator, DistributorConfig, SaleLineItem, CatalogPickupOrder } from '../types';
 import { calculateAlertStatus, formatCurrency, formatDateEs, getBoletaBalance } from './alerts';
 
 // Clean phone for wa.me link (e.g. +54 9 11 1234-5678 -> 5491112345678)
@@ -499,6 +499,7 @@ export interface ReceiptWhatsAppPayload {
   notes?: string;
   isFullSettlement?: boolean;
   isDispatchReceipt?: boolean;
+  dispatchStageHeadline?: string;
   dispatchModalityLabel?: string;
   deliveryAddress?: string;
   hideUnitModeTag?: boolean;
@@ -514,9 +515,10 @@ export function generatePaymentReceiptWhatsAppMessage(
   const sym = config.currencySymbol || '$';
   const methodLabels: Record<string, string> = {
     efectivo: 'Efectivo',
-    transferencia: 'Transferencia / MP',
+    transferencia: 'Transferencia / Alias',
     cheque: 'Cheque',
     link_pago: 'Link de Pago / MP',
+    mercadopago_dinero_cuenta: 'Mercado Pago (Dinero en cuenta)',
     fiado: 'Cuenta Corriente / Fiado',
     acordar: 'A coordinar por WhatsApp',
     otro: 'Otro medio',
@@ -561,8 +563,12 @@ export function generatePaymentReceiptWhatsAppMessage(
         ? `\n🔗 *Link de pago:* ${config.merchantMpCheckoutLink.trim()}`
         : '';
 
+    const headlineBlock = receipt.dispatchStageHeadline
+      ? `\n📣 *${receipt.dispatchStageHeadline}*\n`
+      : '';
+
     return `📦 *COMPROBANTE DE DESPACHO - ${receipt.receiptNumber}*
-🏢 *${config.distributorName}*
+🏢 *${config.distributorName}*${headlineBlock}
 
 Estimado/a *${receipt.clientName}*, te enviamos el comprobante oficial de tu compra (*#${receipt.boletaNumber}*):
 
@@ -1053,4 +1059,197 @@ ${params.payUrl}${directMpLine}${bankBlock}
 
 ✅ _Una vez acreditado, tu cuenta se actualiza y queda marcada como PAGADA automáticamente sin necesidad de avisarnos._`;
 }
+
+export type CatalogOrderProcessStage =
+  | 'en_proceso_armando'
+  | 'listo_para_retirar'
+  | 'en_camino'
+  | 'retirado';
+
+/**
+ * Mensajes de WhatsApp automáticos / en 1 clic hacia el CLIENTE durante el proceso de su pedido web:
+ * 1) Pago en proceso y armando tu pedido
+ * 2) Pedido listo para pasar a buscar (Retiro en tienda)
+ * 3) Pedido en viaje a tu domicilio (Envío)
+ * 4) Pedido entregado / retirado y pagado
+ */
+export function generateCatalogOrderCustomerProcessMessage(params: {
+  order: CatalogPickupOrder;
+  stage: CatalogOrderProcessStage;
+  storeName?: string;
+  pickupAddress?: string;
+  pickupHours?: string;
+}): string {
+  const { order, stage, pickupAddress, pickupHours } = params;
+  const shopName = storeNameOrFallback(params.storeName || order.storeName);
+  const sym = order.currencySymbol || '$';
+  const isDelivery = order.deliveryMethod === 'envio';
+  const itemsBlock = (order.items || [])
+    .map(
+      (it) =>
+        `• ${it.quantity} × *${it.productName}*${it.variantLabel ? ` (${it.variantLabel})` : ''}${
+          it.sku ? ` [Cód: ${it.sku}]` : ''
+        } — ${formatCurrency(it.subtotal, sym)}`
+    )
+    .join('\n');
+
+  const customerRequestText = (order.customerSpecificRequest || order.notes || '').trim();
+  const specificRequestLine = customerRequestText
+    ? `\n📝 *Observaciones / Pedido específico:* ${customerRequestText}`
+    : '';
+
+  const paymentMethodKey = order.confirmedPaymentMethod || order.preferredPaymentMethod || 'acordar';
+  const paymentName =
+    paymentMethodKey === 'mercadopago_dinero_cuenta'
+      ? 'Mercado Pago (Dinero en cuenta)'
+      : paymentMethodKey === 'link_pago'
+      ? 'Mercado Pago / Tarjetas'
+      : paymentMethodKey === 'transferencia'
+      ? 'Transferencia bancaria'
+      : paymentMethodKey === 'efectivo'
+      ? isDelivery
+        ? 'Efectivo contra entrega'
+        : 'Efectivo al retirar'
+      : paymentMethodKey === 'fiado'
+      ? 'Cuenta Corriente'
+      : 'A coordinar';
+
+  const paymentLine =
+    order.paymentStatus === 'acreditado'
+      ? `✅ *Pago:* Acreditado (${paymentName})`
+      : order.paymentStatus === 'comprobante_en_revision' || order.transferReceiptImageUrl
+      ? `🔎 *Pago:* Comprobante de transferencia recibido (en verificación)`
+      : `⏳ *Pago:* En proceso (${paymentName})`;
+
+  if (stage === 'en_proceso_armando') {
+    return (
+      `⏳ *PAGO EN PROCESO Y ARMANDO TU PEDIDO*\n` +
+      `🏪 *${shopName}*\n\n` +
+      `Hola *${order.customerName}*, recibimos tu pedido *#${order.orderNumber}* por *${formatCurrency(
+        order.totalAmount,
+        sym
+      )}*.\n\n` +
+      `${paymentLine}\n` +
+      `📦 *Estado actual:* Ya estamos armando y preparando tus productos.\n\n` +
+      `${itemsBlock}${specificRequestLine}\n\n` +
+      (isDelivery
+        ? `🚚 Te avisaremos por este WhatsApp apenas salga el envío hacia *${order.deliveryAddress || 'tu domicilio'}*.`
+        : `🏪 Te avisaremos por este WhatsApp apenas esté *listo para pasar a buscar* por nuestro local.`)
+    );
+  }
+
+  if (stage === 'listo_para_retirar') {
+    const addressLine = pickupAddress ? `\n📍 *Dirección de retiro:* ${pickupAddress}` : '';
+    const hoursLine = pickupHours ? `\n🕒 *Horarios:* ${pickupHours}` : '';
+    return (
+      `✅ *¡TU PEDIDO ESTÁ LISTO PARA PASAR A BUSCAR!*\n` +
+      `🏪 *${shopName}*\n\n` +
+      `Hola *${order.customerName}*, tu pedido *#${order.orderNumber}* ya está armado y listo para retirar.\n\n` +
+      `${paymentLine}\n` +
+      `💰 *Total:* *${formatCurrency(order.totalAmount, sym)}*${addressLine}${hoursLine}\n\n` +
+      `*Detalle:*\n${itemsBlock}${specificRequestLine}\n\n` +
+      `¡Te esperamos cuando gustes!`
+    );
+  }
+
+  if (stage === 'en_camino') {
+    const dest = order.deliveryAddress ? `\n📍 *Destino:* ${order.deliveryAddress}` : '';
+    return (
+      `🚚 *¡TU PEDIDO ESTÁ EN VIAJE A TU DOMICILIO!*\n` +
+      `🏪 *${shopName}*\n\n` +
+      `Hola *${order.customerName}*, te avisamos que tu pedido *#${order.orderNumber}* ya salió de la tienda y se encuentra en camino.${dest}\n\n` +
+      `${paymentLine}\n` +
+      `💰 *Importe:* *${formatCurrency(order.totalAmount, sym)}*\n\n` +
+      `*Detalle:*\n${itemsBlock}${specificRequestLine}\n\n` +
+      `¡Por favor estate atento/a para recibirlo!`
+    );
+  }
+
+  return (
+    `🎉 *PEDIDO ${isDelivery ? 'ENTREGADO' : 'RETIRADO'} Y COMPLETADO*\n` +
+    `🏪 *${shopName}*\n\n` +
+    `Hola *${order.customerName}*, confirmamos que tu pedido *#${order.orderNumber}* por *${formatCurrency(
+      order.totalAmount,
+      sym
+    )}* fue ${isDelivery ? 'entregado' : 'retirado'} correctamente.\n` +
+    `✅ *Pago:* Confirmado (${paymentName})\n\n` +
+    `¡Muchas gracias por tu compra!`
+  );
+}
+
+export function generateStockAlertRestockWhatsAppMessage(params: {
+  customerName: string;
+  productName: string;
+  variantLabel?: string;
+  productSku?: string;
+  storeName?: string;
+  publicUrl?: string;
+}): string {
+  const shopName = storeNameOrFallback(params.storeName);
+  const variantPart = params.variantLabel ? ` (${params.variantLabel})` : '';
+  const skuPart = params.productSku ? ` [Cód: ${params.productSku}]` : '';
+  const linkPart = params.publicUrl ? `\n\nPodés pedirlo directo desde nuestro catálogo online:\n🔗 ${params.publicUrl}` : '';
+  return (
+    `🔔 *¡VOLVIÓ A ENTRAR STOCK!*\n` +
+    `🏪 *${shopName}*\n\n` +
+    `Hola *${params.customerName}*, te avisamos tal como nos pediste que ya ingresó nuevamente *${params.productName}*${variantPart}${skuPart}.${linkPart}\n\n` +
+    `¡Gracias por esperar!`
+  );
+}
+
+export function generateCatalogPromoClubWhatsAppMessage(params: {
+  customerName: string;
+  storeName?: string;
+  promoText: string;
+  couponCode?: string;
+  publicUrl?: string;
+}): string {
+  const shopName = storeNameOrFallback(params.storeName);
+  const couponLine = params.couponCode?.trim()
+    ? `\n\n🎟️ *Cupón exclusivo:* \`${params.couponCode.trim().toUpperCase()}\``
+    : '';
+  const linkLine = params.publicUrl
+    ? `\n\n🛍️ Mirá el catálogo online y aprovechalo acá:\n🔗 ${params.publicUrl}`
+    : '';
+  return (
+    `🎁 *PROMO ESPECIAL PARA VOS*\n` +
+    `🏪 *${shopName}*\n\n` +
+    `Hola *${params.customerName}*! ${params.promoText.trim()}${couponLine}${linkLine}\n\n` +
+    `¡Te esperamos!`
+  );
+}
+
+export function generateCatalogBirthdayPromoWhatsAppMessage(params: {
+  customerName: string;
+  storeName?: string;
+  customMessage?: string;
+  couponCode?: string;
+  couponDiscountLabel?: string;
+  publicUrl?: string;
+}): string {
+  const shopName = storeNameOrFallback(params.storeName);
+  const body =
+    params.customMessage?.trim() ||
+    `¡Desde *${shopName}* queremos desearte un muy Feliz Cumpleaños! Para celebrarlo con vos te dejamos un beneficio especial en tu próxima compra.`;
+  const couponLine = params.couponCode?.trim()
+    ? `\n\n🎂 *Tu cupón regalo:* \`${params.couponCode.trim().toUpperCase()}\`${
+        params.couponDiscountLabel ? ` (${params.couponDiscountLabel})` : ''
+      }`
+    : '';
+  const linkLine = params.publicUrl
+    ? `\n\n🛍️ Usalo directo desde nuestra tienda web:\n🔗 ${params.publicUrl}`
+    : '';
+  return (
+    `🎉 *¡FELIZ CUMPLEAÑOS, ${params.customerName.toUpperCase()}!*\n` +
+    `🏪 *${shopName}*\n\n` +
+    `${body}${couponLine}${linkLine}\n\n` +
+    `¡Que tengas un hermoso día!`
+  );
+}
+
+function storeNameOrFallback(name?: string): string {
+  const clean = (name || '').trim();
+  return clean || 'Nuestra Tienda';
+}
+
 

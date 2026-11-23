@@ -32,10 +32,34 @@ import {
   Tag,
   SlidersHorizontal,
   Palette,
+  FileCheck2,
+  Wallet,
+  Send,
+  ShieldCheck,
+  Percent,
+  Gift,
+  Download,
+  Users,
+  FileSpreadsheet,
+  Megaphone,
+  Cake,
+  ArrowUp,
+  ArrowDown,
+  DollarSign,
+  BarChart3,
+  Award,
+  UserCheck,
 } from 'lucide-react';
 import {
+  CatalogCoupon,
+  CatalogLoyaltyAccount,
+  CatalogLoyaltyTier,
+  CatalogOrderStageNotification,
   CatalogPickupOrder,
   CatalogProduct,
+  CatalogProductVariant,
+  CatalogPromoBanner,
+  CatalogPromoSubscriber,
   CatalogStockAlertRequest,
   DistributorConfig,
   OnlineCatalogSettings,
@@ -44,10 +68,50 @@ import {
 } from '../types';
 import { formatCurrency } from '../utils/alerts';
 import {
+  CatalogOrderProcessStage,
   createWhatsAppUrl,
+  generateCatalogBirthdayPromoWhatsAppMessage,
+  generateCatalogOrderCustomerProcessMessage,
+  generateCatalogPromoClubWhatsAppMessage,
   generatePaymentReceiptWhatsAppMessage,
+  generateStockAlertRestockWhatsAppMessage,
 } from '../utils/whatsapp';
-import { buildPublicCatalogHandle } from '../utils/supabaseServices';
+import {
+  buildPublicCatalogHandle,
+  notifyCatalogOrderCustomerStageViaServer,
+  notifyCatalogStockAlertViaServer,
+  sendCatalogPromoWhatsAppViaServer,
+  syncCatalogOrderToSupabase,
+  testMerchantMercadoPagoConnection,
+  verifyCatalogTransferReceiptViaServer,
+} from '../utils/supabaseServices';
+import {
+  applyDirectPriceUpdate,
+  applyOrderStockDeltaToProducts,
+  applyPercentagePriceAdjustment,
+  CatalogPriceRoundingStep,
+  computeAggregateStockFromVariants,
+  findMatchingVariant,
+  getDefaultLoyaltyTiers,
+  getEligibleLoyaltyTiers,
+  getProductGalleryImages,
+  getProductLowStockStatus,
+  getProductPointsPerUnit,
+  getProductSummaryStock,
+  getUpcomingBirthdaySubscribers,
+  getVariantStock,
+  hasProductVariants,
+  isProductFullyOutOfStock,
+  normalizeDni,
+  normalizeLoyaltyTiers,
+  UpcomingBirthdayEntry,
+} from '../utils/catalogStock';
+import {
+  buildCatalogCsvTemplate,
+  exportCatalogProductsToCsv,
+  parseCatalogSpreadsheetText,
+  triggerCsvDownload,
+} from '../utils/catalogCsv';
 import {
   getCatalogRubroPreset,
   normalizeFilterList,
@@ -63,13 +127,27 @@ interface CatalogManagerProps {
   products: CatalogProduct[];
   orders: CatalogPickupOrder[];
   stockAlerts?: CatalogStockAlertRequest[];
+  promoSubscribers?: CatalogPromoSubscriber[];
+  loyaltyAccounts?: CatalogLoyaltyAccount[];
   activeUserName?: string;
   onSaveSettings: (next: OnlineCatalogSettings) => void;
+  onSaveMerchantPaymentConfig?: (paymentCfg: {
+    merchantPaymentAlias?: string;
+    merchantPaymentCvu?: string;
+    merchantPaymentBank?: string;
+    merchantPaymentHolder?: string;
+    merchantMpCheckoutLink?: string;
+    merchantMpAccessToken?: string;
+  }) => void;
   onSaveProducts: (next: CatalogProduct[]) => void;
   onSaveOrders: (next: CatalogPickupOrder[]) => void;
   onSaveStockAlerts?: (next: CatalogStockAlertRequest[]) => void;
+  onSavePromoSubscribers?: (next: CatalogPromoSubscriber[]) => void;
+  onSaveLoyaltyAccounts?: (next: CatalogLoyaltyAccount[]) => void;
   onRefreshOrders?: () => Promise<void>;
   onRefreshStockAlerts?: () => Promise<void>;
+  onRefreshPromoSubscribers?: () => Promise<void>;
+  onRefreshLoyaltyAccounts?: () => Promise<void>;
   onBillOrder?: (order: CatalogPickupOrder) => void;
   onOpenReceipt?: (receipt: ReceiptModalData) => void;
   onOpenPublicPreview: (handle: string) => void;
@@ -117,6 +195,44 @@ async function compressProductImageFile(file: File): Promise<string> {
   });
 }
 
+async function compressBannerImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen del banner'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Formato de imagen de banner no válido'));
+      img.onload = () => {
+        const maxWidth = 1280;
+        const maxHeight = 540;
+        let { width, height } = img;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        if (height > maxHeight) {
+          width = Math.round((width * maxHeight) / height);
+          height = maxHeight;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, width);
+        canvas.height = Math.max(1, height);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas no disponible'));
+          return;
+        }
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.84));
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export const CatalogManager: React.FC<CatalogManagerProps> = ({
   config,
   tenant,
@@ -124,23 +240,33 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   products,
   orders,
   stockAlerts = [],
+  promoSubscribers = [],
+  loyaltyAccounts = [],
   activeUserName,
   onSaveSettings,
+  onSaveMerchantPaymentConfig,
   onSaveProducts,
   onSaveOrders,
   onSaveStockAlerts,
+  onSavePromoSubscribers,
+  onSaveLoyaltyAccounts,
   onRefreshOrders,
   onRefreshStockAlerts,
+  onRefreshPromoSubscribers,
+  onRefreshLoyaltyAccounts,
   onBillOrder,
   onOpenReceipt,
   onOpenPublicPreview,
   onOpenEditBrand,
   showToast,
 }) => {
-  const [subTab, setSubTab] = useState<'productos' | 'pedidos' | 'avisos_stock' | 'configuracion'>('productos');
+  const [subTab, setSubTab] = useState<
+    'productos' | 'pedidos' | 'avisos_stock' | 'club_promos' | 'estadisticas' | 'configuracion'
+  >('productos');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [selectedSubfilter, setSelectedSubfilter] = useState<string>('Todos');
+  const [showLowStockOnly, setShowLowStockOnly] = useState(false);
   const [newSubfilterInput, setNewSubfilterInput] = useState('');
   const [settingsFilterInput, setSettingsFilterInput] = useState('');
   const [settingsSubfilterInput, setSettingsSubfilterInput] = useState('');
@@ -188,6 +314,20 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       settings.pickupInstructions ||
       'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
     paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
+    defaultLowStockThreshold: settings.defaultLowStockThreshold ?? 2,
+    cashOrTransferDiscountPercent: settings.cashOrTransferDiscountPercent ?? 0,
+    coupons: settings.coupons || [],
+    enablePromoClub: settings.enablePromoClub !== false,
+    promoClubTitle: settings.promoClubTitle || 'Club de Promos y Descuentos',
+    promoClubIncentive:
+      settings.promoClubIncentive ||
+      'Registrate gratis y recibí ofertas exclusivas, ingresos y cupones directo en tu WhatsApp.',
+    promoClubWelcomeCoupon: settings.promoClubWelcomeCoupon || '',
+    promoBanners: settings.promoBanners || [],
+    enableLoyaltyProgram: Boolean(settings.enableLoyaltyProgram),
+    loyaltyPointsPerUnit:
+      typeof settings.loyaltyPointsPerUnit === 'number' ? settings.loyaltyPointsPerUnit : 10,
+    loyaltyTiers: normalizeLoyaltyTiers(settings.loyaltyTiers),
     currencySymbol: settings.currencySymbol || config.currencySymbol || '$',
   }));
 
@@ -229,6 +369,20 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         settings.pickupInstructions ||
         'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
       paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
+      defaultLowStockThreshold: settings.defaultLowStockThreshold ?? 2,
+      cashOrTransferDiscountPercent: settings.cashOrTransferDiscountPercent ?? 0,
+      coupons: settings.coupons || [],
+      enablePromoClub: settings.enablePromoClub !== false,
+      promoClubTitle: settings.promoClubTitle || 'Club de Promos y Descuentos',
+      promoClubIncentive:
+        settings.promoClubIncentive ||
+        'Registrate gratis y recibí ofertas exclusivas, ingresos y cupones directo en tu WhatsApp.',
+      promoClubWelcomeCoupon: settings.promoClubWelcomeCoupon || '',
+      promoBanners: settings.promoBanners || [],
+      enableLoyaltyProgram: Boolean(settings.enableLoyaltyProgram),
+      loyaltyPointsPerUnit:
+        typeof settings.loyaltyPointsPerUnit === 'number' ? settings.loyaltyPointsPerUnit : 10,
+      loyaltyTiers: normalizeLoyaltyTiers(settings.loyaltyTiers),
       currencySymbol: settings.currencySymbol || config.currencySymbol || '$',
     });
   }, [
@@ -242,6 +396,32 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     config.businessRubro,
   ]);
 
+  const [draftMerchantPayment, setDraftMerchantPayment] = useState({
+    merchantPaymentAlias: config.merchantPaymentAlias || '',
+    merchantPaymentCvu: config.merchantPaymentCvu || '',
+    merchantPaymentBank: config.merchantPaymentBank || '',
+    merchantPaymentHolder: config.merchantPaymentHolder || '',
+    merchantMpCheckoutLink: config.merchantMpCheckoutLink || '',
+    merchantMpAccessToken: '',
+  });
+
+  useEffect(() => {
+    setDraftMerchantPayment((prev) => ({
+      merchantPaymentAlias: config.merchantPaymentAlias || '',
+      merchantPaymentCvu: config.merchantPaymentCvu || '',
+      merchantPaymentBank: config.merchantPaymentBank || '',
+      merchantPaymentHolder: config.merchantPaymentHolder || '',
+      merchantMpCheckoutLink: config.merchantMpCheckoutLink || '',
+      merchantMpAccessToken: prev.merchantMpAccessToken || '',
+    }));
+  }, [
+    config.merchantPaymentAlias,
+    config.merchantPaymentCvu,
+    config.merchantPaymentBank,
+    config.merchantPaymentHolder,
+    config.merchantMpCheckoutLink,
+  ]);
+
   // Product Form Modal
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<CatalogProduct | null>(null);
@@ -249,17 +429,105 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [productSku, setProductSku] = useState('');
   const [productPrice, setProductPrice] = useState('');
   const [productStockQuantity, setProductStockQuantity] = useState('');
+  const [productVariants, setProductVariants] = useState<
+    { id: string; label: string; stockQuantity: string; sku: string; price: string }[]
+  >([]);
   const [productCategory, setProductCategory] = useState('General');
   const [productSubfilters, setProductSubfilters] = useState<string[]>([]);
   const [modalNewSubfilter, setModalNewSubfilter] = useState('');
   const [productUnitLabel, setProductUnitLabel] = useState('Unidad');
   const [productDescription, setProductDescription] = useState('');
   const [productImageUrl, setProductImageUrl] = useState('');
+  const [productAdditionalImages, setProductAdditionalImages] = useState<string[]>([]);
+  const [additionalImageUrlInput, setAdditionalImageUrlInput] = useState('');
+  const [productWholesaleMinQty, setProductWholesaleMinQty] = useState('');
+  const [productWholesalePrice, setProductWholesalePrice] = useState('');
+  const [productLowStockThreshold, setProductLowStockThreshold] = useState('');
+  const [productLoyaltyPoints, setProductLoyaltyPoints] = useState('');
   const [productAvailable, setProductAvailable] = useState(true);
   const [productFeatured, setProductFeatured] = useState(false);
   const [isCompressingImage, setIsCompressingImage] = useState(false);
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<CatalogPickupOrder | null>(null);
+  const [verifyingOrderId, setVerifyingOrderId] = useState<string | null>(null);
+  const [newCouponCode, setNewCouponCode] = useState('');
+  const [newCouponType, setNewCouponType] = useState<'percent' | 'fixed'>('percent');
+  const [newCouponValue, setNewCouponValue] = useState('');
+  const [newCouponMinPurchase, setNewCouponMinPurchase] = useState('');
+  const [promoCategoryFilter, setPromoCategoryFilter] = useState('Todas');
+  const [promoMessageDraft, setPromoMessageDraft] = useState('');
+  const [promoCouponCodeDraft, setPromoCouponCodeDraft] = useState('');
+  const [isSendingBatchPromo, setIsSendingBatchPromo] = useState(false);
+  const [isRefreshingPromos, setIsRefreshingPromos] = useState(false);
+  const [isTestingMp, setIsTestingMp] = useState(false);
+  const [mpTestResult, setMpTestResult] = useState<{
+    ok: boolean;
+    valid: boolean;
+    hasSavedToken?: boolean;
+    account?: {
+      id?: number | string;
+      nickname?: string;
+      email?: string;
+      firstName?: string;
+      lastName?: string;
+      siteId?: string;
+    };
+    webhookUrls?: {
+      serverWebhookUrl?: string;
+      supabaseWebhookUrl?: string;
+    };
+    error?: string;
+  } | null>(null);
+  const [copiedWebhookField, setCopiedWebhookField] = useState<string | null>(null);
+  const [isBatchNotifyingAlerts, setIsBatchNotifyingAlerts] = useState(false);
+
+  // Per-product inline quick price editor ($ fixed or %)
+  const [quickPriceProductId, setQuickPriceProductId] = useState<string | null>(null);
+  const [quickPriceMode, setQuickPriceMode] = useState<'fixed' | 'percent'>('fixed');
+  const [quickPriceInput, setQuickPriceInput] = useState('');
+  const [quickPriceScaleExtras, setQuickPriceScaleExtras] = useState(true);
+
+  // Multi-select bulk percentage adjustment
+  const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(() => new Set());
+  const [bulkPercentInput, setBulkPercentInput] = useState('10');
+  const [bulkRoundingStep, setBulkRoundingStep] = useState<CatalogPriceRoundingStep>(0);
+  const [bulkIncludeWholesale, setBulkIncludeWholesale] = useState(true);
+  const [bulkIncludeVariants, setBulkIncludeVariants] = useState(true);
+
+  // CSV / Excel bulk import modal
+  const [isCsvImportModalOpen, setIsCsvImportModalOpen] = useState(false);
+  const [csvRawInput, setCsvRawInput] = useState('');
+  const [csvConflictMode, setCsvConflictMode] = useState<'upsert' | 'only_new'>('upsert');
+  const csvFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Promotional banners builder inside Settings
+  const [newBannerMode, setNewBannerMode] = useState<'built' | 'image'>('built');
+  const [newBannerImageUrl, setNewBannerImageUrl] = useState('');
+  const [isCompressingBannerImage, setIsCompressingBannerImage] = useState(false);
+  const [newBannerBadge, setNewBannerBadge] = useState('');
+  const [newBannerTitle, setNewBannerTitle] = useState('');
+  const [newBannerSubtitle, setNewBannerSubtitle] = useState('');
+  const [newBannerTheme, setNewBannerTheme] = useState<CatalogPromoBanner['theme']>('navy');
+  const [newBannerFilterCategory, setNewBannerFilterCategory] = useState('');
+  const [newBannerCouponCode, setNewBannerCouponCode] = useState('');
+  const [newBannerCtaLabel, setNewBannerCtaLabel] = useState('Ver oferta');
+  const bannerFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Loyalty tiers draft inputs inside Settings
+  const [newLoyaltyMinPoints, setNewLoyaltyMinPoints] = useState('');
+  const [newLoyaltyDiscountPercent, setNewLoyaltyDiscountPercent] = useState('');
+
+  // Statistics & Loyalty CRM states
+  const [statsRange, setStatsRange] = useState<'today' | '7d' | '30d' | 'all'>('30d');
+  const [loyaltySearchQuery, setLoyaltySearchQuery] = useState('');
+  const [isRefreshingLoyalty, setIsRefreshingLoyalty] = useState(false);
+
+  // Birthday greetings state inside Club Promos
+  const [birthdayCouponCodeDraft, setBirthdayCouponCodeDraft] = useState('');
+  const [birthdayCustomMessageDraft, setBirthdayCustomMessageDraft] = useState('');
+  const [isSendingBirthdayBatch, setIsSendingBirthdayBatch] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isServiceEnabledBySuperAdmin = tenant?.catalogEnabled !== false;
   const currency = settings.currencySymbol || config.currencySymbol || '$';
@@ -324,9 +592,22 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     }
   }, [activeSubfilters, selectedSubfilter]);
 
+  const defaultLowThreshold = Math.max(0, Math.floor(settings.defaultLowStockThreshold ?? 2));
+
+  const lowStockProducts = useMemo(
+    () =>
+      rubroProducts.filter(
+        (p) => p.available && getProductLowStockStatus(p, defaultLowThreshold).isLow
+      ),
+    [rubroProducts, defaultLowThreshold]
+  );
+
   const filteredProducts = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return rubroProducts.filter((p) => {
+      if (showLowStockOnly && !getProductLowStockStatus(p, defaultLowThreshold).isLow) {
+        return false;
+      }
       if (selectedCategory !== 'Todas' && p.category !== selectedCategory) return false;
       if (
         selectedSubfilter !== 'Todos' &&
@@ -342,10 +623,13 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         p.description.toLowerCase().includes(q) ||
         p.category.toLowerCase().includes(q) ||
         (p.sku || '').toLowerCase().includes(q) ||
-        (p.subfilters || []).some((sf) => sf.toLowerCase().includes(q))
+        (p.subfilters || []).some((sf) => sf.toLowerCase().includes(q)) ||
+        (p.variants || []).some(
+          (v) => v.label.toLowerCase().includes(q) || (v.sku || '').toLowerCase().includes(q)
+        )
       );
     });
-  }, [rubroProducts, searchTerm, selectedCategory, selectedSubfilter]);
+  }, [rubroProducts, searchTerm, selectedCategory, selectedSubfilter, showLowStockOnly, defaultLowThreshold]);
 
   const productMap = useMemo(() => {
     const byId = new Map<string, CatalogProduct>();
@@ -393,6 +677,29 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     return map;
   }, [stockAlerts]);
 
+  const isStockAlertAvailableNow = (alert: CatalogStockAlertRequest): boolean => {
+    const liveProduct =
+      productMap.byId.get(alert.productId) ||
+      productMap.byName.get(alert.productName.trim().toLowerCase());
+    if (!liveProduct || !liveProduct.available) return false;
+    if (alert.variantId || alert.variantLabel) {
+      const matchedVar = findMatchingVariant(liveProduct, alert.variantId, alert.variantLabel);
+      if (matchedVar) {
+        const vStock = getVariantStock(matchedVar);
+        return vStock === null || vStock > 0;
+      }
+    }
+    return !isProductFullyOutOfStock(liveProduct);
+  };
+
+  const restockedPendingAlerts = useMemo(
+    () =>
+      stockAlerts.filter(
+        (a) => a.status === 'pending' && isStockAlertAvailableNow(a)
+      ),
+    [stockAlerts, productMap]
+  );
+
   const sortedStockAlerts = useMemo(
     () =>
       [...stockAlerts].sort((a, b) => {
@@ -405,7 +712,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const outOfStockProductsCount = useMemo(
     () =>
       rubroProducts.filter(
-        (p) => p.available && typeof p.stockQuantity === 'number' && p.stockQuantity <= 0
+        (p) => p.available && isProductFullyOutOfStock(p)
       ).length,
     [rubroProducts]
   );
@@ -554,9 +861,16 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     );
     setProductSubfilters(selectedSubfilter !== 'Todos' ? [selectedSubfilter] : []);
     setModalNewSubfilter('');
+    setProductVariants([]);
     setProductUnitLabel(rubroPreset.defaultUnitLabel || 'Unidad');
     setProductDescription('');
     setProductImageUrl('');
+    setProductAdditionalImages([]);
+    setAdditionalImageUrlInput('');
+    setProductWholesaleMinQty('');
+    setProductWholesalePrice('');
+    setProductLowStockThreshold('');
+    setProductLoyaltyPoints('');
     setProductAvailable(true);
     setProductFeatured(false);
     setIsProductModalOpen(true);
@@ -570,12 +884,41 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductStockQuantity(
       typeof product.stockQuantity === 'number' ? String(product.stockQuantity) : ''
     );
+    setProductVariants(
+      (product.variants || []).map((v) => ({
+        id: v.id,
+        label: v.label,
+        stockQuantity: typeof v.stockQuantity === 'number' ? String(v.stockQuantity) : '',
+        sku: v.sku || '',
+        price: typeof v.price === 'number' ? String(v.price) : '',
+      }))
+    );
     setProductCategory(product.category || activeRubroFilters[0] || 'General');
     setProductSubfilters(normalizeFilterList(product.subfilters));
     setModalNewSubfilter('');
     setProductUnitLabel(product.unitLabel || rubroPreset.defaultUnitLabel || 'Unidad');
     setProductDescription(product.description || '');
     setProductImageUrl(product.imageUrl || '');
+    setProductAdditionalImages((product.additionalImageUrls || []).slice(0, 3));
+    setAdditionalImageUrlInput('');
+    setProductWholesaleMinQty(
+      typeof product.wholesaleMinQty === 'number' && product.wholesaleMinQty > 1
+        ? String(product.wholesaleMinQty)
+        : ''
+    );
+    setProductWholesalePrice(
+      typeof product.wholesalePrice === 'number' && product.wholesalePrice >= 0
+        ? String(product.wholesalePrice)
+        : ''
+    );
+    setProductLowStockThreshold(
+      typeof product.lowStockThreshold === 'number' ? String(product.lowStockThreshold) : ''
+    );
+    setProductLoyaltyPoints(
+      typeof product.loyaltyPoints === 'number' && product.loyaltyPoints >= 0
+        ? String(product.loyaltyPoints)
+        : ''
+    );
     setProductAvailable(product.available);
     setProductFeatured(Boolean(product.featured));
     setIsProductModalOpen(true);
@@ -597,6 +940,48 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     }
   };
 
+  const handleBannerImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsCompressingBannerImage(true);
+    try {
+      const dataUrl = await compressBannerImageFile(file);
+      setNewBannerImageUrl(dataUrl);
+      showToast('Imagen de banner optimizada y cargada.');
+    } catch {
+      showToast('No se pudo procesar la imagen del banner.');
+    } finally {
+      setIsCompressingBannerImage(false);
+      if (bannerFileInputRef.current) bannerFileInputRef.current.value = '';
+    }
+  };
+
+  const handleAdditionalGalleryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const remainingSlots = Math.max(0, 3 - productAdditionalImages.length);
+    if (remainingSlots <= 0) {
+      showToast('Ya cargaste el máximo de 3 fotos adicionales por producto (4 en total).');
+      if (galleryFileInputRef.current) galleryFileInputRef.current.value = '';
+      return;
+    }
+    setIsCompressingImage(true);
+    try {
+      const uploaded: string[] = [];
+      for (const file of files.slice(0, remainingSlots)) {
+        const dataUrl = await compressProductImageFile(file);
+        uploaded.push(dataUrl);
+      }
+      setProductAdditionalImages((prev) => [...prev, ...uploaded].slice(0, 3));
+      showToast(`${uploaded.length} foto(s) agregadas a la galería del producto.`);
+    } catch {
+      showToast('No se pudieron procesar las fotos seleccionadas.');
+    } finally {
+      setIsCompressingImage(false);
+      if (galleryFileInputRef.current) galleryFileInputRef.current.value = '';
+    }
+  };
+
   const handleSubmitProduct = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = productName.trim();
@@ -610,26 +995,92 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       return;
     }
 
-    const trimmedStock = productStockQuantity.trim();
-    let parsedStock: number | undefined = undefined;
-    if (trimmedStock !== '') {
-      const numericStock = Number(trimmedStock);
-      if (!Number.isFinite(numericStock) || numericStock < 0) {
-        showToast('Ingresá una cantidad de stock válida (0 o mayor), o dejalo vacío para stock libre.');
-        return;
+    const parsedVariants: CatalogProductVariant[] = [];
+    for (const draftVar of productVariants) {
+      const lbl = draftVar.label.trim();
+      if (!lbl) continue;
+      let vStock: number | undefined = undefined;
+      if (draftVar.stockQuantity.trim() !== '') {
+        const num = Number(draftVar.stockQuantity.trim());
+        if (!Number.isFinite(num) || num < 0) {
+          showToast(`Stock inválido en variante "${lbl}". Usá 0 o mayor, o dejalo vacío.`);
+          return;
+        }
+        vStock = Math.floor(num);
       }
-      parsedStock = Math.floor(numericStock);
+      let vPrice: number | undefined = undefined;
+      if (draftVar.price.trim() !== '') {
+        const numP = Number(draftVar.price.trim().replace(',', '.'));
+        if (!Number.isFinite(numP) || numP < 0) {
+          showToast(`Precio inválido en variante "${lbl}".`);
+          return;
+        }
+        vPrice = numP;
+      }
+      parsedVariants.push({
+        id: draftVar.id || `var-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        label: lbl,
+        sku: draftVar.sku.trim() || undefined,
+        stockQuantity: vStock,
+        price: vPrice,
+      });
+    }
+
+    let parsedStock: number | undefined = undefined;
+    if (parsedVariants.length > 0) {
+      parsedStock = computeAggregateStockFromVariants(parsedVariants);
+    } else {
+      const trimmedStock = productStockQuantity.trim();
+      if (trimmedStock !== '') {
+        const numericStock = Number(trimmedStock);
+        if (!Number.isFinite(numericStock) || numericStock < 0) {
+          showToast('Ingresá una cantidad de stock válida (0 o mayor), o dejalo vacío para stock libre.');
+          return;
+        }
+        parsedStock = Math.floor(numericStock);
+      }
     }
 
     const cleanSubfilters = normalizeFilterList(productSubfilters);
     const cleanCategory = productCategory.trim() || activeRubroFilters[0] || 'General';
     const now = new Date().toISOString();
     const cleanSku = productSku.trim() || undefined;
+    const cleanAdditionalImages = productAdditionalImages
+      .map((u) => u.trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+    const parsedWholesaleMinQty =
+      productWholesaleMinQty.trim() !== '' && Number(productWholesaleMinQty) > 1
+        ? Math.floor(Number(productWholesaleMinQty))
+        : undefined;
+    const parsedWholesalePrice =
+      parsedWholesaleMinQty &&
+      productWholesalePrice.trim() !== '' &&
+      Number.isFinite(Number(productWholesalePrice.replace(',', '.'))) &&
+      Number(productWholesalePrice.replace(',', '.')) > 0
+        ? Number(productWholesalePrice.replace(',', '.'))
+        : undefined;
+    const parsedLowStockThreshold =
+      productLowStockThreshold.trim() !== '' &&
+      Number.isFinite(Number(productLowStockThreshold)) &&
+      Number(productLowStockThreshold) >= 0
+        ? Math.floor(Number(productLowStockThreshold))
+        : undefined;
+    const parsedProductLoyaltyPoints =
+      productLoyaltyPoints.trim() !== '' &&
+      Number.isFinite(Number(productLoyaltyPoints)) &&
+      Number(productLoyaltyPoints) >= 0
+        ? Math.floor(Number(productLoyaltyPoints))
+        : undefined;
 
     if (editingProduct) {
-      const wasOutOfStock =
-        typeof editingProduct.stockQuantity === 'number' && editingProduct.stockQuantity <= 0;
-      const isNowInStock = parsedStock === undefined || parsedStock > 0;
+      const wasOutOfStock = isProductFullyOutOfStock(editingProduct);
+      const nextProdPreview = {
+        stockQuantity: parsedStock,
+        variants: parsedVariants.length > 0 ? parsedVariants : undefined,
+      };
+      const isNowInStock = !isProductFullyOutOfStock(nextProdPreview);
       const waitingCount = pendingAlertsByProductId.get(editingProduct.id) || 0;
 
       const updated = products.map((p) =>
@@ -639,13 +1090,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               name: cleanName,
               sku: cleanSku,
               price: numericPrice,
+              wholesaleMinQty: parsedWholesalePrice ? parsedWholesaleMinQty : undefined,
+              wholesalePrice: parsedWholesalePrice,
+              lowStockThreshold: parsedLowStockThreshold,
+              loyaltyPoints: parsedProductLoyaltyPoints,
               stockQuantity: parsedStock,
+              variants: parsedVariants.length > 0 ? parsedVariants : undefined,
               rubro: activeCatalogRubro,
               category: cleanCategory,
               subfilters: cleanSubfilters,
               unitLabel: productUnitLabel.trim() || rubroPreset.defaultUnitLabel || 'Unidad',
               description: productDescription.trim(),
               imageUrl: productImageUrl.trim() || undefined,
+              additionalImageUrls: cleanAdditionalImages.length > 0 ? cleanAdditionalImages : undefined,
               available: productAvailable,
               featured: productFeatured,
               updatedAt: now,
@@ -653,9 +1110,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           : p
       );
       onSaveProducts(updated);
-      if (wasOutOfStock && isNowInStock && waitingCount > 0) {
+      if ((wasOutOfStock && isNowInStock && waitingCount > 0) || (parsedVariants.length > 0 && waitingCount > 0)) {
         showToast(
-          `Stock repuesto en "${cleanName}". Tenés ${waitingCount} cliente(s) para avisar en "Avisos de Stock".`
+          `Stock actualizado en "${cleanName}". Tenés ${waitingCount} cliente(s) en espera para avisar por WhatsApp.`
         );
       } else {
         showToast(`Producto "${cleanName}" actualizado en el rubro ${rubroPreset.shortLabel}.`);
@@ -666,13 +1123,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         name: cleanName,
         sku: cleanSku,
         price: numericPrice,
+        wholesaleMinQty: parsedWholesalePrice ? parsedWholesaleMinQty : undefined,
+        wholesalePrice: parsedWholesalePrice,
+        lowStockThreshold: parsedLowStockThreshold,
+        loyaltyPoints: parsedProductLoyaltyPoints,
         stockQuantity: parsedStock,
+        variants: parsedVariants.length > 0 ? parsedVariants : undefined,
         rubro: activeCatalogRubro,
         category: cleanCategory,
         subfilters: cleanSubfilters,
         unitLabel: productUnitLabel.trim() || rubroPreset.defaultUnitLabel || 'Unidad',
         description: productDescription.trim(),
         imageUrl: productImageUrl.trim() || undefined,
+        additionalImageUrls: cleanAdditionalImages.length > 0 ? cleanAdditionalImages : undefined,
         available: productAvailable,
         featured: productFeatured,
         createdAt: now,
@@ -707,14 +1170,57 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     }
   };
 
-  const handleNotifyStockAlertWhatsApp = (alert: CatalogStockAlertRequest) => {
+  const handleQuickUpdateVariantStock = (
+    product: CatalogProduct,
+    variantId: string,
+    nextStock: number | undefined
+  ) => {
+    if (!product.variants || product.variants.length === 0) return;
+    const now = new Date().toISOString();
+    const prevVar = product.variants.find((v) => v.id === variantId);
+    const wasVarOut = prevVar && typeof prevVar.stockQuantity === 'number' && prevVar.stockQuantity <= 0;
+    const isVarIn = nextStock === undefined || nextStock > 0;
+
+    const nextVariants = product.variants.map((v) =>
+      v.id === variantId ? { ...v, stockQuantity: nextStock } : v
+    );
+    const aggStock = computeAggregateStockFromVariants(nextVariants);
+
+    const updated = products.map((p) =>
+      p.id === product.id
+        ? { ...p, variants: nextVariants, stockQuantity: aggStock, updatedAt: now }
+        : p
+    );
+    onSaveProducts(updated);
+
+    const waitingCount = pendingAlertsByProductId.get(product.id) || 0;
+    if (wasVarOut && isVarIn && waitingCount > 0) {
+      showToast(
+        `Stock repuesto en "${product.name} (${prevVar?.label || ''})". Hay clientes en espera para avisar.`
+      );
+    }
+  };
+
+  const handleNotifyStockAlertWhatsApp = async (
+    alert: CatalogStockAlertRequest,
+    silentOpenFallback: boolean = false
+  ) => {
     const storeTitle = settings.storeName || config.distributorName || 'Nuestra Tienda';
-    const skuPart = alert.productSku ? ` (Cód: ${alert.productSku})` : '';
-    const message =
-      `Hola ${alert.customerName}! 👋 Te avisamos de *${storeTitle}* que ya volvió a entrar stock de *${alert.productName}*${skuPart}.\n\n` +
-      `Podés verlo y hacer tu pedido directo desde nuestro catálogo online:\n🔗 ${publicUrl}\n\n` +
-      `¡Gracias por esperar!`;
-    window.open(createWhatsAppUrl(alert.customerPhone, message), '_blank', 'noopener,noreferrer');
+    const message = generateStockAlertRestockWhatsAppMessage({
+      customerName: alert.customerName,
+      productName: alert.productName,
+      variantLabel: alert.variantLabel,
+      productSku: alert.productSku,
+      storeName: storeTitle,
+      publicUrl,
+    });
+
+    const serverRes = await notifyCatalogStockAlertViaServer({ alert, message });
+    if (!serverRes.success && !silentOpenFallback) {
+      window.open(createWhatsAppUrl(alert.customerPhone, message), '_blank', 'noopener,noreferrer');
+    } else if (!serverRes.success && silentOpenFallback) {
+      window.open(createWhatsAppUrl(alert.customerPhone, message), '_blank', 'noopener,noreferrer');
+    }
 
     if (onSaveStockAlerts) {
       const now = new Date().toISOString();
@@ -726,7 +1232,59 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         )
       );
     }
-    showToast(`Aviso enviado por WhatsApp a ${alert.customerName}.`);
+    if (!silentOpenFallback) {
+      showToast(
+        serverRes.success
+          ? `Aviso automático enviado por WhatsApp a ${alert.customerName}.`
+          : `Aviso listo en WhatsApp para ${alert.customerName}.`
+      );
+    }
+  };
+
+  const handleNotifyAllRestockedAlerts = async () => {
+    if (restockedPendingAlerts.length === 0) return;
+    setIsBatchNotifyingAlerts(true);
+    try {
+      const storeTitle = settings.storeName || config.distributorName || 'Nuestra Tienda';
+      const now = new Date().toISOString();
+      let apiSentCount = 0;
+      const notifiedIds = new Set<string>();
+
+      for (const alert of restockedPendingAlerts) {
+        const message = generateStockAlertRestockWhatsAppMessage({
+          customerName: alert.customerName,
+          productName: alert.productName,
+          variantLabel: alert.variantLabel,
+          productSku: alert.productSku,
+          storeName: storeTitle,
+          publicUrl,
+        });
+        const serverRes = await notifyCatalogStockAlertViaServer({ alert, message });
+        if (serverRes.success) {
+          apiSentCount += 1;
+        } else {
+          window.open(createWhatsAppUrl(alert.customerPhone, message), '_blank', 'noopener,noreferrer');
+        }
+        notifiedIds.add(alert.id);
+      }
+
+      if (onSaveStockAlerts) {
+        onSaveStockAlerts(
+          stockAlerts.map((a) =>
+            notifiedIds.has(a.id)
+              ? { ...a, status: 'notified', notifiedAt: now, updatedAt: now }
+              : a
+          )
+        );
+      }
+      showToast(
+        apiSentCount === restockedPendingAlerts.length
+          ? `Se enviaron ${apiSentCount} avisos automáticos de reposición por WhatsApp.`
+          : `Se procesaron ${restockedPendingAlerts.length} avisos de reposición (${apiSentCount} vía API, el resto por WhatsApp Web).`
+      );
+    } finally {
+      setIsBatchNotifyingAlerts(false);
+    }
   };
 
   const handleToggleStockAlertStatus = (alert: CatalogStockAlertRequest) => {
@@ -793,11 +1351,33 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         config.senderPhone ||
         config.distributorPhone ||
         '',
+      enableLoyaltyProgram: Boolean(draftSettings.enableLoyaltyProgram),
+      loyaltyPointsPerUnit: Math.max(
+        0,
+        Math.floor(Number(draftSettings.loyaltyPointsPerUnit) || 0)
+      ),
+      loyaltyTiers: normalizeLoyaltyTiers(draftSettings.loyaltyTiers),
+      loyaltyRestrictRedeemMethods: draftSettings.loyaltyRestrictRedeemMethods !== false,
       updatedAt: new Date().toISOString(),
     };
     setDraftSettings(next);
+    if (onSaveMerchantPaymentConfig) {
+      onSaveMerchantPaymentConfig({
+        merchantPaymentAlias: draftMerchantPayment.merchantPaymentAlias.trim(),
+        merchantPaymentCvu: draftMerchantPayment.merchantPaymentCvu.trim(),
+        merchantPaymentBank: draftMerchantPayment.merchantPaymentBank.trim(),
+        merchantPaymentHolder: draftMerchantPayment.merchantPaymentHolder.trim(),
+        merchantMpCheckoutLink: draftMerchantPayment.merchantMpCheckoutLink.trim(),
+        ...(draftMerchantPayment.merchantMpAccessToken.trim()
+          ? { merchantMpAccessToken: draftMerchantPayment.merchantMpAccessToken.trim() }
+          : {}),
+      });
+      if (draftMerchantPayment.merchantMpAccessToken.trim()) {
+        setDraftMerchantPayment((prev) => ({ ...prev, merchantMpAccessToken: '' }));
+      }
+    }
     onSaveSettings(next);
-    showToast('Configuración, filtros y enlace del catálogo guardados y publicados.');
+    showToast('Configuración, cobros, programa de puntos y enlace del catálogo guardados.');
   };
 
   const resolveOrderPaymentLabel = (
@@ -807,6 +1387,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     switch (method) {
       case 'transferencia':
         return 'Transferencia bancaria / Alias';
+      case 'mercadopago_dinero_cuenta':
+        return 'Mercado Pago (Dinero en cuenta)';
       case 'link_pago':
         return 'Link de Pago / Mercado Pago';
       case 'efectivo':
@@ -831,14 +1413,18 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       `DESP-${order.orderNumber.replace(/^PED-/, '')}`;
     const todayStr = new Date().toISOString().split('T')[0];
 
-    const lineItems: SaleLineItem[] = order.items.map((it, idx) => ({
-      id: `desp-it-${order.id}-${idx}`,
-      name: it.unitLabel ? `${it.productName} (${it.unitLabel})` : it.productName,
-      quantity: it.quantity,
-      unitPrice: it.unitPrice,
-      subtotal: it.subtotal,
-      paymentMode: paymentKey === 'fiado' ? 'un_pago_fiado' : 'contado_hoy',
-    }));
+    const lineItems: SaleLineItem[] = order.items.map((it, idx) => {
+      const variantSuffix = it.variantLabel ? ` · ${it.variantLabel}` : '';
+      const unitSuffix = it.unitLabel ? ` (${it.unitLabel})` : '';
+      return {
+        id: `desp-it-${order.id}-${idx}`,
+        name: `${it.productName}${variantSuffix}${unitSuffix}`,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        subtotal: it.subtotal,
+        paymentMode: paymentKey === 'fiado' ? 'un_pago_fiado' : 'contado_hoy',
+      };
+    });
 
     const isPaidOnDispatch = order.status === 'retirado' && paymentKey !== 'fiado';
 
@@ -864,7 +1450,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       totalPaidAccumulated: isPaidOnDispatch ? order.totalAmount : 0,
       remainingBalance: isPaidOnDispatch ? 0 : order.totalAmount,
       receivedBy: activeUserName || config.distributorName || 'Despacho',
-      notes: order.notes,
+      notes: order.customerSpecificRequest || order.notes,
       isFullSettlement: isPaidOnDispatch,
       isDispatchReceipt: true,
       dispatchModalityLabel: isDelivery ? 'Envío a domicilio' : 'Retiro en el comercio',
@@ -961,6 +1547,121 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     status: CatalogPickupOrder['status']
   ) => {
     const target = orders.find((o) => o.id === orderId);
+    const now = new Date().toISOString();
+
+    // Si pasa a CANCELADO y tenía stock descontado, reintegrar automáticamente las unidades al catálogo
+    if (target && status === 'cancelado' && target.status !== 'cancelado') {
+      let stockRestoredNow = false;
+      let restoredAlertsWaiting = 0;
+
+      if (target.stockDeducted) {
+        const { updatedProducts, changed, restoredProductIds } = applyOrderStockDeltaToProducts(
+          products,
+          target.items,
+          'restore'
+        );
+        if (changed) {
+          onSaveProducts(updatedProducts);
+          stockRestoredNow = true;
+          restoredAlertsWaiting = restoredProductIds.reduce(
+            (sum, pid) => sum + (pendingAlertsByProductId.get(pid) || 0),
+            0
+          );
+        }
+      }
+
+      // Revertir puntos del Programa de Puntos por DNI si el pedido había sumado o canjeado
+      let loyaltyReversed = false;
+      if (target.loyaltyPointsSettled && target.customerDni && onSaveLoyaltyAccounts) {
+        const cleanDni = normalizeDni(target.customerDni);
+        const targetAcc = loyaltyAccounts.find((a) => normalizeDni(a.dni) === cleanDni);
+        if (targetAcc) {
+          const earned = Math.max(0, Math.floor(Number(target.loyaltyPointsEarned) || 0));
+          const redeemed = Math.max(0, Math.floor(Number(target.loyaltyPointsRedeemed) || 0));
+          const revertedBalance = Math.max(0, targetAcc.pointsBalance - earned + redeemed);
+          const delta = revertedBalance - targetAcc.pointsBalance;
+          const updatedAcc: CatalogLoyaltyAccount = {
+            ...targetAcc,
+            pointsBalance: revertedBalance,
+            totalPointsEarned: Math.max(0, targetAcc.totalPointsEarned - earned),
+            totalPointsRedeemed: Math.max(0, targetAcc.totalPointsRedeemed - redeemed),
+            ordersCount: Math.max(0, targetAcc.ordersCount - 1),
+            history: [
+              {
+                id: `lmov-rev-${Date.now()}`,
+                date: now,
+                type: 'reversed' as const,
+                pointsDelta: delta,
+                orderId: target.id,
+                orderNumber: target.orderNumber,
+                note: `Pedido #${target.orderNumber} cancelado (reversión automática)`,
+              },
+              ...(targetAcc.history || []),
+            ].slice(0, 40),
+            updatedAt: now,
+          };
+          onSaveLoyaltyAccounts(
+            loyaltyAccounts.map((a) => (a.id === targetAcc.id ? updatedAcc : a))
+          );
+          loyaltyReversed = true;
+        }
+      }
+
+      const updatedOrders = orders.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'cancelado' as const,
+              stockDeducted: false,
+              stockRestoredAt: stockRestoredNow ? now : o.stockRestoredAt,
+              loyaltyPointsSettled: loyaltyReversed ? false : o.loyaltyPointsSettled,
+              updatedAt: now,
+            }
+          : o
+      );
+      onSaveOrders(updatedOrders);
+      showToast(
+        stockRestoredNow
+          ? restoredAlertsWaiting > 0
+            ? `Pedido #${target.orderNumber} cancelado y stock reintegrado automáticamente. Hay ${restoredAlertsWaiting} aviso(s) de stock para notificar.`
+            : `Pedido #${target.orderNumber} cancelado y stock reintegrado automáticamente al catálogo.`
+          : loyaltyReversed
+          ? `Pedido #${target.orderNumber} cancelado y puntos DNI revertidos.`
+          : `Pedido #${target.orderNumber} marcado como Cancelado.`
+      );
+      return;
+    }
+
+    // Si estaba CANCELADO y se reactiva a otro estado, volver a descontar el stock
+    if (target && target.status === 'cancelado' && status !== 'cancelado' && !target.stockDeducted) {
+      const { updatedProducts, changed } = applyOrderStockDeltaToProducts(
+        products,
+        target.items,
+        'deduct'
+      );
+      if (changed) {
+        onSaveProducts(updatedProducts);
+      }
+      const reactivatedTarget: CatalogPickupOrder = {
+        ...target,
+        status,
+        stockDeducted: true,
+        stockRestoredAt: undefined,
+        updatedAt: now,
+      };
+      if (status === 'retirado') {
+        handleMarkOrderPaidPickedUp(reactivatedTarget);
+        return;
+      }
+      if (status === 'listo_para_retirar' || status === 'en_camino') {
+        handleDispatchAndOpenReceipt(reactivatedTarget, status);
+        return;
+      }
+      onSaveOrders(orders.map((o) => (o.id === orderId ? reactivatedTarget : o)));
+      showToast(`Pedido #${target.orderNumber} reactivado y stock descontado nuevamente.`);
+      return;
+    }
+
     if (target && status === 'retirado') {
       handleMarkOrderPaidPickedUp(target);
       return;
@@ -974,7 +1675,6 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       return;
     }
 
-    const now = new Date().toISOString();
     const updated = orders.map((o) =>
       o.id === orderId ? { ...o, status, updatedAt: now } : o
     );
@@ -1015,7 +1715,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     const itemSummaryLines = order.items
       .map(
         (it) =>
-          `• ${it.quantity} × ${it.productName}: ${formatCurrency(it.subtotal, orderCurrency)}`
+          `• ${it.quantity} × ${it.productName}${it.variantLabel ? ` (${it.variantLabel})` : ''}: ${formatCurrency(it.subtotal, orderCurrency)}`
       )
       .join('\n');
 
@@ -1047,6 +1747,718 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
     const url = createWhatsAppUrl(order.customerPhone, msg);
     window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleConfirmOrderPayment = (order: CatalogPickupOrder) => {
+    const now = new Date().toISOString();
+    const resolvedMethod: NonNullable<CatalogPickupOrder['confirmedPaymentMethod']> =
+      order.confirmedPaymentMethod ||
+      (order.preferredPaymentMethod && order.preferredPaymentMethod !== 'acordar'
+        ? order.preferredPaymentMethod
+        : 'transferencia');
+    const updatedOrder: CatalogPickupOrder = {
+      ...order,
+      paymentStatus: 'acreditado',
+      confirmedPaymentMethod: resolvedMethod,
+      updatedAt: now,
+    };
+    onSaveOrders(orders.map((o) => (o.id === order.id ? updatedOrder : o)));
+    void syncCatalogOrderToSupabase(updatedOrder);
+    showToast(`Pago de pedido #${order.orderNumber} confirmado y acreditado.`);
+  };
+
+  const handleSendOrderProcessWhatsApp = async (
+    order: CatalogPickupOrder,
+    stage: CatalogOrderProcessStage
+  ) => {
+    const now = new Date().toISOString();
+    const nextStatus: CatalogPickupOrder['status'] =
+      stage === 'listo_para_retirar'
+        ? 'listo_para_retirar'
+        : stage === 'en_camino'
+        ? 'en_camino'
+        : stage === 'retirado'
+        ? 'retirado'
+        : order.status;
+
+    const stageLabels: Record<CatalogOrderProcessStage, string> = {
+      en_proceso_armando: 'Pago en proceso y armando tu pedido',
+      listo_para_retirar: 'Pedido listo para pasar a buscar',
+      en_camino: 'Pedido en viaje a tu domicilio',
+      retirado: 'Pedido entregado / retirado y pagado',
+    };
+
+    const previewOrder: CatalogPickupOrder = {
+      ...order,
+      status: nextStatus,
+      updatedAt: now,
+    };
+
+    const msg = generateCatalogOrderCustomerProcessMessage({
+      order: previewOrder,
+      stage,
+      storeName: settings.storeName || config.distributorName || order.storeName,
+      pickupAddress: settings.pickupAddress || tenant?.address,
+      pickupHours: settings.pickupHours,
+    });
+
+    const apiRes = await notifyCatalogOrderCustomerStageViaServer({
+      order: previewOrder,
+      stage,
+      message: msg,
+      config: {
+        whatsappProvider: config.whatsappProvider,
+        whatsappApiToken: config.whatsappApiToken,
+        whatsappPhoneNumberId: config.whatsappPhoneNumberId,
+        twilioAccountSid: config.twilioAccountSid,
+        twilioAuthToken: config.twilioAuthToken,
+        twilioFromPhone: config.twilioFromPhone,
+        webhookGatewayUrl: config.webhookGatewayUrl,
+        webhookAuthKey: config.webhookAuthKey,
+      },
+    });
+
+    const newLog: CatalogOrderStageNotification = {
+      stage,
+      sentAt: now,
+      channel: apiRes.success ? 'whatsapp_api' : 'whatsapp_link',
+      summary: stageLabels[stage],
+    };
+
+    const updatedOrder: CatalogPickupOrder = {
+      ...previewOrder,
+      stageNotifications: [...(order.stageNotifications || []), newLog].slice(-12),
+      updatedAt: new Date().toISOString(),
+    };
+
+    onSaveOrders(orders.map((o) => (o.id === order.id ? updatedOrder : o)));
+    void syncCatalogOrderToSupabase(updatedOrder);
+
+    window.open(createWhatsAppUrl(order.customerPhone, msg), '_blank', 'noopener,noreferrer');
+    showToast(`WhatsApp de proceso (${stageLabels[stage]}) enviado a ${order.customerName}.`);
+  };
+
+  const handleVerifyOrderTransferReceipt = async (order: CatalogPickupOrder) => {
+    if (!order.transferReceiptImageUrl) {
+      showToast('Este pedido no tiene imagen de comprobante para verificar.');
+      return;
+    }
+    setVerifyingOrderId(order.id);
+    try {
+      const knownUsedOperationIds = orders
+        .filter(
+          (o) =>
+            o.id !== order.id &&
+            o.status !== 'cancelado' &&
+            (o.transferOperationId || o.transferReference)
+        )
+        .map((o) => ({
+          orderId: o.id,
+          operationId: String(o.transferOperationId || o.transferReference || '').trim(),
+        }))
+        .filter((entry) => Boolean(entry.operationId));
+
+      const res = await verifyCatalogTransferReceiptViaServer({
+        tenantId: order.tenantId,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        storeName: order.storeName || settings.storeName || config.distributorName || 'Comercio',
+        expectedAmount: order.totalAmount,
+        alias: config.merchantPaymentAlias,
+        cvu: config.merchantPaymentCvu,
+        holderName: config.merchantPaymentHolder,
+        imageBase64: order.transferReceiptImageUrl,
+        knownUsedOperationIds,
+      });
+
+      const now = new Date().toISOString();
+      const updatedOrder: CatalogPickupOrder = {
+        ...order,
+        transferOperationId: res.operationId || order.transferOperationId,
+        transferReference: order.transferReference || res.operationId,
+        transferVerifiedAt: res.approved ? res.verifiedAt || now : order.transferVerifiedAt,
+        transferVerificationSummary: res.verificationSummary || res.message,
+        transferVerificationStatus: res.duplicate
+          ? 'duplicado'
+          : res.approved
+          ? 'verificado_auto'
+          : res.success
+          ? 'rechazado'
+          : 'pendiente',
+        paymentStatus: res.approved
+          ? 'acreditado'
+          : order.paymentStatus || 'comprobante_en_revision',
+        confirmedPaymentMethod: res.approved
+          ? order.confirmedPaymentMethod || 'transferencia'
+          : order.confirmedPaymentMethod,
+        updatedAt: now,
+      };
+
+      onSaveOrders(orders.map((o) => (o.id === order.id ? updatedOrder : o)));
+      void syncCatalogOrderToSupabase(updatedOrder);
+
+      if (res.duplicate) {
+        showToast(res.message || 'Comprobante duplicado: el número de operación ya se usó antes.');
+      } else if (res.approved) {
+        showToast(`Comprobante verificado y pago acreditado (${res.operationId || 'OK'}).`);
+      } else {
+        showToast(res.message || 'No coincidió automáticamente; revisá el comprobante adjunto.');
+      }
+    } finally {
+      setVerifyingOrderId(null);
+    }
+  };
+
+  const activePromoSubscribers = useMemo(() => {
+    const q = promoCategoryFilter.trim().toLowerCase();
+    return [...promoSubscribers]
+      .filter((s) => {
+        if (!q || q === 'todas') return true;
+        return (s.preferredCategory || '').trim().toLowerCase() === q;
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [promoSubscribers, promoCategoryFilter]);
+
+  const promoSelectedCoupon = useMemo(
+    () =>
+      (settings.coupons || []).find(
+        (c) => c.active !== false && c.code.toUpperCase() === promoCouponCodeDraft.toUpperCase()
+      ),
+    [settings.coupons, promoCouponCodeDraft]
+  );
+
+  const handleSendPromoToSubscriber = async (
+    sub: CatalogPromoSubscriber,
+    silentFallback: boolean = false
+  ) => {
+    const storeTitle = settings.storeName || config.distributorName || 'Nuestra Tienda';
+    const couponDetailText = promoSelectedCoupon
+      ? ` Aprovechá un ${
+          promoSelectedCoupon.discountType === 'percent'
+            ? `${promoSelectedCoupon.value}% OFF`
+            : `${formatCurrency(promoSelectedCoupon.value, currency)} OFF`
+        }${
+          promoSelectedCoupon.minPurchase
+            ? ` en compras desde ${formatCurrency(promoSelectedCoupon.minPurchase, currency)}`
+            : ''
+        }.`
+      : '';
+    const basePromoText =
+      promoMessageDraft.trim() ||
+      `Tenemos promociones especiales y nuevos ingresos pensados para vos en ${storeTitle}.`;
+    const message = generateCatalogPromoClubWhatsAppMessage({
+      customerName: sub.name,
+      storeName: storeTitle,
+      promoText: `${basePromoText}${couponDetailText}`,
+      couponCode: promoSelectedCoupon?.code,
+      publicUrl,
+    });
+
+    const apiRes = await sendCatalogPromoWhatsAppViaServer({
+      subscriberId: sub.id,
+      customerPhone: sub.phone,
+      message,
+    });
+    if (!apiRes.success) {
+      window.open(createWhatsAppUrl(sub.phone, message), '_blank', 'noopener,noreferrer');
+    }
+
+    if (onSavePromoSubscribers) {
+      const now = new Date().toISOString();
+      onSavePromoSubscribers(
+        promoSubscribers.map((s) =>
+          s.id === sub.id ? { ...s, lastPromoSentAt: now, updatedAt: now } : s
+        )
+      );
+    }
+
+    if (!silentFallback) {
+      showToast(
+        apiRes.success
+          ? `Promo enviada automáticamente al WhatsApp de ${sub.name}.`
+          : `Promo lista en WhatsApp para ${sub.name}.`
+      );
+    }
+    return apiRes.success;
+  };
+
+  const handleBatchSendPromo = async () => {
+    if (activePromoSubscribers.length === 0) return;
+    setIsSendingBatchPromo(true);
+    try {
+      const storeTitle = settings.storeName || config.distributorName || 'Nuestra Tienda';
+      const couponDetailText = promoSelectedCoupon
+        ? ` Aprovechá un ${
+            promoSelectedCoupon.discountType === 'percent'
+              ? `${promoSelectedCoupon.value}% OFF`
+              : `${formatCurrency(promoSelectedCoupon.value, currency)} OFF`
+          }${
+            promoSelectedCoupon.minPurchase
+              ? ` en compras desde ${formatCurrency(promoSelectedCoupon.minPurchase, currency)}`
+              : ''
+          }.`
+        : '';
+      const basePromoText =
+        promoMessageDraft.trim() ||
+        `Tenemos promociones especiales y nuevos ingresos pensados para vos en ${storeTitle}.`;
+      const now = new Date().toISOString();
+      let apiCount = 0;
+      const sentIds = new Set<string>();
+
+      for (const sub of activePromoSubscribers) {
+        const message = generateCatalogPromoClubWhatsAppMessage({
+          customerName: sub.name,
+          storeName: storeTitle,
+          promoText: `${basePromoText}${couponDetailText}`,
+          couponCode: promoSelectedCoupon?.code,
+          publicUrl,
+        });
+        const res = await sendCatalogPromoWhatsAppViaServer({
+          subscriberId: sub.id,
+          customerPhone: sub.phone,
+          message,
+        });
+        if (res.success) {
+          apiCount += 1;
+        } else {
+          window.open(createWhatsAppUrl(sub.phone, message), '_blank', 'noopener,noreferrer');
+        }
+        sentIds.add(sub.id);
+      }
+
+      if (onSavePromoSubscribers) {
+        onSavePromoSubscribers(
+          promoSubscribers.map((s) =>
+            sentIds.has(s.id) ? { ...s, lastPromoSentAt: now, updatedAt: now } : s
+          )
+        );
+      }
+
+      showToast(
+        apiCount === activePromoSubscribers.length
+          ? `Se enviaron ${apiCount} promos por WhatsApp automáticamente.`
+          : `Campaña procesada para ${activePromoSubscribers.length} suscriptor(es) (${apiCount} vía API, el resto vía WhatsApp Web).`
+      );
+    } finally {
+      setIsSendingBatchPromo(false);
+    }
+  };
+
+  const handleExportPromoSubscribersCsv = () => {
+    if (activePromoSubscribers.length === 0) return;
+    const headers = [
+      'Nombre',
+      'WhatsApp',
+      'Email',
+      'Interés / Categoría',
+      'Cumpleaños',
+      'Origen',
+      'Fecha de alta',
+      'Última promo enviada',
+    ];
+    const rows = activePromoSubscribers.map((s) => [
+      s.name,
+      s.phone,
+      s.email || '',
+      s.preferredCategory || '',
+      s.birthDate || '',
+      s.source === 'checkout_opt_in' ? 'Opt-in pedido' : 'Formulario Club Web',
+      s.createdAt ? new Date(s.createdAt).toLocaleString('es-AR') : '',
+      s.lastPromoSentAt ? new Date(s.lastPromoSentAt).toLocaleString('es-AR') : '',
+    ]);
+    const csvContent = [headers, ...rows]
+      .map((row) =>
+        row.map((val) => `"${String(val || '').replace(/"/g, '""')}"`).join(';')
+      )
+      .join('\n');
+    const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `club_promos_suscriptores_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Listado de suscriptores exportado en CSV.');
+  };
+
+  // --- Bulk Selection & Quick Price Update Handlers ---
+  const toggleProductSelected = (productId: string) => {
+    setSelectedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  };
+
+  const handleSelectAllFilteredProducts = () => {
+    const allFilteredSelected =
+      filteredProducts.length > 0 &&
+      filteredProducts.every((p) => selectedProductIds.has(p.id));
+    if (allFilteredSelected) {
+      setSelectedProductIds((prev) => {
+        const next = new Set(prev);
+        filteredProducts.forEach((p) => next.delete(p.id));
+        return next;
+      });
+    } else {
+      setSelectedProductIds((prev) => {
+        const next = new Set(prev);
+        filteredProducts.forEach((p) => next.add(p.id));
+        return next;
+      });
+    }
+  };
+
+  const openQuickPriceEditor = (product: CatalogProduct, mode: 'fixed' | 'percent' = 'fixed') => {
+    setQuickPriceProductId(product.id);
+    setQuickPriceMode(mode);
+    setQuickPriceInput(mode === 'fixed' ? String(product.price) : '10');
+    setQuickPriceScaleExtras(true);
+  };
+
+  const handleSaveQuickProductPrice = (product: CatalogProduct) => {
+    const rawNum = Number(String(quickPriceInput).replace(',', '.'));
+    if (!Number.isFinite(rawNum)) {
+      showToast('Ingresá un valor numérico válido.');
+      return;
+    }
+
+    let updatedProduct: CatalogProduct;
+    if (quickPriceMode === 'fixed') {
+      if (rawNum < 0) {
+        showToast('El precio no puede ser negativo.');
+        return;
+      }
+      updatedProduct = applyDirectPriceUpdate(product, rawNum, {
+        scaleWholesaleAndVariants: quickPriceScaleExtras,
+      });
+    } else {
+      if (rawNum <= -100 || rawNum > 1000) {
+        showToast('Ingresá un porcentaje válido (mayor a -100%).');
+        return;
+      }
+      updatedProduct = applyPercentagePriceAdjustment(product, rawNum, {
+        includeWholesale: quickPriceScaleExtras,
+        includeVariants: quickPriceScaleExtras,
+      });
+    }
+
+    onSaveProducts(products.map((p) => (p.id === product.id ? updatedProduct : p)));
+    setQuickPriceProductId(null);
+    showToast(
+      `Precio de "${product.name}" actualizado a ${formatCurrency(updatedProduct.price, currency)}.`
+    );
+  };
+
+  const selectedRubroProducts = useMemo(
+    () => rubroProducts.filter((p) => selectedProductIds.has(p.id)),
+    [rubroProducts, selectedProductIds]
+  );
+
+  const handleApplyBulkPercentage = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (selectedRubroProducts.length === 0) return;
+    const pct = Number(String(bulkPercentInput).replace(',', '.'));
+    if (!Number.isFinite(pct) || pct === 0 || pct <= -100 || pct > 1000) {
+      showToast('Ingresá un porcentaje distinto de 0% (mayor a -100%).');
+      return;
+    }
+
+    const updated = products.map((p) =>
+      selectedProductIds.has(p.id)
+        ? applyPercentagePriceAdjustment(p, pct, {
+            roundingStep: bulkRoundingStep,
+            includeWholesale: bulkIncludeWholesale,
+            includeVariants: bulkIncludeVariants,
+          })
+        : p
+    );
+    onSaveProducts(updated);
+    const sign = pct > 0 ? `+${pct}%` : `${pct}%`;
+    showToast(
+      `Se actualizó el precio (${sign}) de ${selectedRubroProducts.length} producto(s).`
+    );
+    setSelectedProductIds(new Set());
+  };
+
+  // --- CSV / Excel Bulk Import Handlers ---
+  const parsedCsvPreview = useMemo(
+    () => parseCatalogSpreadsheetText(csvRawInput, activeRubroFilters[0] || 'General'),
+    [csvRawInput, activeRubroFilters]
+  );
+
+  const handleCsvFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCsvRawInput(String(reader.result || ''));
+    };
+    reader.onerror = () => {
+      showToast('No se pudo leer el archivo seleccionado.');
+    };
+    reader.readAsText(file, 'utf-8');
+  };
+
+  const handleDownloadCsvTemplate = () => {
+    const csv = buildCatalogCsvTemplate(activeRubroFilters[0] || 'General', activeCatalogRubro);
+    triggerCsvDownload(csv, `plantilla_catalogo_${activeCatalogRubro}.csv`);
+    showToast('Plantilla CSV compatible con Excel descargada.');
+  };
+
+  const handleExportCurrentCatalogCsv = () => {
+    if (rubroProducts.length === 0) {
+      showToast('No hay productos para exportar en este rubro.');
+      return;
+    }
+    const csv = exportCatalogProductsToCsv(rubroProducts);
+    triggerCsvDownload(
+      csv,
+      `catalogo_${activeCatalogRubro}_${new Date().toISOString().slice(0, 10)}.csv`
+    );
+    showToast(`Exportados ${rubroProducts.length} producto(s) a CSV.`);
+  };
+
+  const handleConfirmCsvImport = () => {
+    if (parsedCsvPreview.validRows.length === 0) {
+      showToast('No hay filas válidas para importar.');
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const working = [...products];
+    let createdCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+    const discoveredSubfilters = new Set<string>(savedCustomSubfilters);
+    const discoveredFilters = new Set<string>(activeRubroFilters);
+
+    for (const row of parsedCsvPreview.validRows) {
+      row.subfilters.forEach((sf) => discoveredSubfilters.add(sf));
+      if (row.category) discoveredFilters.add(row.category);
+
+      const matchIdx = working.findIndex((existing) => {
+        if ((existing.rubro || activeCatalogRubro) !== activeCatalogRubro) return false;
+        if (row.sku && existing.sku && existing.sku.trim().toLowerCase() === row.sku.toLowerCase()) {
+          return true;
+        }
+        return existing.name.trim().toLowerCase() === row.name.trim().toLowerCase();
+      });
+
+      if (matchIdx >= 0) {
+        if (csvConflictMode === 'only_new') {
+          skippedCount += 1;
+          continue;
+        }
+        const prev = working[matchIdx];
+        working[matchIdx] = {
+          ...prev,
+          name: row.name,
+          price: row.price,
+          category: row.category || prev.category,
+          subfilters: row.subfilters.length > 0 ? row.subfilters : prev.subfilters,
+          sku: row.sku ?? prev.sku,
+          stockQuantity:
+            typeof row.stockQuantity === 'number' ? row.stockQuantity : prev.stockQuantity,
+          unitLabel: row.unitLabel || prev.unitLabel,
+          description: row.description || prev.description,
+          wholesaleMinQty: row.wholesaleMinQty ?? prev.wholesaleMinQty,
+          wholesalePrice: row.wholesalePrice ?? prev.wholesalePrice,
+          lowStockThreshold: row.lowStockThreshold ?? prev.lowStockThreshold,
+          available: row.available,
+          rubro: activeCatalogRubro,
+          updatedAt: nowIso,
+        };
+        updatedCount += 1;
+      } else {
+        const created: CatalogProduct = {
+          id: `cat-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          name: row.name,
+          price: row.price,
+          category: row.category || activeRubroFilters[0] || 'General',
+          rubro: activeCatalogRubro,
+          subfilters: row.subfilters.length > 0 ? row.subfilters : undefined,
+          sku: row.sku,
+          stockQuantity: row.stockQuantity,
+          unitLabel: row.unitLabel || 'Unidad',
+          description: row.description,
+          wholesaleMinQty: row.wholesaleMinQty,
+          wholesalePrice: row.wholesalePrice,
+          lowStockThreshold: row.lowStockThreshold,
+          available: row.available,
+          featured: false,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        };
+        working.unshift(created);
+        createdCount += 1;
+      }
+    }
+
+    // Persist newly discovered subfilters/categories cleanly if needed
+    const nextFilters = normalizeFilterList(Array.from(discoveredFilters));
+    const nextSubs = normalizeFilterList(Array.from(discoveredSubfilters));
+    if (
+      nextSubs.length !== savedCustomSubfilters.length ||
+      nextFilters.length !== activeRubroFilters.length
+    ) {
+      onSaveSettings({
+        ...settings,
+        catalogRubro: activeCatalogRubro,
+        rubroFilters: nextFilters,
+        customSubfilters: nextSubs,
+        updatedAt: nowIso,
+      });
+    }
+
+    onSaveProducts(working);
+    setIsCsvImportModalOpen(false);
+    setCsvRawInput('');
+    showToast(
+      `Importación lista: ${createdCount} nuevo(s), ${updatedCount} actualizado(s)${
+        skippedCount > 0 ? `, ${skippedCount} omitido(s)` : ''
+      }.`
+    );
+  };
+
+  // --- Birthday Club Greetings Handlers ---
+  const currentYear = new Date().getFullYear();
+  const upcomingBirthdays = useMemo<UpcomingBirthdayEntry[]>(
+    () => getUpcomingBirthdaySubscribers(promoSubscribers, 7),
+    [promoSubscribers]
+  );
+  const birthdaySelectedCoupon = useMemo(
+    () =>
+      (settings.coupons || []).find(
+        (c) =>
+          c.active !== false &&
+          c.code.toUpperCase() === birthdayCouponCodeDraft.trim().toUpperCase()
+      ),
+    [settings.coupons, birthdayCouponCodeDraft]
+  );
+
+  const handleSendBirthdayGreeting = async (
+    entry: UpcomingBirthdayEntry,
+    silentToast: boolean = false
+  ) => {
+    const sub = entry.subscriber;
+    const storeTitle = settings.storeName || config.distributorName || 'Nuestra Tienda';
+    const couponLabel = birthdaySelectedCoupon
+      ? birthdaySelectedCoupon.discountType === 'percent'
+        ? `${birthdaySelectedCoupon.value}% OFF`
+        : `${formatCurrency(birthdaySelectedCoupon.value, currency)} OFF`
+      : undefined;
+    const message = generateCatalogBirthdayPromoWhatsAppMessage({
+      customerName: sub.name,
+      storeName: storeTitle,
+      customMessage: birthdayCustomMessageDraft,
+      couponCode: birthdaySelectedCoupon?.code,
+      couponDiscountLabel: couponLabel,
+      publicUrl,
+    });
+
+    const apiRes = await sendCatalogPromoWhatsAppViaServer({
+      subscriberId: sub.id,
+      customerPhone: sub.phone,
+      message,
+    });
+    if (!apiRes.success) {
+      window.open(createWhatsAppUrl(sub.phone, message), '_blank', 'noopener,noreferrer');
+    }
+
+    if (onSavePromoSubscribers) {
+      const now = new Date().toISOString();
+      onSavePromoSubscribers(
+        promoSubscribers.map((s) =>
+          s.id === sub.id
+            ? {
+                ...s,
+                lastPromoSentAt: now,
+                lastBirthdayGreetingYear: currentYear,
+                updatedAt: now,
+              }
+            : s
+        )
+      );
+    }
+
+    if (!silentToast) {
+      showToast(
+        apiRes.success
+          ? `Saludo de cumpleaños enviado a ${sub.name} por WhatsApp.`
+          : `Mensaje de cumpleaños abierto en WhatsApp para ${sub.name}.`
+      );
+    }
+    return apiRes.success;
+  };
+
+  const handleSendAllPendingBirthdays = async () => {
+    const pending = upcomingBirthdays.filter(
+      (b) => b.subscriber.lastBirthdayGreetingYear !== currentYear
+    );
+    const targets = pending.length > 0 ? pending : upcomingBirthdays;
+    if (targets.length === 0) return;
+
+    setIsSendingBirthdayBatch(true);
+    try {
+      const storeTitle = settings.storeName || config.distributorName || 'Nuestra Tienda';
+      const couponLabel = birthdaySelectedCoupon
+        ? birthdaySelectedCoupon.discountType === 'percent'
+          ? `${birthdaySelectedCoupon.value}% OFF`
+          : `${formatCurrency(birthdaySelectedCoupon.value, currency)} OFF`
+        : undefined;
+      const sentIds = new Set<string>();
+      let apiCount = 0;
+
+      for (const entry of targets) {
+        const sub = entry.subscriber;
+        const message = generateCatalogBirthdayPromoWhatsAppMessage({
+          customerName: sub.name,
+          storeName: storeTitle,
+          customMessage: birthdayCustomMessageDraft,
+          couponCode: birthdaySelectedCoupon?.code,
+          couponDiscountLabel: couponLabel,
+          publicUrl,
+        });
+        const res = await sendCatalogPromoWhatsAppViaServer({
+          subscriberId: sub.id,
+          customerPhone: sub.phone,
+          message,
+        });
+        if (res.success) {
+          apiCount += 1;
+        } else {
+          window.open(createWhatsAppUrl(sub.phone, message), '_blank', 'noopener,noreferrer');
+        }
+        sentIds.add(sub.id);
+      }
+
+      if (onSavePromoSubscribers) {
+        const now = new Date().toISOString();
+        onSavePromoSubscribers(
+          promoSubscribers.map((s) =>
+            sentIds.has(s.id)
+              ? {
+                  ...s,
+                  lastPromoSentAt: now,
+                  lastBirthdayGreetingYear: currentYear,
+                  updatedAt: now,
+                }
+              : s
+          )
+        );
+      }
+
+      showToast(
+        apiCount === targets.length
+          ? `Se enviaron ${apiCount} saludo(s) de cumpleaños automáticamente.`
+          : `Saludos procesados para ${targets.length} cumpleañero(s).`
+      );
+    } finally {
+      setIsSendingBirthdayBatch(false);
+    }
   };
 
   if (!isServiceEnabledBySuperAdmin) {
@@ -1321,6 +2733,33 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setSubTab('club_promos')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'club_promos'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Gift className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Club Promos ({promoSubscribers.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSubTab('estadisticas');
+                void onRefreshLoyaltyAccounts?.();
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'estadisticas'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5 text-[#0B1933]" />
+              <span>Estadísticas</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setSubTab('configuracion')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 subTab === 'configuracion'
@@ -1328,7 +2767,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              Tienda, Envíos y Retiro
+              Tienda, Envíos y Cobros
             </button>
           </div>
 
@@ -1336,6 +2775,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             <span>
               <strong className="text-slate-800">{activeProductsCount}</strong> activos
             </span>
+            {lowStockProducts.length > 0 && (
+              <>
+                <span>·</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubTab('productos');
+                    setShowLowStockOnly((prev) => !prev);
+                  }}
+                  className="text-amber-700 hover:underline font-semibold cursor-pointer"
+                >
+                  <strong>{lowStockProducts.length}</strong> stock bajo
+                </button>
+              </>
+            )}
             {outOfStockProductsCount > 0 && (
               <>
                 <span>·</span>
@@ -1496,7 +2950,244 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   ))}
               </div>
             )}
+
+            {/* Quick Toolbar: Multi-Select + Excel/CSV Import & Export */}
+            <div className="pt-2.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {filteredProducts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleSelectAllFilteredProducts}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer whitespace-nowrap"
+                  >
+                    <Check className="w-3.5 h-3.5 text-[#0B1933]" />
+                    <span>
+                      {filteredProducts.every((p) => selectedProductIds.has(p.id))
+                        ? `Deseleccionar visibles (${filteredProducts.length})`
+                        : `Seleccionar visibles (${filteredProducts.length})`}
+                    </span>
+                  </button>
+                )}
+                {selectedRubroProducts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProductIds(new Set())}
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer whitespace-nowrap"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Limpiar ({selectedRubroProducts.length})</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {rubroProducts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleExportCurrentCatalogCsv}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer whitespace-nowrap"
+                  >
+                    <Download className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Exportar CSV</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsCsvImportModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-800 cursor-pointer whitespace-nowrap"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Importar Excel / CSV</span>
+                </button>
+              </div>
+            </div>
           </div>
+
+          {/* Bulk Percentage Price Update Bar (shown when 1+ products are selected) */}
+          {selectedRubroProducts.length > 0 && (
+            <form
+              onSubmit={handleApplyBulkPercentage}
+              className="bg-[#0B1933] text-white rounded-2xl p-4 space-y-3 shadow-sm"
+            >
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold flex items-center gap-2">
+                    <Percent className="w-4 h-4 text-emerald-300" />
+                    <span>
+                      Ajuste por porcentaje sobre {selectedRubroProducts.length} producto(s) seleccionado(s)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-0.5 tabular-nums">
+                    {(() => {
+                      const sample = selectedRubroProducts[0];
+                      const pctNum = Number(String(bulkPercentInput).replace(',', '.'));
+                      if (!sample || !Number.isFinite(pctNum)) return 'Ingresá un % para ver la vista previa.';
+                      const preview = applyPercentagePriceAdjustment(sample, pctNum, {
+                        roundingStep: bulkRoundingStep,
+                        includeWholesale: bulkIncludeWholesale,
+                        includeVariants: bulkIncludeVariants,
+                      });
+                      return `Ejemplo "${sample.name}": ${formatCurrency(sample.price, currency)} → ${formatCurrency(preview.price, currency)}`;
+                    })()}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[5, 10, 15, 20, -10].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setBulkPercentInput(String(preset))}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border cursor-pointer transition-colors ${
+                        Number(bulkPercentInput) === preset
+                          ? 'bg-white text-[#0B1933] border-white'
+                          : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+                      }`}
+                    >
+                      {preset > 0 ? `+${preset}%` : `${preset}%`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 items-end">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-200">
+                    Porcentaje (% aumento o - descuento)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={bulkPercentInput}
+                    onChange={(e) => setBulkPercentInput(e.target.value)}
+                    placeholder="Ej. 15 o -10"
+                    className="w-full px-3 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-mono font-bold"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-200">
+                    Redondeo automático
+                  </label>
+                  <select
+                    value={bulkRoundingStep}
+                    onChange={(e) =>
+                      setBulkRoundingStep(Number(e.target.value) as CatalogPriceRoundingStep)
+                    }
+                    className="w-full px-2.5 py-1.5 rounded-lg bg-white text-slate-900 text-xs font-semibold"
+                  >
+                    <option value={0}>Exacto (sin redondeo)</option>
+                    <option value={10}>Múltiplos de $ 10</option>
+                    <option value={50}>Múltiplos de $ 50</option>
+                    <option value={100}>Múltiplos de $ 100</option>
+                    <option value={500}>Múltiplos de $ 500</option>
+                    <option value={1000}>Múltiplos de $ 1.000</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5 text-[11px] text-slate-200">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={bulkIncludeVariants}
+                      onChange={(e) => setBulkIncludeVariants(e.target.checked)}
+                      className="rounded"
+                    />
+                    <span>Ajustar precios de variantes</span>
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={bulkIncludeWholesale}
+                      onChange={(e) => setBulkIncludeWholesale(e.target.checked)}
+                      className="rounded"
+                    />
+                    <span>Ajustar precios mayoristas</span>
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2 px-3 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 cursor-pointer whitespace-nowrap"
+                >
+                  Aplicar % a los {selectedRubroProducts.length}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {lowStockProducts.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="text-xs font-bold text-slate-900">
+                    Alerta de stock bajo: {lowStockProducts.length} producto(s) con{' '}
+                    {defaultLowThreshold} u. o menos
+                  </div>
+                  <p className="text-[11px] text-slate-600 truncate max-w-2xl">
+                    {lowStockProducts
+                      .slice(0, 4)
+                      .map((p) => {
+                        const st = getProductLowStockStatus(p, defaultLowThreshold);
+                        return `${p.name} (${st.minAvailableStock ?? 0} u.)`;
+                      })
+                      .join(' · ')}
+                    {lowStockProducts.length > 4 ? ` y ${lowStockProducts.length - 4} más` : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowLowStockOnly((prev) => !prev)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap shrink-0 border ${
+                  showLowStockOnly
+                    ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                    : 'bg-white text-amber-900 border-amber-300 hover:bg-amber-100/70'
+                }`}
+              >
+                {showLowStockOnly ? 'Ver todos los productos' : `Filtrar stock bajo (${lowStockProducts.length})`}
+              </button>
+            </div>
+          )}
+
+          {restockedPendingAlerts.length > 0 && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <Bell className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="text-xs font-bold text-slate-900">
+                    ¡Stock repuesto! Hay {restockedPendingAlerts.length} cliente(s) esperando aviso en productos disponibles
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    Ya volvió a haber stock en artículos que pidieron tus clientes. Podés avisarles en 1 clic por WhatsApp.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={isBatchNotifyingAlerts}
+                  onClick={handleNotifyAllRestockedAlerts}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white cursor-pointer whitespace-nowrap"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>
+                    {isBatchNotifyingAlerts
+                      ? 'Enviando avisos...'
+                      : `Avisar a los ${restockedPendingAlerts.length} por WhatsApp`}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubTab('avisos_stock')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-300 bg-white hover:bg-emerald-100/50 text-emerald-800 cursor-pointer whitespace-nowrap"
+                >
+                  Ver lista
+                </button>
+              </div>
+            </div>
+          )}
 
           {filteredProducts.length === 0 ? (
             <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center space-y-3">
@@ -1542,23 +3233,32 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredProducts.map((product) => {
-                const hasTrackedStock = typeof product.stockQuantity === 'number';
-                const stockQty = hasTrackedStock ? Math.max(0, Math.floor(product.stockQuantity as number)) : null;
-                const isOutOfStock = stockQty !== null && stockQty <= 0;
+                const productHasVar = hasProductVariants(product);
+                const stockQty = getProductSummaryStock(product);
+                const isOutOfStock = isProductFullyOutOfStock(product);
+                const lowStockStatus = getProductLowStockStatus(product, defaultLowThreshold);
+                const galleryImages = getProductGalleryImages(product);
                 const waitingAlerts = pendingAlertsByProductId.get(product.id) || 0;
+
+                const isCardSelected = selectedProductIds.has(product.id);
+                const isQuickEditingPrice = quickPriceProductId === product.id;
 
                 return (
                   <div
                     key={product.id}
-                    className={`bg-white border rounded-2xl overflow-hidden flex flex-col transition-shadow hover:shadow-sm ${
-                      product.available ? 'border-slate-200' : 'border-slate-200 opacity-75'
+                    className={`bg-white border rounded-2xl overflow-hidden flex flex-col transition-all hover:shadow-sm ${
+                      isCardSelected
+                        ? 'border-[#0B1933] ring-2 ring-[#0B1933]/15'
+                        : product.available
+                        ? 'border-slate-200'
+                        : 'border-slate-200 opacity-75'
                     }`}
                   >
                     {/* Product Image Container */}
                     <div className="aspect-[4/3] bg-slate-100 relative overflow-hidden">
-                      {product.imageUrl ? (
+                      {galleryImages[0] ? (
                         <img
-                          src={product.imageUrl}
+                          src={galleryImages[0]}
                           alt={product.name}
                           referrerPolicy="no-referrer"
                           className={`w-full h-full object-cover ${isOutOfStock ? 'opacity-70 grayscale-[30%]' : ''}`}
@@ -1575,6 +3275,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           <span>Destacado</span>
                         </span>
                       )}
+                      {galleryImages.length > 1 && (
+                        <span className="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-slate-950/80 text-white text-[10px] font-bold font-mono tabular-nums">
+                          {galleryImages.length} fotos
+                        </span>
+                      )}
                       {isOutOfStock && product.available && (
                         <span className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-md bg-rose-700 text-white text-[10px] font-bold shadow-xs">
                           Sin stock (0 u.)
@@ -1586,16 +3291,27 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     <div className="p-4 flex-1 flex flex-col justify-between gap-3">
                       <div className="space-y-1.5">
                         <div className="text-[11px] font-medium text-slate-500 flex items-center justify-between gap-2">
-                          <span className="truncate">
-                            {product.category || 'General'} · {product.unitLabel || 'Unidad'}
-                            {product.sku ? ` · Cód: ${product.sku}` : ''}
-                          </span>
+                          <label className="inline-flex items-center gap-2 min-w-0 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isCardSelected}
+                              onChange={() => toggleProductSelected(product.id)}
+                              title="Seleccionar para ajuste masivo por porcentaje"
+                              className="w-4 h-4 rounded border-slate-300 text-[#0B1933] cursor-pointer shrink-0"
+                            />
+                            <span className="truncate">
+                              {product.category || 'General'} · {product.unitLabel || 'Unidad'}
+                              {product.sku ? ` · Cód: ${product.sku}` : ''}
+                            </span>
+                          </label>
                           <span
                             className={`font-semibold shrink-0 tabular-nums ${
                               !product.available
                                 ? 'text-slate-500'
                                 : isOutOfStock
                                 ? 'text-rose-700'
+                                : lowStockStatus.isLow
+                                ? 'text-amber-700'
                                 : 'text-emerald-700'
                             }`}
                           >
@@ -1603,6 +3319,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                               ? 'Pausado'
                               : isOutOfStock
                               ? 'Sin stock'
+                              : lowStockStatus.isLow
+                              ? `Stock bajo (${lowStockStatus.minAvailableStock ?? stockQty} u.)`
                               : stockQty !== null
                               ? `Stock: ${stockQty} u.`
                               : 'Stock libre'}
@@ -1611,6 +3329,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         <h3 className="text-sm font-bold text-slate-900 leading-snug line-clamp-2">
                           {product.name}
                         </h3>
+                        {product.wholesaleMinQty && product.wholesalePrice ? (
+                          <div className="text-[11px] font-semibold text-indigo-700 font-mono tabular-nums">
+                            Mayorista x{product.wholesaleMinQty}+ u.: {formatCurrency(product.wholesalePrice, currency)} c/u
+                          </div>
+                        ) : null}
                         {product.subfilters && product.subfilters.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {product.subfilters.map((sf) => (
@@ -1627,116 +3350,323 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           {product.description || 'Sin descripción cargada.'}
                         </p>
 
-                        {/* Quick Inline Stock Control */}
-                        <div className="pt-1 flex items-center justify-between gap-2 flex-wrap">
-                          {stockQty !== null ? (
-                            <div className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg p-0.5">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleQuickUpdateStock(product, Math.max(0, stockQty - 1))
-                                }
-                                title="Restar 1 unidad de stock"
-                                className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
-                              >
-                                <Minus className="w-3 h-3" />
-                              </button>
-                              <span className="px-2 text-[11px] font-mono tabular-nums font-bold text-slate-900">
-                                {stockQty} u.
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleQuickUpdateStock(product, stockQty + 1)}
-                                title="Sumar 1 unidad de stock"
-                                className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
-                              >
-                                <Plus className="w-3 h-3" />
-                              </button>
-                              {stockQty > 0 && (
+                        {/* Per-Variant Stock Strip OR Single Product Inline Stock Control */}
+                        {productHasVar ? (
+                          <div className="pt-1 space-y-1.5">
+                            <div className="text-[10px] font-bold text-slate-500">
+                              Variantes ({product.variants!.length}) · Stock propio:
+                            </div>
+                            <div className="space-y-1">
+                              {product.variants!.map((v) => {
+                                const vStock = getVariantStock(v);
+                                const vOut = vStock !== null && vStock <= 0;
+                                return (
+                                  <div
+                                    key={v.id}
+                                    className="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 text-[11px]"
+                                  >
+                                    <span
+                                      className={`font-bold truncate ${
+                                        vOut ? 'text-rose-700' : 'text-slate-800'
+                                      }`}
+                                    >
+                                      {v.label}
+                                      {v.sku ? ` · ${v.sku}` : ''}
+                                    </span>
+                                    {vStock !== null ? (
+                                      <div className="inline-flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleQuickUpdateVariantStock(
+                                              product,
+                                              v.id,
+                                              Math.max(0, vStock - 1)
+                                            )
+                                          }
+                                          className="w-5 h-5 rounded bg-white border border-slate-200 text-slate-700 flex items-center justify-center cursor-pointer"
+                                        >
+                                          <Minus className="w-2.5 h-2.5" />
+                                        </button>
+                                        <span
+                                          className={`w-8 text-center font-mono tabular-nums font-bold ${
+                                            vOut ? 'text-rose-700' : 'text-slate-900'
+                                          }`}
+                                        >
+                                          {vStock}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleQuickUpdateVariantStock(product, v.id, vStock + 1)
+                                          }
+                                          className="w-5 h-5 rounded bg-white border border-slate-200 text-slate-700 flex items-center justify-center cursor-pointer"
+                                        >
+                                          <Plus className="w-2.5 h-2.5" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickUpdateVariantStock(product, v.id, 0)}
+                                        className="text-[10px] font-semibold text-emerald-700 hover:underline cursor-pointer shrink-0"
+                                      >
+                                        Libre
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="pt-1 flex items-center justify-between gap-2 flex-wrap">
+                            {stockQty !== null ? (
+                              <div className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg p-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleQuickUpdateStock(product, Math.max(0, stockQty - 1))
+                                  }
+                                  title="Restar 1 unidad de stock"
+                                  className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
+                                >
+                                  <Minus className="w-3 h-3" />
+                                </button>
+                                <span className="px-2 text-[11px] font-mono tabular-nums font-bold text-slate-900">
+                                  {stockQty} u.
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickUpdateStock(product, stockQty + 1)}
+                                  title="Sumar 1 unidad de stock"
+                                  className="w-6 h-6 rounded bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 flex items-center justify-center cursor-pointer"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                </button>
+                                {stockQty > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleQuickUpdateStock(product, 0)}
+                                    title="Marcar sin stock (0 u.)"
+                                    className="px-1.5 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-50 rounded cursor-pointer"
+                                  >
+                                    0
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleQuickUpdateStock(product, undefined)}
+                                  title="Pasar a stock libre (sin límite)"
+                                  className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:text-slate-800 rounded cursor-pointer"
+                                >
+                                  Libre
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="inline-flex items-center gap-1.5 text-[11px]">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditProductModal(product)}
+                                  className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                                >
+                                  Cargar cantidad
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleQuickUpdateStock(product, 0)}
-                                  title="Marcar sin stock (0 u.)"
-                                  className="px-1.5 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-50 rounded cursor-pointer"
+                                  className="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold cursor-pointer"
                                 >
-                                  0
+                                  Marcar sin stock
                                 </button>
-                              )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {waitingAlerts > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSubTab('avisos_stock')}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold hover:bg-amber-100 cursor-pointer"
+                          >
+                            <Bell className="w-3 h-3" />
+                            <span>
+                              {waitingAlerts} esperando aviso{!isOutOfStock ? ' (¡Ya hay stock!)' : ''}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="pt-2.5 border-t border-slate-100 space-y-2">
+                        {isQuickEditingPrice ? (
+                          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                            <div className="flex items-center justify-between gap-1.5">
+                              <div className="inline-flex rounded-lg bg-slate-200/70 p-0.5 text-[11px] font-bold">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setQuickPriceMode('fixed');
+                                    setQuickPriceInput(String(product.price));
+                                  }}
+                                  className={`px-2 py-1 rounded-md cursor-pointer ${
+                                    quickPriceMode === 'fixed'
+                                      ? 'bg-white text-slate-900 shadow-2xs'
+                                      : 'text-slate-600'
+                                  }`}
+                                >
+                                  $ Valor nuevo
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setQuickPriceMode('percent');
+                                    setQuickPriceInput('10');
+                                  }}
+                                  className={`px-2 py-1 rounded-md cursor-pointer ${
+                                    quickPriceMode === 'percent'
+                                      ? 'bg-white text-slate-900 shadow-2xs'
+                                      : 'text-slate-600'
+                                  }`}
+                                >
+                                  % Porcentaje
+                                </button>
+                              </div>
                               <button
                                 type="button"
-                                onClick={() => handleQuickUpdateStock(product, undefined)}
-                                title="Pasar a stock libre (sin límite)"
-                                className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:text-slate-800 rounded cursor-pointer"
+                                onClick={() => setQuickPriceProductId(null)}
+                                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                                title="Cancelar"
                               >
-                                Libre
+                                <X className="w-3.5 h-3.5" />
                               </button>
                             </div>
-                          ) : (
-                            <div className="inline-flex items-center gap-1.5 text-[11px]">
+
+                            {quickPriceMode === 'percent' && (
+                              <div className="flex items-center gap-1">
+                                {[5, 10, 15, 20, -10].map((p) => (
+                                  <button
+                                    key={p}
+                                    type="button"
+                                    onClick={() => setQuickPriceInput(String(p))}
+                                    className="px-1.5 py-0.5 rounded bg-white border border-slate-200 hover:border-[#0B1933] text-[10px] font-mono font-bold text-slate-700 cursor-pointer"
+                                  >
+                                    {p > 0 ? `+${p}%` : `${p}%`}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                step="0.01"
+                                autoFocus
+                                value={quickPriceInput}
+                                onChange={(e) => setQuickPriceInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleSaveQuickProductPrice(product);
+                                  } else if (e.key === 'Escape') {
+                                    setQuickPriceProductId(null);
+                                  }
+                                }}
+                                placeholder={
+                                  quickPriceMode === 'fixed' ? 'Nuevo valor...' : 'Ej. 15 ó -10'
+                                }
+                                className="flex-1 min-w-0 px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-mono font-bold text-slate-900"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSaveQuickProductPrice(product)}
+                                className="px-2.5 py-1.5 rounded-lg bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer shrink-0"
+                              >
+                                Aplicar
+                              </button>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2 text-[10px] text-slate-600">
+                              <span className="font-mono tabular-nums font-semibold">
+                                {(() => {
+                                  const v = Number(String(quickPriceInput).replace(',', '.'));
+                                  if (!Number.isFinite(v)) return 'Ingresá un número';
+                                  if (quickPriceMode === 'fixed') {
+                                    const diffPct =
+                                      product.price > 0
+                                        ? Math.round(((v - product.price) / product.price) * 100)
+                                        : 0;
+                                    return `${formatCurrency(product.price, currency)} → ${formatCurrency(
+                                      Math.max(0, v),
+                                      currency
+                                    )} (${diffPct >= 0 ? `+${diffPct}%` : `${diffPct}%`})`;
+                                  }
+                                  const res = applyPercentagePriceAdjustment(product, v).price;
+                                  return `${formatCurrency(product.price, currency)} → ${formatCurrency(res, currency)}`;
+                                })()}
+                              </span>
+                            </div>
+
+                            {(productHasVar || (product.wholesalePrice ?? 0) > 0) && (
+                              <label className="inline-flex items-center gap-1.5 text-[10px] text-slate-600 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={quickPriceScaleExtras}
+                                  onChange={(e) => setQuickPriceScaleExtras(e.target.checked)}
+                                  className="rounded border-slate-300"
+                                />
+                                <span>Ajustar también mayorista/variantes</span>
+                              </label>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-base font-bold font-mono tabular-nums text-slate-900">
+                                {formatCurrency(product.price, currency)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => openQuickPriceEditor(product, 'fixed')}
+                                title="Editar precio rápido ($ valor nuevo o % porcentaje)"
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border border-slate-200 bg-slate-50 hover:bg-slate-100 text-[10px] font-bold text-slate-700 cursor-pointer shrink-0"
+                              >
+                                <DollarSign className="w-3 h-3 text-[#0B1933]" />
+                                <span>/ %</span>
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleProductAvailability(product.id)}
+                                title={product.available ? 'Ocultar del catálogo' : 'Mostrar en catálogo'}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+                              >
+                                {product.available ? (
+                                  <Eye className="w-4 h-4 text-emerald-600" />
+                                ) : (
+                                  <EyeOff className="w-4 h-4 text-slate-400" />
+                                )}
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => openEditProductModal(product)}
-                                className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold cursor-pointer"
+                                title="Editar producto y stock"
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-[#0B1933] hover:bg-slate-100 transition-colors cursor-pointer"
                               >
-                                Cargar cantidad
+                                <Edit2 className="w-4 h-4" />
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleQuickUpdateStock(product, 0)}
-                                className="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold cursor-pointer"
+                                onClick={() => handleDeleteProduct(product)}
+                                title="Eliminar producto"
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
                               >
-                                Marcar sin stock
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
-                          )}
-
-                          {waitingAlerts > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setSubTab('avisos_stock')}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold hover:bg-amber-100 cursor-pointer"
-                            >
-                              <Bell className="w-3 h-3" />
-                              <span>{waitingAlerts} esperando aviso</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <span className="text-base font-bold font-mono tabular-nums text-slate-900">
-                          {formatCurrency(product.price, currency)}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleProductAvailability(product.id)}
-                            title={product.available ? 'Ocultar del catálogo' : 'Mostrar en catálogo'}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
-                          >
-                            {product.available ? (
-                              <Eye className="w-4 h-4 text-emerald-600" />
-                            ) : (
-                              <EyeOff className="w-4 h-4 text-slate-400" />
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openEditProductModal(product)}
-                            title="Editar producto y stock"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-[#0B1933] hover:bg-slate-100 transition-colors cursor-pointer"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteProduct(product)}
-                            title="Eliminar producto"
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1901,6 +3831,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                               <div className="min-w-0 tabular-nums">
                                 <span className="font-bold text-slate-900">
                                   {it.quantity} × {it.productName}
+                                  {it.variantLabel ? ` (${it.variantLabel})` : ''}
                                 </span>
                                 {skuCode && (
                                   <span className="ml-1.5 font-mono text-[11px] font-semibold text-[#0B1933] bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded">
@@ -1920,6 +3851,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         })}
                       </button>
 
+                      {(order.customerSpecificRequest || order.notes) && (
+                        <div className="p-2.5 rounded-lg bg-amber-50/75 border border-amber-200 text-xs text-slate-800">
+                          <span className="font-bold text-slate-900">Observaciones / Pedido específico: </span>
+                          <span>{order.customerSpecificRequest || order.notes}</span>
+                        </div>
+                      )}
+
+                      {order.status === 'cancelado' && order.stockRestoredAt && (
+                        <div className="text-[11px] font-semibold text-emerald-700">
+                          Stock reintegrado automáticamente al catálogo ({new Date(order.stockRestoredAt).toLocaleString('es-AR')})
+                        </div>
+                      )}
+
                       <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 pt-0.5">
                         {order.preferredPickupWindow && (
                           <span className="inline-flex items-center gap-1">
@@ -1934,25 +3878,159 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           <CreditCard className="w-3 h-3" />
                           <span>Forma de pago: {paymentMethodLabel}</span>
                         </span>
-                        {order.notes && <span>Nota: {order.notes}</span>}
+                        {order.paymentStatus && (
+                          <span
+                            className={`font-semibold ${
+                              order.paymentStatus === 'acreditado'
+                                ? 'text-emerald-700'
+                                : order.paymentStatus === 'comprobante_en_revision'
+                                ? 'text-sky-700'
+                                : 'text-amber-700'
+                            }`}
+                          >
+                            {order.paymentStatus === 'acreditado'
+                              ? '· Pago acreditado'
+                              : order.paymentStatus === 'comprobante_en_revision'
+                              ? '· Comprobante subido (para revisar)'
+                              : '· Pago en proceso'}
+                          </span>
+                        )}
                       </div>
+
+                      {order.transferReceiptImageUrl && (
+                        <div className="space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedOrderForDetail(order)}
+                              className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white border border-sky-200 hover:bg-sky-50/60 text-left cursor-pointer"
+                              title="Clic para ampliar el comprobante de pago enviado por el cliente"
+                            >
+                              <img
+                                src={order.transferReceiptImageUrl}
+                                alt="Comprobante cliente"
+                                referrerPolicy="no-referrer"
+                                className="w-8 h-8 rounded object-cover border border-slate-200 shrink-0"
+                              />
+                              <div className="text-[11px]">
+                                <div className="font-bold text-slate-900 flex items-center gap-1">
+                                  <FileCheck2 className="w-3 h-3 text-emerald-600" />
+                                  <span>Comprobante de transferencia adjuntado</span>
+                                </div>
+                                <div className="text-[10px] text-sky-700">
+                                  Clic para ver grande
+                                  {order.transferOperationId || order.transferReference
+                                    ? ` · Op: ${order.transferOperationId || order.transferReference}`
+                                    : ''}
+                                </div>
+                              </div>
+                            </button>
+
+                            {order.status !== 'cancelado' &&
+                              order.transferVerificationStatus !== 'verificado_auto' && (
+                                <button
+                                  type="button"
+                                  disabled={verifyingOrderId === order.id}
+                                  onClick={() => void handleVerifyOrderTransferReceipt(order)}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-60 text-white cursor-pointer whitespace-nowrap"
+                                >
+                                  {verifyingOrderId === order.id ? (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                                  )}
+                                  <span>
+                                    {verifyingOrderId === order.id
+                                      ? 'Verificando...'
+                                      : 'Verificar comprobante auto'}
+                                  </span>
+                                </button>
+                              )}
+                          </div>
+
+                          {order.transferVerificationSummary && (
+                            <div
+                              className={`px-2.5 py-1.5 rounded-lg text-[11px] border ${
+                                order.transferVerificationStatus === 'verificado_auto'
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                  : order.transferVerificationStatus === 'duplicado' ||
+                                    order.transferVerificationStatus === 'rechazado'
+                                  ? 'bg-rose-50 border-rose-200 text-rose-800'
+                                  : 'bg-slate-50 border-slate-200 text-slate-700'
+                              }`}
+                            >
+                              {order.transferVerificationSummary}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex flex-col sm:flex-row lg:flex-col items-start sm:items-center lg:items-end gap-2 shrink-0">
-                      <div className="text-base font-bold font-mono tabular-nums text-slate-900">
-                        Valor final:{' '}
-                        {formatCurrency(order.totalAmount, order.currencySymbol || currency)}
+                      <div className="text-right space-y-0.5">
+                        {(Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) ||
+                          Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) ||
+                          Boolean(
+                            order.paymentMethodDiscountAmount &&
+                              order.paymentMethodDiscountAmount > 0
+                          )) && (
+                          <div className="text-[11px] font-medium text-emerald-700 space-y-0.5">
+                            {Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) && (
+                              <div>
+                                Mayorista: -{formatCurrency(order.wholesaleSavings || 0, order.currencySymbol || currency)}
+                              </div>
+                            )}
+                            {Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) && (
+                              <div>
+                                Cupón {order.couponCode}: -{formatCurrency(order.couponDiscountAmount || 0, order.currencySymbol || currency)}
+                              </div>
+                            )}
+                            {Boolean(
+                              order.paymentMethodDiscountAmount &&
+                                order.paymentMethodDiscountAmount > 0
+                            ) && (
+                              <div>
+                                Bonif. {order.paymentMethodDiscountPercent || 0}%: -
+                                {formatCurrency(
+                                  order.paymentMethodDiscountAmount || 0,
+                                  order.currencySymbol || currency
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <div className="text-base font-bold font-mono tabular-nums text-slate-900">
+                          Valor final:{' '}
+                          {formatCurrency(order.totalAmount, order.currencySymbol || currency)}
+                        </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => setSelectedOrderForDetail(order)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#0B1933]/30 bg-white hover:bg-slate-100 text-[#0B1933] cursor-pointer whitespace-nowrap"
-                          title="Abrir venta para ver fotos ampliadas, códigos y tildar productos a entregar"
+                          title="Abrir venta para ver fotos ampliadas, comprobante, códigos y tildar productos"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>Abrir Venta (Fotos / Cód.)</span>
                         </button>
+
+                        {order.paymentStatus !== 'acreditado' &&
+                          order.status !== 'cancelado' &&
+                          (order.transferReceiptImageUrl ||
+                            activePaymentKey === 'transferencia' ||
+                            activePaymentKey === 'mercadopago_dinero_cuenta' ||
+                            activePaymentKey === 'link_pago') && (
+                            <button
+                              type="button"
+                              onClick={() => handleConfirmOrderPayment(order)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white cursor-pointer whitespace-nowrap"
+                              title="Aprobar comprobante y marcar pago como acreditado"
+                            >
+                              <FileCheck2 className="w-3.5 h-3.5" />
+                              <span>Confirmar Pago</span>
+                            </button>
+                          )}
 
                         {order.status !== 'retirado' && order.status !== 'cancelado' && (
                           <button
@@ -1964,6 +4042,40 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>{isDelivery ? 'Entregado (Pagado)' : 'Marcar Retirado (Pagado)'}</span>
                           </button>
+                        )}
+
+                        {order.status !== 'cancelado' && order.customerPhone && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleSendOrderProcessWhatsApp(order, 'en_proceso_armando')
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-100 text-slate-800 cursor-pointer whitespace-nowrap"
+                              title="Enviar WhatsApp: Pago en proceso y armando tu pedido"
+                            >
+                              <Send className="w-3 h-3 text-amber-600" />
+                              <span>WA: Armando</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void handleSendOrderProcessWhatsApp(
+                                  order,
+                                  isDelivery ? 'en_camino' : 'listo_para_retirar'
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer whitespace-nowrap"
+                              title={
+                                isDelivery
+                                  ? 'Avisar por WhatsApp que el pedido ya salió y está en viaje al domicilio'
+                                  : 'Avisar por WhatsApp que el pedido ya está listo para pasar a buscar'
+                              }
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 text-emerald-300" />
+                              <span>{isDelivery ? 'WA: En viaje a domicilio' : 'WA: Listo p/ buscar'}</span>
+                            </button>
+                          </>
                         )}
 
                         <select
@@ -1981,6 +4093,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         >
                           <option value="acordar">Pago: A coordinar</option>
                           <option value="transferencia">Pago: Transferencia / Alias</option>
+                          <option value="mercadopago_dinero_cuenta">Pago: Mercado Pago (Dinero en cuenta)</option>
                           <option value="link_pago">Pago: Link de Pago / MP</option>
                           <option value="efectivo">
                             {isDelivery ? 'Pago: Efectivo contra entrega' : 'Pago: Efectivo en local'}
@@ -2088,24 +4201,41 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 Cuando un producto figura Sin stock, los clientes pueden dejar su nombre y teléfono. Al reponer unidades, avisales en 1 clic por WhatsApp.
               </p>
             </div>
-            {onRefreshStockAlerts && (
-              <button
-                type="button"
-                disabled={isRefreshingAlerts}
-                onClick={async () => {
-                  setIsRefreshingAlerts(true);
-                  try {
-                    await onRefreshStockAlerts();
-                  } finally {
-                    setIsRefreshingAlerts(false);
-                  }
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0 whitespace-nowrap"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingAlerts ? 'animate-spin' : ''}`} />
-                <span>Actualizar avisos</span>
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {restockedPendingAlerts.length > 0 && (
+                <button
+                  type="button"
+                  disabled={isBatchNotifyingAlerts}
+                  onClick={handleNotifyAllRestockedAlerts}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white cursor-pointer whitespace-nowrap"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>
+                    {isBatchNotifyingAlerts
+                      ? 'Enviando...'
+                      : `Avisar ya disponibles (${restockedPendingAlerts.length})`}
+                  </span>
+                </button>
+              )}
+              {onRefreshStockAlerts && (
+                <button
+                  type="button"
+                  disabled={isRefreshingAlerts}
+                  onClick={async () => {
+                    setIsRefreshingAlerts(true);
+                    try {
+                      await onRefreshStockAlerts();
+                    } finally {
+                      setIsRefreshingAlerts(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0 whitespace-nowrap"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingAlerts ? 'animate-spin' : ''}`} />
+                  <span>Actualizar avisos</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {sortedStockAlerts.length === 0 ? (
@@ -2124,18 +4254,29 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 const liveProduct =
                   productMap.byId.get(alert.productId) ||
                   productMap.byName.get(alert.productName.trim().toLowerCase());
-                const liveStock =
-                  liveProduct && typeof liveProduct.stockQuantity === 'number'
-                    ? liveProduct.stockQuantity
-                    : null;
-                const isRestocked =
-                  Boolean(liveProduct?.available) && (liveStock === null || liveStock > 0);
+                const matchedVariant =
+                  liveProduct && (alert.variantId || alert.variantLabel)
+                    ? findMatchingVariant(liveProduct, alert.variantId, alert.variantLabel)
+                    : undefined;
+                const liveStock = matchedVariant
+                  ? getVariantStock(matchedVariant)
+                  : liveProduct
+                  ? getProductSummaryStock(liveProduct)
+                  : null;
+                const isRestocked = Boolean(
+                  liveProduct?.available &&
+                    (matchedVariant
+                      ? liveStock === null || liveStock > 0
+                      : !isProductFullyOutOfStock(liveProduct))
+                );
 
                 return (
                   <div
                     key={alert.id}
                     className={`border rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
-                      alert.status === 'pending'
+                      alert.status === 'pending' && isRestocked
+                        ? 'border-emerald-300 bg-emerald-50/50'
+                        : alert.status === 'pending'
                         ? 'border-amber-200 bg-amber-50/40'
                         : 'border-slate-200 bg-slate-50/50'
                     }`}
@@ -2175,6 +4316,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         <div className="text-xs text-slate-700 flex items-center gap-2 flex-wrap">
                           <span>
                             Producto pedido: <strong>{alert.productName}</strong>
+                            {alert.variantLabel ? ` (${alert.variantLabel})` : ''}
                             {alert.productSku ? ` (Cód: ${alert.productSku})` : ''}
                           </span>
                           <span
@@ -2251,6 +4393,989 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           )}
         </div>
       )}
+
+      {/* SUB-TAB 2C: CLUB DE PROMOS Y DESCUENTOS (SUSCRIPTORES) */}
+      {subTab === 'club_promos' && (
+        <div className="space-y-4">
+          {/* Birthday Automation Panel */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Cake className="w-4 h-4 text-amber-600" />
+                  <span>
+                    Cumpleaños del Club (Hoy y próximos 7 días:{' '}
+                    {upcomingBirthdays.length})
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Detectamos automáticamente los suscriptores que cumplen años hoy o esta semana para enviarles su saludo y cupón regalo por WhatsApp.
+                </p>
+              </div>
+              {upcomingBirthdays.length > 0 && (
+                <button
+                  type="button"
+                  disabled={isSendingBirthdayBatch}
+                  onClick={handleSendAllPendingBirthdays}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-60 text-white cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>
+                    {isSendingBirthdayBatch
+                      ? 'Enviando saludos...'
+                      : 'Saludar cumpleañeros por WhatsApp'}
+                  </span>
+                </button>
+              )}
+            </div>
+
+            {upcomingBirthdays.length === 0 ? (
+              <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                No hay suscriptores que cumplan años hoy ni en los próximos 7 días (
+                <strong className="font-mono tabular-nums">
+                  {promoSubscribers.filter((s) => Boolean(s.birthDate)).length}
+                </strong>{' '}
+                suscriptor(es) con fecha de cumpleaños cargada).
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700">
+                      Cupón regalo para adjuntar al saludo (opcional)
+                    </label>
+                    <select
+                      value={birthdayCouponCodeDraft}
+                      onChange={(e) => setBirthdayCouponCodeDraft(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                    >
+                      <option value="">Sin cupón adjunto</option>
+                      {(settings.coupons || [])
+                        .filter((c) => c.active !== false)
+                        .map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.code} (
+                            {c.discountType === 'percent'
+                              ? `${c.value}% OFF`
+                              : `${formatCurrency(c.value, currency)} OFF`}
+                            )
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700">
+                      Mensaje personalizado (opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={birthdayCustomMessageDraft}
+                      onChange={(e) => setBirthdayCustomMessageDraft(e.target.value)}
+                      placeholder="¡Feliz cumpleaños! Te regalamos un beneficio especial esta semana..."
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                  {upcomingBirthdays.map((entry) => {
+                    const sub = entry.subscriber;
+                    const greetedThisYear = sub.lastBirthdayGreetingYear === currentYear;
+                    return (
+                      <div
+                        key={sub.id}
+                        className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-white"
+                      >
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-slate-900">{sub.name}</span>
+                            <span className="text-xs font-mono text-slate-600">{sub.phone}</span>
+                            <span
+                              className={`text-[11px] font-bold ${
+                                entry.isToday ? 'text-emerald-700' : 'text-amber-700'
+                              }`}
+                            >
+                              {entry.isToday
+                                ? `Cumple HOY (${entry.formattedDayMonth})`
+                                : entry.daysUntil === 1
+                                ? `Cumple mañana (${entry.formattedDayMonth})`
+                                : `En ${entry.daysUntil} días (${entry.formattedDayMonth})`}
+                            </span>
+                            {greetedThisYear && (
+                              <span className="text-[11px] font-semibold text-emerald-700">
+                                · Saludado {currentYear}
+                              </span>
+                            )}
+                          </div>
+                          {sub.preferredCategory && (
+                            <div className="text-[11px] text-slate-500">
+                              Categoría favorita: {sub.preferredCategory}
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => void handleSendBirthdayGreeting(entry)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer whitespace-nowrap shrink-0 ${
+                            greetedThisYear
+                              ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          <span>{greetedThisYear ? 'Volver a saludar WA' : 'Enviar regalo WA'}</span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Gift className="w-4 h-4 text-emerald-600" />
+                  <span>Suscriptores para Promos y Descuentos ({promoSubscribers.length})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Clientes que dejaron sus datos en la web o al finalizar un pedido para recibir novedades, promos y cupones.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                {activePromoSubscribers.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleExportPromoSubscribersCsv}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer whitespace-nowrap"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Exportar CSV</span>
+                  </button>
+                )}
+                {onRefreshPromoSubscribers && (
+                  <button
+                    type="button"
+                    disabled={isRefreshingPromos}
+                    onClick={async () => {
+                      setIsRefreshingPromos(true);
+                      try {
+                        await onRefreshPromoSubscribers();
+                      } finally {
+                        setIsRefreshingPromos(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer whitespace-nowrap"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingPromos ? 'animate-spin' : ''}`} />
+                    <span>Actualizar lista</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Broadcaster Composer */}
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+              <div className="text-xs font-bold text-slate-900">
+                Armar envío de promo / cupón por WhatsApp
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Filtrar por categoría de interés
+                  </label>
+                  <select
+                    value={promoCategoryFilter}
+                    onChange={(e) => setPromoCategoryFilter(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                  >
+                    <option value="Todas">Todas las categorías ({promoSubscribers.length})</option>
+                    {activeRubroFilters.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Adjuntar cupón activo (opcional)
+                  </label>
+                  <select
+                    value={promoCouponCodeDraft}
+                    onChange={(e) => setPromoCouponCodeDraft(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                  >
+                    <option value="">Sin cupón adjunto</option>
+                    {(settings.coupons || [])
+                      .filter((c) => c.active !== false)
+                      .map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.code} (
+                          {c.discountType === 'percent'
+                            ? `${c.value}% OFF`
+                            : `${formatCurrency(c.value, currency)} OFF`}
+                          )
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    disabled={activePromoSubscribers.length === 0 || isSendingBatchPromo}
+                    onClick={handleBatchSendPromo}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>
+                      {isSendingBatchPromo
+                        ? 'Enviando promos...'
+                        : `Enviar a los ${activePromoSubscribers.length} por WhatsApp`}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-slate-700">
+                  Texto de la promo o novedad
+                </label>
+                <textarea
+                  rows={2}
+                  value={promoMessageDraft}
+                  onChange={(e) => setPromoMessageDraft(e.target.value)}
+                  placeholder="Ej: ¡Entraron ingresos nuevos de temporada y tenés 15% OFF hasta el sábado comprando desde la web!"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                />
+              </div>
+            </div>
+
+            {activePromoSubscribers.length === 0 ? (
+              <div className="border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-1.5">
+                <Users className="w-7 h-7 text-slate-300 mx-auto" />
+                <div className="text-xs font-semibold text-slate-700">
+                  Todavía no hay suscriptores en este filtro
+                </div>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  Tus clientes pueden sumarse desde la sección "Club de Promos" en la página del catálogo o tildando la casilla al finalizar su compra.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                {activePromoSubscribers.map((sub) => (
+                  <div
+                    key={sub.id}
+                    className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white hover:bg-slate-50/70"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900">{sub.name}</span>
+                        <span className="text-xs font-mono text-slate-600">{sub.phone}</span>
+                        {sub.email && (
+                          <span className="text-[11px] text-slate-500">{sub.email}</span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                        <span>
+                          {sub.source === 'checkout_opt_in'
+                            ? 'Opt-in en compra'
+                            : 'Formulario Club Web'}
+                        </span>
+                        {sub.preferredCategory && (
+                          <span>· Interés: {sub.preferredCategory}</span>
+                        )}
+                        {sub.birthDate && <span>· Cumple: {sub.birthDate}</span>}
+                        {sub.lastPromoSentAt && (
+                          <span className="text-emerald-700 font-semibold">
+                            · Última promo: {new Date(sub.lastPromoSentAt).toLocaleDateString('es-AR')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => void handleSendPromoToSubscriber(sub)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        <span>Enviar promo WA</span>
+                      </button>
+                      {onSavePromoSubscribers && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSavePromoSubscribers(
+                              promoSubscribers.filter((s) => s.id !== sub.id)
+                            );
+                            showToast(`Suscriptor "${sub.name}" quitado de la lista.`);
+                          }}
+                          title="Eliminar suscriptor"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 2D: ESTADÍSTICAS, RANKING DE VENTAS Y PUNTOS POR DNI */}
+      {subTab === 'estadisticas' &&
+        (() => {
+          const nowDate = new Date();
+          const todayStart = new Date(
+            nowDate.getFullYear(),
+            nowDate.getMonth(),
+            nowDate.getDate()
+          ).getTime();
+          const cutoffMs =
+            statsRange === 'today'
+              ? todayStart
+              : statsRange === '7d'
+              ? todayStart - 6 * 24 * 60 * 60 * 1000
+              : statsRange === '30d'
+              ? todayStart - 29 * 24 * 60 * 60 * 1000
+              : 0;
+
+          const ordersInPeriod = orders.filter((o) => {
+            if (!cutoffMs) return true;
+            const ts = new Date(o.createdAt).getTime();
+            return Number.isFinite(ts) && ts >= cutoffMs;
+          });
+          const activeOrders = ordersInPeriod.filter((o) => o.status !== 'cancelado');
+          const cancelledCount = ordersInPeriod.length - activeOrders.length;
+
+          const netRevenue = activeOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+          const collectedRevenue = activeOrders
+            .filter((o) => o.paymentStatus === 'acreditado' || o.status === 'retirado')
+            .reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+          const totalUnitsSold = activeOrders.reduce(
+            (sum, o) =>
+              sum + o.items.reduce((s, it) => s + Math.max(0, Number(it.quantity) || 0), 0),
+            0
+          );
+          const avgTicket = activeOrders.length > 0 ? netRevenue / activeOrders.length : 0;
+          const totalDiscountsGranted = activeOrders.reduce(
+            (sum, o) =>
+              sum +
+              (Number(o.wholesaleSavings) || 0) +
+              (Number(o.couponDiscountAmount) || 0) +
+              (Number(o.paymentMethodDiscountAmount) || 0) +
+              (Number(o.loyaltyDiscountAmount) || 0),
+            0
+          );
+
+          // Breakdown by payment method
+          const payBucketMap = new Map<string, { label: string; count: number; amount: number }>();
+          activeOrders.forEach((o) => {
+            const key = o.confirmedPaymentMethod || o.preferredPaymentMethod || 'acordar';
+            const label =
+              key === 'transferencia'
+                ? 'Transferencia bancaria'
+                : key === 'mercadopago_dinero_cuenta'
+                ? 'Mercado Pago (Dinero en cuenta)'
+                : key === 'link_pago'
+                ? 'Mercado Pago / Tarjetas'
+                : key === 'efectivo'
+                ? 'Efectivo'
+                : key === 'fiado'
+                ? 'Cuenta Corriente / Fiado'
+                : 'A coordinar WhatsApp';
+            const cur = payBucketMap.get(label) || { label, count: 0, amount: 0 };
+            cur.count += 1;
+            cur.amount += Number(o.totalAmount) || 0;
+            payBucketMap.set(label, cur);
+          });
+          const payBuckets = Array.from(payBucketMap.values()).sort((a, b) => b.amount - a.amount);
+
+          // Top 10 selling products
+          const productSalesMap = new Map<
+            string,
+            {
+              key: string;
+              productId: string;
+              name: string;
+              sku?: string;
+              units: number;
+              revenue: number;
+              variantCounts: Record<string, number>;
+            }
+          >();
+          activeOrders.forEach((o) => {
+            o.items.forEach((it) => {
+              const lookupKey = it.productId || it.productName.trim().toLowerCase();
+              const matchedProd =
+                productMap.byId.get(it.productId) ||
+                productMap.byName.get(it.productName.trim().toLowerCase());
+              const entry = productSalesMap.get(lookupKey) || {
+                key: lookupKey,
+                productId: it.productId,
+                name: it.productName,
+                sku: it.sku || matchedProd?.sku,
+                units: 0,
+                revenue: 0,
+                variantCounts: {},
+              };
+              const qty = Math.max(0, Number(it.quantity) || 0);
+              entry.units += qty;
+              entry.revenue += Number(it.subtotal) || 0;
+              if (it.variantLabel) {
+                entry.variantCounts[it.variantLabel] =
+                  (entry.variantCounts[it.variantLabel] || 0) + qty;
+              }
+              productSalesMap.set(lookupKey, entry);
+            });
+          });
+          const topSellingProducts = Array.from(productSalesMap.values())
+            .sort((a, b) => b.units - a.units || b.revenue - a.revenue)
+            .slice(0, 10);
+
+          // Top restock demand from pending stock alerts
+          const restockDemandMap = new Map<
+            string,
+            {
+              productId: string;
+              name: string;
+              sku?: string;
+              pendingCount: number;
+              variantsWaiting: string[];
+              liveProduct?: CatalogProduct;
+            }
+          >();
+          stockAlerts
+            .filter((a) => a.status === 'pending')
+            .forEach((a) => {
+              const key = a.productId || a.productName.trim().toLowerCase();
+              const liveProduct =
+                productMap.byId.get(a.productId) ||
+                productMap.byName.get(a.productName.trim().toLowerCase());
+              const entry = restockDemandMap.get(key) || {
+                productId: a.productId,
+                name: a.productName,
+                sku: a.productSku || liveProduct?.sku,
+                pendingCount: 0,
+                variantsWaiting: [],
+                liveProduct,
+              };
+              entry.pendingCount += 1;
+              if (a.variantLabel && !entry.variantsWaiting.includes(a.variantLabel)) {
+                entry.variantsWaiting.push(a.variantLabel);
+              }
+              restockDemandMap.set(key, entry);
+            });
+          const topRestockDemand = Array.from(restockDemandMap.values()).sort(
+            (a, b) => b.pendingCount - a.pendingCount
+          );
+
+          const filteredLoyaltyAccounts = loyaltyAccounts.filter((acc) => {
+            const q = loyaltySearchQuery.trim().toLowerCase();
+            if (!q) return true;
+            return (
+              acc.dni.includes(q) ||
+              (acc.customerName || '').toLowerCase().includes(q) ||
+              (acc.customerPhone || '').toLowerCase().includes(q)
+            );
+          });
+
+          const handleExportStatsCsv = () => {
+            const headers = [
+              'Ranking',
+              'Producto',
+              'SKU',
+              'Unidades Vendidas',
+              'Ingresos Brutos',
+              'Variantes Populares',
+            ];
+            const lines = topSellingProducts.map((p, idx) => {
+              const varStr = Object.entries(p.variantCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3)
+                .map(([lbl, cnt]) => `${lbl} (${cnt})`)
+                .join(' | ');
+              return [
+                idx + 1,
+                `"${p.name.replace(/"/g, '""')}"`,
+                `"${(p.sku || '').replace(/"/g, '""')}"`,
+                p.units,
+                p.revenue.toFixed(2),
+                `"${varStr.replace(/"/g, '""')}"`,
+              ].join(',');
+            });
+            const summaryFooter = [
+              '',
+              `Periodo,${statsRange}`,
+              `Pedidos Activos,${activeOrders.length}`,
+              `Facturacion Neta,${netRevenue.toFixed(2)}`,
+              `Ticket Promedio,${avgTicket.toFixed(2)}`,
+              `Unidades Vendidas,${totalUnitsSold}`,
+              `Descuentos Otorgados,${totalDiscountsGranted.toFixed(2)}`,
+            ];
+            const body = [headers.join(','), ...lines, ...summaryFooter].join('\n');
+            triggerCsvDownload(body, `estadisticas_catalogo_${statsRange}.csv`);
+            showToast('Reporte CSV de estadísticas descargado.');
+          };
+
+          const handleManualLoyaltyAdjustment = (
+            acc: CatalogLoyaltyAccount,
+            delta: number
+          ) => {
+            if (!onSaveLoyaltyAccounts || !delta) return;
+            const nowIso = new Date().toISOString();
+            const nextBal = Math.max(0, acc.pointsBalance + delta);
+            const appliedDelta = nextBal - acc.pointsBalance;
+            const updated: CatalogLoyaltyAccount = {
+              ...acc,
+              pointsBalance: nextBal,
+              totalPointsEarned:
+                appliedDelta > 0 ? acc.totalPointsEarned + appliedDelta : acc.totalPointsEarned,
+              totalPointsRedeemed:
+                appliedDelta < 0
+                  ? acc.totalPointsRedeemed + Math.abs(appliedDelta)
+                  : acc.totalPointsRedeemed,
+              history: [
+                {
+                  id: `lmov-adj-${Date.now()}`,
+                  date: nowIso,
+                  type: 'manual_adjustment' as const,
+                  pointsDelta: appliedDelta,
+                  note: `Ajuste manual desde panel (${appliedDelta >= 0 ? '+' : ''}${appliedDelta} pts)`,
+                },
+                ...(acc.history || []),
+              ].slice(0, 40),
+              updatedAt: nowIso,
+            };
+            onSaveLoyaltyAccounts(
+              loyaltyAccounts.map((x) => (x.id === acc.id ? updated : x))
+            );
+            showToast(
+              `Puntos de DNI ${acc.dni} actualizados (${nextBal} pts disponibles).`
+            );
+          };
+
+          return (
+            <div className="space-y-4">
+              {/* Top Filter & Export Bar */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-[#0B1933]" />
+                    <span>Estadísticas y Ranking de Ventas del Catálogo Web</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Analizá los artículos más vendidos, medios de cobro elegidos, demanda de reposición y saldos de clientes por DNI.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                  {(
+                    [
+                      { id: 'today', label: 'Hoy' },
+                      { id: '7d', label: '7 días' },
+                      { id: '30d', label: '30 días' },
+                      { id: 'all', label: 'Todo' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setStatsRange(opt.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                        statsRange === opt.id
+                          ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={handleExportStatsCsv}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Exportar CSV</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 4 KPI Strip (Clean hairline surface, tabular-nums) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Facturación Web Neta
+                  </div>
+                  <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
+                    {formatCurrency(netRevenue, currency)}
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-mono tabular-nums">
+                    Cobrado / Retirado: {formatCurrency(collectedRevenue, currency)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Pedidos & Ticket Promedio
+                  </div>
+                  <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
+                    {activeOrders.length} pedidos
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-mono tabular-nums">
+                    Promedio: {formatCurrency(avgTicket, currency)}
+                    {cancelledCount > 0 ? ` · ${cancelledCount} cancelados` : ''}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Unidades & Ahorros Otorgados
+                  </div>
+                  <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
+                    {totalUnitsSold} u.
+                  </div>
+                  <div className="text-[11px] text-emerald-700 font-mono tabular-nums font-semibold">
+                    Dtos. totales: {formatCurrency(totalDiscountsGranted, currency)}
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                    Demanda Sin Stock / Puntos
+                  </div>
+                  <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
+                    {pendingStockAlertsCount} avisos
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-mono tabular-nums">
+                    {loyaltyAccounts.length} DNI activos en puntos
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Breakdown + Top 10 Products */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      Medios de pago elegidos
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Participación por monto vendido en el período.
+                    </p>
+                  </div>
+
+                  {payBuckets.length === 0 ? (
+                    <div className="text-xs text-slate-500 py-6 text-center">
+                      Sin pedidos en este rango de fechas.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {payBuckets.map((b) => {
+                        const pct = netRevenue > 0 ? Math.round((b.amount / netRevenue) * 100) : 0;
+                        return (
+                          <div key={b.label} className="space-y-1">
+                            <div className="flex items-center justify-between text-xs gap-2">
+                              <span className="font-semibold text-slate-800 truncate">{b.label}</span>
+                              <span className="font-mono tabular-nums font-bold text-slate-900 shrink-0">
+                                {formatCurrency(b.amount, currency)} ({pct}%)
+                              </span>
+                            </div>
+                            <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                              <div
+                                className="h-full bg-[#0B1933] rounded-full"
+                                style={{ width: `${Math.min(100, Math.max(4, pct))}%` }}
+                              />
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-mono tabular-nums">
+                              {b.count} pedido{b.count === 1 ? '' : 's'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      Top 10 Productos Más Vendidos
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      Ordenados por volumen de unidades y facturación acumulada.
+                    </p>
+                  </div>
+
+                  {topSellingProducts.length === 0 ? (
+                    <div className="text-xs text-slate-500 py-8 text-center">
+                      Todavía no hay ventas registradas en el rango seleccionado.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                            <th className="py-2.5 px-3">#</th>
+                            <th className="py-2.5 px-3">Producto / SKU</th>
+                            <th className="py-2.5 px-3">Variantes</th>
+                            <th className="py-2.5 px-3 text-right">Unidades</th>
+                            <th className="py-2.5 px-3 text-right">Ingresos</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {topSellingProducts.map((p, idx) => {
+                            const topVarStr = Object.entries(p.variantCounts)
+                              .sort((a, b) => b[1] - a[1])
+                              .slice(0, 2)
+                              .map(([lbl, cnt]) => `${lbl} (${cnt})`)
+                              .join(' · ');
+                            return (
+                              <tr key={p.key} className="hover:bg-slate-50/70">
+                                <td className="py-2.5 px-3 font-mono tabular-nums font-bold text-slate-500">
+                                  {idx + 1}
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <div className="font-bold text-slate-900">{p.name}</div>
+                                  {p.sku && (
+                                    <div className="text-[11px] font-mono text-slate-500">
+                                      SKU: {p.sku}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 text-[11px] text-slate-600">
+                                  {topVarStr || 'Estándar'}
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900">
+                                  {p.units}
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-700">
+                                  {formatCurrency(p.revenue, currency)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Priority Restock Demand from Stock Alerts */}
+              {topRestockDemand.length > 0 && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">
+                        Artículos Sin Stock con Mayor Demanda de Clientes
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Productos con solicitudes activas de "Avisar cuando haya stock" para priorizar reposición.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSubTab('avisos_stock')}
+                      className="text-xs font-bold text-[#0B1933] hover:underline cursor-pointer"
+                    >
+                      Ver todos los avisos →
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {topRestockDemand.slice(0, 6).map((item) => (
+                      <div
+                        key={item.productId || item.name}
+                        className="p-3 rounded-xl border border-amber-200 bg-amber-50/40 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-900 truncate">
+                            {item.name}
+                          </div>
+                          <div className="text-[11px] text-slate-600 font-mono tabular-nums">
+                            {item.pendingCount} cliente{item.pendingCount === 1 ? '' : 's'} esperando
+                            {item.variantsWaiting.length > 0
+                              ? ` · Talles: ${item.variantsWaiting.slice(0, 3).join(', ')}`
+                              : ''}
+                          </div>
+                        </div>
+                        {item.liveProduct && (
+                          <button
+                            type="button"
+                            onClick={() => openEditProductModal(item.liveProduct!)}
+                            className="px-2.5 py-1 rounded-lg bg-[#0B1933] hover:bg-[#13264A] text-white text-[11px] font-bold cursor-pointer shrink-0"
+                          >
+                            Reponer
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Customer DNI Loyalty Accounts Table */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <Award className="w-4 h-4 text-emerald-700" />
+                      <span>Clientes del Programa de Puntos por DNI ({loyaltyAccounts.length})</span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {settings.enableLoyaltyProgram
+                        ? `Programa activo: suma ${settings.loyaltyPointsPerUnit ?? 10} pts por prenda/unidad.`
+                        : 'El programa de puntos está desactivado. Podés habilitarlo en "Tienda, Envíos y Cobros".'}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="search"
+                        value={loyaltySearchQuery}
+                        onChange={(e) => setLoyaltySearchQuery(e.target.value)}
+                        placeholder="Buscar DNI o nombre..."
+                        className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                      />
+                    </div>
+                    {onRefreshLoyaltyAccounts && (
+                      <button
+                        type="button"
+                        disabled={isRefreshingLoyalty}
+                        onClick={async () => {
+                          setIsRefreshingLoyalty(true);
+                          try {
+                            await onRefreshLoyaltyAccounts();
+                          } finally {
+                            setIsRefreshingLoyalty(false);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 cursor-pointer"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingLoyalty ? 'animate-spin' : ''}`} />
+                        <span>Actualizar DNI</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {filteredLoyaltyAccounts.length === 0 ? (
+                  <div className="border border-dashed border-slate-200 rounded-xl p-6 text-center text-xs text-slate-500">
+                    {loyaltyAccounts.length === 0
+                      ? 'Todavía ningún cliente registró compras con su DNI.'
+                      : 'Ningún cliente coincide con esa búsqueda.'}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                          <th className="py-2.5 px-3">DNI / Cliente</th>
+                          <th className="py-2.5 px-3 text-right">Compras</th>
+                          <th className="py-2.5 px-3 text-right">Puntos Disponibles</th>
+                          <th className="py-2.5 px-3">Nivel Alcanzado</th>
+                          <th className="py-2.5 px-3 text-right">Ajuste Rápido</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredLoyaltyAccounts.map((acc) => {
+                          const { highestUnlocked, nextTier } = getEligibleLoyaltyTiers(
+                            acc.pointsBalance,
+                            settings.loyaltyTiers
+                          );
+                          return (
+                            <tr key={acc.id} className="hover:bg-slate-50/70">
+                              <td className="py-2.5 px-3">
+                                <div className="font-mono font-bold text-slate-900">
+                                  DNI {acc.dni}
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  {acc.customerName || 'Sin nombre'}
+                                  {acc.customerPhone ? ` · ${acc.customerPhone}` : ''}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-700">
+                                {acc.ordersCount}
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <div className="font-mono tabular-nums font-bold text-[#0B1933]">
+                                  {acc.pointsBalance} pts
+                                </div>
+                                <div className="text-[10px] font-mono tabular-nums text-slate-500">
+                                  +{acc.totalPointsEarned} ganados · -{acc.totalPointsRedeemed} canjeados
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-3 text-xs">
+                                {highestUnlocked ? (
+                                  <span className="font-bold text-emerald-700">
+                                    Desbloqueó {highestUnlocked.discountPercent}% OFF
+                                  </span>
+                                ) : nextTier ? (
+                                  <span className="text-slate-500">
+                                    A {nextTier.minPoints - acc.pointsBalance} pts del {nextTier.discountPercent}% OFF
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500">—</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                {onSaveLoyaltyAccounts && (
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleManualLoyaltyAdjustment(acc, 10)}
+                                      className="px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-mono font-bold text-[11px] cursor-pointer"
+                                      title="Sumar 10 puntos manualmente"
+                                    >
+                                      +10
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleManualLoyaltyAdjustment(acc, 50)}
+                                      className="px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-mono font-bold text-[11px] cursor-pointer"
+                                      title="Sumar 50 puntos manualmente"
+                                    >
+                                      +50
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={acc.pointsBalance <= 0}
+                                      onClick={() => handleManualLoyaltyAdjustment(acc, -10)}
+                                      className="px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 font-mono font-bold text-[11px] cursor-pointer"
+                                      title="Restar 10 puntos manualmente"
+                                    >
+                                      -10
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
       {/* SUB-TAB 3: CONFIGURACIÓN DE TIENDA, WHATSAPP Y RETIRO */}
       {subTab === 'configuracion' && (
@@ -2612,19 +5737,1102 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               </div>
             </div>
 
-            <div className="sm:col-span-2 p-3 rounded-xl bg-sky-50 border border-sky-200 text-xs text-slate-700">
-              <strong>Datos para cobrar por WhatsApp:</strong>{' '}
-              {config.merchantPaymentAlias?.trim() || config.merchantMpCheckoutLink?.trim() ? (
-                <span>
-                  El botón <em>Cobrar por WhatsApp</em> usará tu{' '}
-                  {config.merchantPaymentAlias ? `Alias (${config.merchantPaymentAlias})` : ''}{' '}
-                  {config.merchantMpCheckoutLink ? 'y Link de Mercado Pago' : ''} configurado en Administradores/Ajustes.
-                </span>
-              ) : (
-                <span>
-                  Podés cargar tu Alias, CVU y Link de Pago en la pestaña de Configuración / Administradores para enviarlos automáticamente al cobrar envíos por WhatsApp.
-                </span>
-              )}
+            <div className="sm:col-span-2 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+              <div>
+                <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <Wallet className="w-4 h-4 text-[#009EE3]" />
+                  <span>Cobros en tu Página Web: Alias para Transferencias y Mercado Pago</span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Cuando el cliente elija <strong>Transferencia</strong> en tu web verá estos datos para transferir y subir el comprobante. Si configurás Mercado Pago, podrá pagar con <strong>Dinero en cuenta</strong> desde ahí mismo.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Alias de transferencia *
+                  </label>
+                  <input
+                    type="text"
+                    value={draftMerchantPayment.merchantPaymentAlias}
+                    onChange={(e) =>
+                      setDraftMerchantPayment((prev) => ({
+                        ...prev,
+                        merchantPaymentAlias: e.target.value,
+                      }))
+                    }
+                    placeholder="ej. mi.tienda.mp"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    CBU / CVU (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={draftMerchantPayment.merchantPaymentCvu}
+                    onChange={(e) =>
+                      setDraftMerchantPayment((prev) => ({
+                        ...prev,
+                        merchantPaymentCvu: e.target.value,
+                      }))
+                    }
+                    placeholder="00000031000..."
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Titular de la cuenta
+                  </label>
+                  <input
+                    type="text"
+                    value={draftMerchantPayment.merchantPaymentHolder}
+                    onChange={(e) =>
+                      setDraftMerchantPayment((prev) => ({
+                        ...prev,
+                        merchantPaymentHolder: e.target.value,
+                      }))
+                    }
+                    placeholder="ej. Juan Pérez"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Banco o Billetera
+                  </label>
+                  <input
+                    type="text"
+                    value={draftMerchantPayment.merchantPaymentBank}
+                    onChange={(e) =>
+                      setDraftMerchantPayment((prev) => ({
+                        ...prev,
+                        merchantPaymentBank: e.target.value,
+                      }))
+                    }
+                    placeholder="ej. Mercado Pago / Galicia"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Link fijo de Mercado Pago (opcional)
+                  </label>
+                  <input
+                    type="url"
+                    value={draftMerchantPayment.merchantMpCheckoutLink}
+                    onChange={(e) =>
+                      setDraftMerchantPayment((prev) => ({
+                        ...prev,
+                        merchantMpCheckoutLink: e.target.value,
+                      }))
+                    }
+                    placeholder="https://link.mercadopago.com.ar/..."
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Access Token Checkout Pro MP (acreditación automática Dinero en cuenta)
+                  </label>
+                  <input
+                    type="password"
+                    value={draftMerchantPayment.merchantMpAccessToken}
+                    onChange={(e) =>
+                      setDraftMerchantPayment((prev) => ({
+                        ...prev,
+                        merchantMpAccessToken: e.target.value,
+                      }))
+                    }
+                    placeholder={
+                      config.hasMerchantMpAccessToken
+                        ? '•••••••• (Token guardado · escribir para cambiar)'
+                        : 'APP_USR-... (opcional para link dinámico)'
+                    }
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                  />
+                </div>
+              </div>
+
+              {/* Botón Probar Mercado Pago + Estado de Webhook por Tienda */}
+              <div className="pt-2 border-t border-slate-200 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="text-[11px] text-slate-600">
+                    <span className="font-bold text-slate-800">Estado de integración MP: </span>
+                    {config.hasMerchantMpAccessToken || draftMerchantPayment.merchantMpAccessToken.trim() ? (
+                      <span className="text-emerald-700 font-semibold">
+                        Token configurado {draftMerchantPayment.merchantMpAccessToken.trim() ? '(nuevo borrador listo)' : '(guardado)'}
+                      </span>
+                    ) : (
+                      <span className="text-amber-700 font-semibold">
+                        Sin Access Token aún (usará Alias o Link fijo)
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isTestingMp}
+                    onClick={async () => {
+                      setIsTestingMp(true);
+                      setMpTestResult(null);
+                      try {
+                        const tid = tenant?.id || config.tenantId || 'default-tenant';
+                        const res = await testMerchantMercadoPagoConnection({
+                          tenantId: tid,
+                          mpAccessToken: draftMerchantPayment.merchantMpAccessToken.trim() || undefined,
+                        });
+                        setMpTestResult(res);
+                        if (res.valid) {
+                          showToast(`Mercado Pago conectado: ${res.account?.nickname || res.account?.email || 'OK'}`);
+                        } else {
+                          showToast(res.error || 'No se pudo validar el Access Token de Mercado Pago.');
+                        }
+                      } finally {
+                        setIsTestingMp(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#009EE3] hover:bg-[#008ACA] disabled:opacity-60 text-white cursor-pointer whitespace-nowrap"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingMp ? 'animate-spin' : ''}`} />
+                    <span>{isTestingMp ? 'Probando MP...' : 'Probar Mercado Pago'}</span>
+                  </button>
+                </div>
+
+                {mpTestResult && (
+                  <div
+                    className={`p-3 rounded-xl border text-xs space-y-2 ${
+                      mpTestResult.valid
+                        ? 'bg-emerald-50 border-emerald-200 text-slate-800'
+                        : 'bg-rose-50 border-rose-200 text-rose-800'
+                    }`}
+                  >
+                    {mpTestResult.valid && mpTestResult.account ? (
+                      <div className="space-y-1">
+                        <div className="font-bold text-emerald-800 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          <span>
+                            Conexión verificada · Cuenta MP activa ({mpTestResult.account.siteId || 'MLA'})
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-700 font-mono">
+                          Usuario: {mpTestResult.account.nickname || '—'} ·{' '}
+                          {mpTestResult.account.email || ''} · ID #{mpTestResult.account.id}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="font-semibold flex items-start gap-1.5">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span>{mpTestResult.error}</span>
+                      </div>
+                    )}
+
+                    {mpTestResult.webhookUrls && (
+                      <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                        <div className="text-[11px] font-bold text-slate-800">
+                          Recordatorio de Webhook para acreditación automática:
+                        </div>
+                        <p className="text-[11px] text-slate-600">
+                          Pegá esta URL en <strong>Mercado Pago Developers → Tu aplicación → Webhooks</strong> (evento <em>Pagos / payments</em>) para acreditar pedidos incluso si el cliente cierra la ventana antes de regresar:
+                        </p>
+                        {(mpTestResult.webhookUrls.supabaseWebhookUrl ||
+                          mpTestResult.webhookUrls.serverWebhookUrl) && (
+                          <div className="flex items-center justify-between gap-2 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5">
+                            <span className="text-[11px] font-mono text-slate-800 truncate">
+                              {mpTestResult.webhookUrls.supabaseWebhookUrl ||
+                                mpTestResult.webhookUrls.serverWebhookUrl}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const url =
+                                  mpTestResult.webhookUrls?.supabaseWebhookUrl ||
+                                  mpTestResult.webhookUrls?.serverWebhookUrl ||
+                                  '';
+                                if (!url) return;
+                                await navigator.clipboard.writeText(url);
+                                setCopiedWebhookField('webhook');
+                                showToast('URL de Webhook copiada.');
+                                setTimeout(() => setCopiedWebhookField(null), 2000);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded bg-slate-900 text-white text-[10px] font-bold shrink-0 cursor-pointer"
+                            >
+                              {copiedWebhookField === 'webhook' ? (
+                                <>
+                                  <Check className="w-3 h-3 text-emerald-300" />
+                                  <span>Copiado</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3 h-3" />
+                                  <span>Copiar</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="sm:col-span-2 p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <Percent className="w-4 h-4 text-emerald-700" />
+                    <span>Promociones, Cupones, Descuento Efectivo/Transferencia y Alertas de Stock</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Ofrecé un beneficio por pagar en Efectivo/Transferencia, creá códigos de descuento y definí cuándo avisarte por stock bajo.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Descuento pagando en Efectivo / Transferencia (%)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="90"
+                    step="1"
+                    value={draftSettings.cashOrTransferDiscountPercent ?? 0}
+                    onChange={(e) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        cashOrTransferDiscountPercent: Math.max(
+                          0,
+                          Math.min(90, Number(e.target.value) || 0)
+                        ),
+                      }))
+                    }
+                    placeholder="0"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Alerta de stock mínimo por defecto (unidades)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={draftSettings.defaultLowStockThreshold ?? 2}
+                    onChange={(e) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        defaultLowStockThreshold: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      }))
+                    }
+                    placeholder="2"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                  />
+                </div>
+              </div>
+
+              {/* Coupon builder */}
+              <div className="pt-2 border-t border-slate-200 space-y-2.5">
+                <div className="text-[11px] font-bold text-slate-800">
+                  Cupones de descuento para la tienda web
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  <input
+                    type="text"
+                    value={newCouponCode}
+                    onChange={(e) => setNewCouponCode(e.target.value.toUpperCase())}
+                    placeholder="Código (ej. BIENVENIDO10)"
+                    className="col-span-2 sm:col-span-2 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 uppercase"
+                  />
+                  <select
+                    value={newCouponType}
+                    onChange={(e) => setNewCouponType(e.target.value as 'percent' | 'fixed')}
+                    className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900"
+                  >
+                    <option value="percent">% Porcentaje</option>
+                    <option value="fixed">{currency} Monto fijo</option>
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    value={newCouponValue}
+                    onChange={(e) => setNewCouponValue(e.target.value)}
+                    placeholder={newCouponType === 'percent' ? '% desc.' : 'Monto'}
+                    className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                  />
+                  <div className="col-span-2 sm:col-span-1 flex gap-1.5">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={newCouponMinPurchase}
+                      onChange={(e) => setNewCouponMinPurchase(e.target.value)}
+                      placeholder="Mín. opc."
+                      title="Compra mínima opcional para aplicar el cupón"
+                      className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const code = newCouponCode.trim().toUpperCase().replace(/\s+/g, '');
+                        const val = Number(String(newCouponValue).replace(',', '.'));
+                        if (!code || !Number.isFinite(val) || val <= 0) {
+                          showToast('Ingresá un código de cupón y un valor de descuento mayor a 0.');
+                          return;
+                        }
+                        if (newCouponType === 'percent' && val > 95) {
+                          showToast('El cupón porcentual no puede superar el 95%.');
+                          return;
+                        }
+                        const minPurch =
+                          newCouponMinPurchase.trim() !== '' && Number(newCouponMinPurchase) > 0
+                            ? Number(newCouponMinPurchase)
+                            : undefined;
+                        const nextCoupon: CatalogCoupon = {
+                          id: `cpn-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                          code,
+                          discountType: newCouponType,
+                          value: val,
+                          minPurchase: minPurch,
+                          active: true,
+                        };
+                        setDraftSettings((prev) => ({
+                          ...prev,
+                          coupons: [
+                            ...(prev.coupons || []).filter((c) => c.code.toUpperCase() !== code),
+                            nextCoupon,
+                          ],
+                        }));
+                        setNewCouponCode('');
+                        setNewCouponValue('');
+                        setNewCouponMinPurchase('');
+                        showToast(`Cupón "${code}" agregado. Guardá los cambios para publicarlo.`);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#0B1933] text-white text-xs font-bold cursor-pointer shrink-0"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                {(draftSettings.coupons || []).length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {(draftSettings.coupons || []).map((c) => (
+                      <div
+                        key={c.code}
+                        className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-[11px]"
+                      >
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDraftSettings((prev) => ({
+                              ...prev,
+                              coupons: (prev.coupons || []).map((x) =>
+                                x.code === c.code ? { ...x, active: x.active === false } : x
+                              ),
+                            }))
+                          }
+                          className={`font-mono font-bold cursor-pointer ${
+                            c.active !== false ? 'text-emerald-700' : 'text-slate-400 line-through'
+                          }`}
+                          title="Clic para activar/pausar cupón"
+                        >
+                          {c.code}
+                        </button>
+                        <span className="text-slate-600">
+                          {c.discountType === 'percent'
+                            ? `${c.value}%`
+                            : formatCurrency(c.value, currency)}
+                          {c.minPurchase ? ` (mín ${formatCurrency(c.minPurchase, currency)})` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDraftSettings((prev) => ({
+                              ...prev,
+                              coupons: (prev.coupons || []).filter((x) => x.code !== c.code),
+                            }))
+                          }
+                          className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Promo Club settings */}
+              <div className="pt-2 border-t border-slate-200 space-y-2.5">
+                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={draftSettings.enablePromoClub !== false}
+                    onChange={(e) =>
+                      setDraftSettings((prev) => ({ ...prev, enablePromoClub: e.target.checked }))
+                    }
+                    className="rounded border-slate-300"
+                  />
+                  <span>Mostrar formulario "Recibir promos y descuentos" en la página web</span>
+                </label>
+
+                {draftSettings.enablePromoClub !== false && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700">
+                        Título de la sección en tu web
+                      </label>
+                      <input
+                        type="text"
+                        value={draftSettings.promoClubTitle || ''}
+                        onChange={(e) =>
+                          setDraftSettings((prev) => ({ ...prev, promoClubTitle: e.target.value }))
+                        }
+                        placeholder="Club de Promos y Descuentos"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700">
+                        Cupón de bienvenida al registrarse (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={draftSettings.promoClubWelcomeCoupon || ''}
+                        onChange={(e) =>
+                          setDraftSettings((prev) => ({
+                            ...prev,
+                            promoClubWelcomeCoupon: e.target.value.toUpperCase(),
+                          }))
+                        }
+                        placeholder="Ej. BIENVENIDO10 (se muestra al anotarse)"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-900 uppercase"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2 space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700">
+                        Mensaje incentivo para tus clientes
+                      </label>
+                      <input
+                        type="text"
+                        value={draftSettings.promoClubIncentive || ''}
+                        onChange={(e) =>
+                          setDraftSettings((prev) => ({
+                            ...prev,
+                            promoClubIncentive: e.target.value,
+                          }))
+                        }
+                        placeholder="Dejanos tu WhatsApp y recibí descuentos, ingresos y promos exclusivas."
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Storefront Promo Banners Builder */}
+              <div className="pt-3 border-t border-slate-200 space-y-3">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <Megaphone className="w-4 h-4 text-[#0B1933]" />
+                    <span>Banners promocionales en la portada del catálogo web</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Podés armar un banner directo en la página o subir / pegar tu propia imagen diseñada. Al tocarlo, el cliente filtra la categoría o aplica su cupón.
+                  </p>
+                </div>
+
+                {/* Mode switcher: Armar en la página vs Subir/pegar imagen */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewBannerMode('built')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                      newBannerMode === 'built'
+                        ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Armar banner en la página
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewBannerMode('image')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                      newBannerMode === 'image'
+                        ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    <span>Cargar banner como imagen</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-white p-3.5 rounded-xl border border-slate-200">
+                  {newBannerMode === 'image' && (
+                    <div className="sm:col-span-2 space-y-2 pb-2 border-b border-slate-100">
+                      <label className="text-[11px] font-semibold text-slate-700 block">
+                        Imagen del banner (formato apaisado recomendado) *
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          ref={bannerFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleBannerImageUpload}
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          disabled={isCompressingBannerImage}
+                          onClick={() => bannerFileInputRef.current?.click()}
+                          className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-60 text-white text-xs font-bold cursor-pointer shrink-0"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>
+                            {isCompressingBannerImage
+                              ? 'Optimizando imagen...'
+                              : 'Subir imagen desde dispositivo'}
+                          </span>
+                        </button>
+                        <input
+                          type="url"
+                          value={newBannerImageUrl}
+                          onChange={(e) => setNewBannerImageUrl(e.target.value)}
+                          placeholder="O pegá la URL de la imagen (https://...)"
+                          className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                        />
+                      </div>
+                      {newBannerImageUrl.trim() && (
+                        <div className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100 max-h-36">
+                          <img
+                            src={newBannerImageUrl.trim()}
+                            alt="Vista previa de banner"
+                            referrerPolicy="no-referrer"
+                            className="w-full h-32 object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setNewBannerImageUrl('')}
+                            className="absolute top-2 right-2 p-1 rounded-lg bg-slate-950/75 text-white hover:bg-slate-950 cursor-pointer"
+                            title="Quitar imagen"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700">
+                      {newBannerMode === 'image'
+                        ? 'Título o pie sobre la imagen (opcional)'
+                        : 'Título del banner *'}
+                    </label>
+                    <input
+                      type="text"
+                      value={newBannerTitle}
+                      onChange={(e) => setNewBannerTitle(e.target.value)}
+                      placeholder="Ej. 20% OFF en Temporada Invierno"
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                    />
+                  </div>
+                  {newBannerMode === 'built' && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700">
+                        Etiqueta superior (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={newBannerBadge}
+                        onChange={(e) => setNewBannerBadge(e.target.value)}
+                        placeholder="Ej. LANZAMIENTO · SOLO ESTA SEMANA"
+                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                      />
+                    </div>
+                  )}
+                  {newBannerMode === 'built' && (
+                    <div className="sm:col-span-2 space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700">
+                        Descripción breve (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={newBannerSubtitle}
+                        onChange={(e) => setNewBannerSubtitle(e.target.value)}
+                        placeholder="Ej. Tocá este banner para filtrar la colección o aplicar tu cupón de descuento."
+                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                      />
+                    </div>
+                  )}
+                  {newBannerMode === 'built' && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700">
+                        Color de fondo
+                      </label>
+                      <select
+                        value={newBannerTheme}
+                        onChange={(e) =>
+                          setNewBannerTheme(e.target.value as CatalogPromoBanner['theme'])
+                        }
+                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                      >
+                        <option value="navy">Azul Institucional</option>
+                        <option value="emerald">Verde Oferta</option>
+                        <option value="amber">Ámbar Destacado</option>
+                        <option value="rose">Coral / Liquidación</option>
+                      </select>
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700">
+                      Al hacer clic: Filtrar categoría
+                    </label>
+                    <select
+                      value={newBannerFilterCategory}
+                      onChange={(e) => setNewBannerFilterCategory(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                    >
+                      <option value="">Todas las categorías</option>
+                      {(draftSettings.rubroFilters || activeRubroFilters).map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700">
+                      Al hacer clic: Aplicar cupón
+                    </label>
+                    <select
+                      value={newBannerCouponCode}
+                      onChange={(e) => setNewBannerCouponCode(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                    >
+                      <option value="">Sin cupón asociado</option>
+                      {(draftSettings.coupons || [])
+                        .filter((c) => c.active !== false)
+                        .map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.code}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700">
+                      Texto del botón (opcional)
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={newBannerCtaLabel}
+                        onChange={(e) => setNewBannerCtaLabel(e.target.value)}
+                        placeholder={newBannerMode === 'image' ? 'Opcional (ej. Ver promo)' : 'Ver oferta'}
+                        className="flex-1 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const title = newBannerTitle.trim();
+                          const cleanImg = newBannerImageUrl.trim();
+                          if (newBannerMode === 'image' && !cleanImg) {
+                            showToast('Subí una imagen o pegá la URL para crear el banner.');
+                            return;
+                          }
+                          if (newBannerMode === 'built' && !title) {
+                            showToast('Ingresá al menos un título para armar el banner.');
+                            return;
+                          }
+                          const nextBanner: CatalogPromoBanner = {
+                            id: `bnr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                            mode: newBannerMode,
+                            imageUrl: newBannerMode === 'image' ? cleanImg : undefined,
+                            badgeText: newBannerMode === 'built' ? newBannerBadge.trim() || undefined : undefined,
+                            title: title || 'Promoción destacada',
+                            subtitle: newBannerMode === 'built' ? newBannerSubtitle.trim() || undefined : undefined,
+                            theme: newBannerTheme,
+                            filterCategory: newBannerFilterCategory || undefined,
+                            couponCode: newBannerCouponCode || undefined,
+                            ctaLabel:
+                              newBannerMode === 'image'
+                                ? newBannerCtaLabel.trim() || undefined
+                                : newBannerCtaLabel.trim() || 'Ver oferta',
+                            active: true,
+                          };
+                          setDraftSettings((prev) => ({
+                            ...prev,
+                            promoBanners: [...(prev.promoBanners || []), nextBanner].slice(0, 6),
+                          }));
+                          setNewBannerImageUrl('');
+                          setNewBannerBadge('');
+                          setNewBannerTitle('');
+                          setNewBannerSubtitle('');
+                          setNewBannerFilterCategory('');
+                          setNewBannerCouponCode('');
+                          setNewBannerCtaLabel('Ver oferta');
+                          showToast('Banner agregado. Guardá los cambios para publicarlo en la web.');
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer whitespace-nowrap"
+                      >
+                        + Agregar banner
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {(draftSettings.promoBanners || []).length > 0 && (
+                  <div className="space-y-2">
+                    {(draftSettings.promoBanners || []).map((bnr, bIdx) => (
+                      <div
+                        key={bnr.id}
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 rounded-xl bg-white border border-slate-200 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {bnr.mode === 'image' && bnr.imageUrl && (
+                            <img
+                              src={bnr.imageUrl}
+                              alt={bnr.title}
+                              referrerPolicy="no-referrer"
+                              className="w-16 h-10 rounded-lg object-cover border border-slate-200 shrink-0"
+                            />
+                          )}
+                          <div className="min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`font-bold ${
+                                  bnr.active ? 'text-slate-900' : 'text-slate-400 line-through'
+                                }`}
+                              >
+                                {bnr.title}
+                              </span>
+                              <span className="text-[11px] text-slate-500">
+                                · {bnr.mode === 'image' ? 'Imagen cargada' : 'Armado en página'}
+                              </span>
+                              {bnr.badgeText && (
+                                <span className="text-[11px] text-slate-500">· {bnr.badgeText}</span>
+                              )}
+                              {bnr.filterCategory && (
+                                <span className="text-[11px] text-[#0B1933] font-semibold">
+                                  · Filtra: {bnr.filterCategory}
+                                </span>
+                              )}
+                              {bnr.couponCode && (
+                                <span className="text-[11px] font-mono font-bold text-emerald-700">
+                                  · Cupón: {bnr.couponCode}
+                                </span>
+                              )}
+                            </div>
+                            {bnr.subtitle && (
+                              <div className="text-[11px] text-slate-500 truncate">{bnr.subtitle}</div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            disabled={bIdx === 0}
+                            onClick={() =>
+                              setDraftSettings((prev) => {
+                                const list = [...(prev.promoBanners || [])];
+                                if (bIdx <= 0) return prev;
+                                [list[bIdx - 1], list[bIdx]] = [list[bIdx], list[bIdx - 1]];
+                                return { ...prev, promoBanners: list };
+                              })
+                            }
+                            className="p-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-30 cursor-pointer"
+                            title="Subir orden"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={bIdx === (draftSettings.promoBanners || []).length - 1}
+                            onClick={() =>
+                              setDraftSettings((prev) => {
+                                const list = [...(prev.promoBanners || [])];
+                                if (bIdx >= list.length - 1) return prev;
+                                [list[bIdx], list[bIdx + 1]] = [list[bIdx + 1], list[bIdx]];
+                                return { ...prev, promoBanners: list };
+                              })
+                            }
+                            className="p-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-30 cursor-pointer"
+                            title="Bajar orden"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDraftSettings((prev) => ({
+                                ...prev,
+                                promoBanners: (prev.promoBanners || []).map((x) =>
+                                  x.id === bnr.id ? { ...x, active: !x.active } : x
+                                ),
+                              }))
+                            }
+                            className="px-2 py-1 rounded text-[11px] font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer"
+                          >
+                            {bnr.active ? 'Pausar' : 'Activar'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDraftSettings((prev) => ({
+                                ...prev,
+                                promoBanners: (prev.promoBanners || []).filter((x) => x.id !== bnr.id),
+                              }))
+                            }
+                            className="p-1 rounded text-slate-400 hover:text-rose-600 cursor-pointer"
+                            title="Eliminar banner"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Programa de Puntos por DNI (Escala de descuentos por puntos) */}
+              <div className="pt-3 border-t border-slate-200 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <Award className="w-4 h-4 text-emerald-700" />
+                      <span>Programa de Puntos por DNI (Descuentos del 10% al 50%)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Si lo habilitás, el cliente ingresa su DNI arriba de todo al abrir el catálogo, suma puntos con cada prenda/unidad y puede canjearlos por % de descuento al cierre de su compra.
+                    </p>
+                  </div>
+                </div>
+
+                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(draftSettings.enableLoyaltyProgram)}
+                    onChange={(e) =>
+                      setDraftSettings((prev) => ({
+                        ...prev,
+                        enableLoyaltyProgram: e.target.checked,
+                        loyaltyPointsPerUnit:
+                          typeof prev.loyaltyPointsPerUnit === 'number'
+                            ? prev.loyaltyPointsPerUnit
+                            : 10,
+                        loyaltyTiers:
+                          prev.loyaltyTiers && prev.loyaltyTiers.length > 0
+                            ? prev.loyaltyTiers
+                            : getDefaultLoyaltyTiers(),
+                      }))
+                    }
+                    className="rounded border-slate-300"
+                  />
+                  <span>Habilitar Programa de Puntos por DNI en este catálogo web</span>
+                </label>
+
+                {Boolean(draftSettings.enableLoyaltyProgram) && (
+                  <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-semibold text-slate-700">
+                          Puntos que suma cada prenda / unidad (por defecto)
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={draftSettings.loyaltyPointsPerUnit ?? 10}
+                          onChange={(e) =>
+                            setDraftSettings((prev) => ({
+                              ...prev,
+                              loyaltyPointsPerUnit: Math.max(
+                                1,
+                                Math.floor(Number(e.target.value) || 0)
+                              ),
+                            }))
+                          }
+                          className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                        />
+                      </div>
+
+                      <div className="flex justify-start sm:justify-end">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDraftSettings((prev) => ({
+                              ...prev,
+                              loyaltyTiers: getDefaultLoyaltyTiers(),
+                            }))
+                          }
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                        >
+                          Cargar escala 10% · 15% · 20% · 30% · 40% · 50%
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-bold text-slate-800">
+                        Niveles de descuento configurados (Puntos mínimos → % OFF)
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                        {(draftSettings.loyaltyTiers || []).map((tier) => (
+                          <div
+                            key={tier.id}
+                            className="flex items-center gap-1.5 p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"
+                          >
+                            <input
+                              type="number"
+                              min="1"
+                              value={tier.minPoints}
+                              onChange={(e) => {
+                                const val = Math.max(1, Math.floor(Number(e.target.value) || 1));
+                                setDraftSettings((prev) => ({
+                                  ...prev,
+                                  loyaltyTiers: (prev.loyaltyTiers || []).map((t) =>
+                                    t.id === tier.id ? { ...t, minPoints: val } : t
+                                  ),
+                                }));
+                              }}
+                              aria-label="Puntos necesarios"
+                              className="w-16 px-2 py-1 bg-white border border-slate-200 rounded text-xs font-mono text-slate-900"
+                            />
+                            <span className="text-[11px] text-slate-500">pts →</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="90"
+                              value={tier.discountPercent}
+                              onChange={(e) => {
+                                const pct = Math.max(
+                                  1,
+                                  Math.min(90, Math.floor(Number(e.target.value) || 1))
+                                );
+                                setDraftSettings((prev) => ({
+                                  ...prev,
+                                  loyaltyTiers: (prev.loyaltyTiers || []).map((t) =>
+                                    t.id === tier.id ? { ...t, discountPercent: pct } : t
+                                  ),
+                                }));
+                              }}
+                              aria-label="Porcentaje de descuento"
+                              className="w-14 px-2 py-1 bg-white border border-slate-200 rounded text-xs font-mono font-bold text-emerald-700"
+                            />
+                            <span className="text-[11px] font-bold text-emerald-700">%</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDraftSettings((prev) => ({
+                                  ...prev,
+                                  loyaltyTiers: (prev.loyaltyTiers || []).filter(
+                                    (t) => t.id !== tier.id
+                                  ),
+                                }))
+                              }
+                              className="ml-auto p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
+                              title="Eliminar nivel"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={newLoyaltyMinPoints}
+                        onChange={(e) => setNewLoyaltyMinPoints(e.target.value)}
+                        placeholder="Puntos (ej. 120)"
+                        className="w-36 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                      />
+                      <input
+                        type="number"
+                        min="1"
+                        max="90"
+                        step="1"
+                        value={newLoyaltyDiscountPercent}
+                        onChange={(e) => setNewLoyaltyDiscountPercent(e.target.value)}
+                        placeholder="% OFF (ej. 25)"
+                        className="w-32 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const pts = Math.floor(Number(newLoyaltyMinPoints));
+                          const pct = Math.floor(Number(newLoyaltyDiscountPercent));
+                          if (!Number.isFinite(pts) || pts <= 0 || !Number.isFinite(pct) || pct <= 0 || pct > 90) {
+                            showToast('Ingresá puntos mayores a 0 y descuento entre 1% y 90%.');
+                            return;
+                          }
+                          const newTier: CatalogLoyaltyTier = {
+                            id: `tier-${Date.now()}`,
+                            minPoints: pts,
+                            discountPercent: pct,
+                            label: `${pct}% OFF`,
+                          };
+                          setDraftSettings((prev) => ({
+                            ...prev,
+                            loyaltyTiers: normalizeLoyaltyTiers([
+                              ...(prev.loyaltyTiers || []),
+                              newTier,
+                            ]),
+                          }));
+                          setNewLoyaltyMinPoints('');
+                          setNewLoyaltyDiscountPercent('');
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer"
+                      >
+                        + Agregar nivel
+                      </button>
+                    </div>
+
+                    <label className="inline-flex items-start gap-2 pt-2 border-t border-slate-100 text-xs font-medium text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={draftSettings.loyaltyRestrictRedeemMethods !== false}
+                        onChange={(e) =>
+                          setDraftSettings((prev) => ({
+                            ...prev,
+                            loyaltyRestrictRedeemMethods: e.target.checked,
+                          }))
+                        }
+                        className="rounded border-slate-300 mt-0.5"
+                      />
+                      <span>
+                        Permitir canjear puntos para descuento solo con <strong>retiro en el local</strong>,{' '}
+                        <strong>transferencia bancaria</strong> o <strong>Dinero en cuenta (Mercado Pago)</strong>{' '}
+                        (al confirmar el pedido los puntos canjeados se descuentan automáticamente del DNI)
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -2724,6 +6932,86 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* Additional Multi-Photo Gallery (up to 3 extra = 4 total) */}
+                <div className="pt-2 border-t border-slate-100 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      Galería de fotos extra ({productAdditionalImages.length}/3 adicionales)
+                    </span>
+                    <input
+                      ref={galleryFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleAdditionalGalleryUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      disabled={isCompressingImage || productAdditionalImages.length >= 3}
+                      onClick={() => galleryFileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Agregar más fotos</span>
+                    </button>
+                  </div>
+
+                  {productAdditionalImages.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {productAdditionalImages.map((imgSrc, gIdx) => (
+                        <div
+                          key={`${gIdx}-${imgSrc.slice(0, 24)}`}
+                          className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200 bg-slate-100"
+                        >
+                          <img
+                            src={imgSrc}
+                            alt={`Galería ${gIdx + 2}`}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setProductAdditionalImages((prev) =>
+                                prev.filter((_, idx) => idx !== gIdx)
+                              )
+                            }
+                            aria-label="Quitar foto adicional"
+                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-slate-950/80 text-white flex items-center justify-center text-[10px] cursor-pointer"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {productAdditionalImages.length < 3 && (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="url"
+                        value={additionalImageUrlInput}
+                        onChange={(e) => setAdditionalImageUrlInput(e.target.value)}
+                        placeholder="O pegá URL de otra foto de detalle..."
+                        className="flex-1 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-800"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const clean = additionalImageUrlInput.trim();
+                          if (!clean) return;
+                          setProductAdditionalImages((prev) => [...prev, clean].slice(0, 3));
+                          setAdditionalImageUrlInput('');
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 text-white text-[11px] font-semibold cursor-pointer"
+                      >
+                        + URL
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2773,57 +7061,212 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-slate-700">
-                    Cantidad en stock
+                    {productVariants.length > 0
+                      ? 'Stock total (calculado por variantes)'
+                      : 'Cantidad en stock'}
                   </label>
                   <input
                     type="number"
                     min="0"
                     step="1"
-                    value={productStockQuantity}
+                    disabled={productVariants.length > 0}
+                    value={
+                      productVariants.length > 0
+                        ? productVariants.every((v) => v.stockQuantity.trim() !== '')
+                          ? String(
+                              productVariants.reduce(
+                                (sum, v) => sum + Math.max(0, Math.floor(Number(v.stockQuantity) || 0)),
+                                0
+                              )
+                            )
+                          : ''
+                        : productStockQuantity
+                    }
                     onChange={(e) => setProductStockQuantity(e.target.value)}
-                    placeholder="Vacío = stock libre"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                    placeholder={
+                      productVariants.length > 0
+                        ? 'Controlado por cada variante abajo'
+                        : 'Vacío = stock libre'
+                    }
+                    className="w-full px-3 py-2 bg-slate-50 disabled:opacity-70 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
                   />
-                  <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setProductStockQuantity('0')}
-                      className="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold cursor-pointer"
-                    >
-                      Sin stock (0)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setProductStockQuantity((prev) =>
-                          String((Number(prev || 0) || 0) + 5)
-                        )
-                      }
-                      className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
-                    >
-                      +5
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setProductStockQuantity((prev) =>
-                          String((Number(prev || 0) || 0) + 10)
-                        )
-                      }
-                      className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
-                    >
-                      +10
-                    </button>
-                    {productStockQuantity !== '' && (
+                  {productVariants.length === 0 && (
+                    <div className="flex flex-wrap items-center gap-1 pt-0.5">
                       <button
                         type="button"
-                        onClick={() => setProductStockQuantity('')}
-                        className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-semibold cursor-pointer"
+                        onClick={() => setProductStockQuantity('0')}
+                        className="px-2 py-0.5 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold cursor-pointer"
                       >
-                        Stock libre
+                        Sin stock (0)
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setProductStockQuantity((prev) =>
+                            String((Number(prev || 0) || 0) + 5)
+                          )
+                        }
+                        className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
+                      >
+                        +5
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setProductStockQuantity((prev) =>
+                            String((Number(prev || 0) || 0) + 10)
+                          )
+                        }
+                        className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
+                      >
+                        +10
+                      </button>
+                      {productStockQuantity !== '' && (
+                        <button
+                          type="button"
+                          onClick={() => setProductStockQuantity('')}
+                          className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-semibold cursor-pointer"
+                        >
+                          Stock libre
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Variantes de Producto (Talle / Color / Medida) con Stock Propio */}
+                <div className="sm:col-span-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-bold text-slate-900">
+                        Variantes con stock propio (Talle / Color / Medida)
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Opcional: ideal para Indumentaria o Calzado. Cada opción lleva su propio stock y el cliente la elige antes de agregar al carrito.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setProductVariants((prev) => {
+                            const existingLabels = new Set(prev.map((x) => x.label.toLowerCase()));
+                            const toAdd = ['S', 'M', 'L', 'XL']
+                              .filter((l) => !existingLabels.has(l.toLowerCase()))
+                              .map((l, idx) => ({
+                                id: `var-${Date.now()}-${idx}-${l}`,
+                                label: l,
+                                stockQuantity: '1',
+                                sku: '',
+                                price: '',
+                              }));
+                            return [...prev, ...toAdd];
+                          })
+                        }
+                        className="px-2 py-1 rounded-lg bg-white border border-slate-200 hover:border-[#0B1933] text-[10px] font-bold text-slate-700 cursor-pointer"
+                      >
+                        + Talles S–XL
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setProductVariants((prev) => [
+                            ...prev,
+                            {
+                              id: `var-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                              label: '',
+                              stockQuantity: '1',
+                              sku: '',
+                              price: '',
+                            },
+                          ])
+                        }
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[#0B1933] text-white text-[10px] font-bold cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Agregar variante</span>
+                      </button>
+                    </div>
                   </div>
+
+                  {productVariants.length > 0 && (
+                    <div className="space-y-2">
+                      {productVariants.map((draftVar, idx) => (
+                        <div
+                          key={draftVar.id || idx}
+                          className="grid grid-cols-12 gap-1.5 items-center bg-white border border-slate-200 rounded-lg p-2"
+                        >
+                          <input
+                            type="text"
+                            value={draftVar.label}
+                            onChange={(e) =>
+                              setProductVariants((prev) =>
+                                prev.map((v, i) =>
+                                  i === idx ? { ...v, label: e.target.value } : v
+                                )
+                              )
+                            }
+                            placeholder="Talle / Color (ej. Negro M)"
+                            className="col-span-5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-slate-900"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={draftVar.stockQuantity}
+                            onChange={(e) =>
+                              setProductVariants((prev) =>
+                                prev.map((v, i) =>
+                                  i === idx ? { ...v, stockQuantity: e.target.value } : v
+                                )
+                              )
+                            }
+                            placeholder="Stock"
+                            title="Stock de esta variante (0 = Sin stock, vacío = libre)"
+                            className="col-span-2 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-mono text-slate-900"
+                          />
+                          <input
+                            type="text"
+                            value={draftVar.sku}
+                            onChange={(e) =>
+                              setProductVariants((prev) =>
+                                prev.map((v, i) => (i === idx ? { ...v, sku: e.target.value } : v))
+                              )
+                            }
+                            placeholder="Cód."
+                            title="Código / SKU opcional de esta variante"
+                            className="col-span-2 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-mono text-slate-900"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={draftVar.price}
+                            onChange={(e) =>
+                              setProductVariants((prev) =>
+                                prev.map((v, i) =>
+                                  i === idx ? { ...v, price: e.target.value } : v
+                                )
+                              )
+                            }
+                            placeholder="$ opc."
+                            title="Precio opcional para esta variante (vacío = usa precio base)"
+                            className="col-span-2 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-mono text-slate-900"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setProductVariants((prev) => prev.filter((_, i) => i !== idx))
+                            }
+                            title="Quitar variante"
+                            className="col-span-1 p-1 text-slate-400 hover:text-rose-600 flex items-center justify-center cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -2837,6 +7280,71 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     placeholder="Ej. Unidad, Bulto x12, Talle L"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900"
                   />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Alerta stock bajo (opcional)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={productLowStockThreshold}
+                    onChange={(e) => setProductLowStockThreshold(e.target.value)}
+                    placeholder={`Por defecto: ${defaultLowThreshold} u.`}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                  />
+                </div>
+
+                {Boolean(settings.enableLoyaltyProgram || draftSettings.enableLoyaltyProgram) && (
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                      <Award className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>Puntos por unidad (Programa DNI)</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={productLoyaltyPoints}
+                      onChange={(e) => setProductLoyaltyPoints(e.target.value)}
+                      placeholder={`Por defecto tienda: ${settings.loyaltyPointsPerUnit ?? 10} pts`}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                    />
+                  </div>
+                )}
+
+                {/* Wholesale Tier (Precio Mayorista por Cantidad) */}
+                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-indigo-50/50 border border-indigo-200/80">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-800">
+                      Cant. mínima precio mayorista (opcional)
+                    </label>
+                    <input
+                      type="number"
+                      min="2"
+                      step="1"
+                      value={productWholesaleMinQty}
+                      onChange={(e) => setProductWholesaleMinQty(e.target.value)}
+                      placeholder="Ej. 3 (desde 3 unidades)"
+                      className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-800">
+                      Precio unitario mayorista ({currency})
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={productWholesalePrice}
+                      onChange={(e) => setProductWholesalePrice(e.target.value)}
+                      placeholder="Ej. 8500.00"
+                      className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                    />
+                  </div>
                 </div>
 
                 <div className="sm:col-span-2 space-y-1.5">
@@ -2979,6 +7487,186 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         </div>
       )}
 
+      {/* MODAL IMPORTACIÓN MASIVA DESDE EXCEL / CSV */}
+      {isCsvImportModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="w-5 h-5 text-emerald-700" />
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Carga Masiva de Productos desde Excel / CSV
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Rubro activo: <strong>{rubroPreset.shortLabel}</strong> · Subí un archivo CSV o pegá filas directo desde Excel / Google Sheets.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCsvImportModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                <div className="space-y-0.5">
+                  <div className="font-bold text-slate-900">
+                    Columnas aceptadas (con o sin encabezado):
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-600">
+                    nombre · precio · categoria · subfiltros (separados por |) · sku · stock · unidad · descripcion · minimo_mayorista · precio_mayorista · disponible
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleDownloadCsvTemplate}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Descargar plantilla Excel/CSV</span>
+                  </button>
+                  <input
+                    ref={csvFileInputRef}
+                    type="file"
+                    accept=".csv,.tsv,.txt"
+                    onChange={handleCsvFileSelected}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => csvFileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Subir archivo .CSV</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">
+                  O pegá directamente tus filas copiadas desde Excel / Google Sheets
+                </label>
+                <textarea
+                  rows={5}
+                  value={csvRawInput}
+                  onChange={(e) => setCsvRawInput(e.target.value)}
+                  placeholder={`nombre;precio;categoria;subfiltros;sku;stock;unidad\nRemera Básica;12500;Hombres;Remeras|Verano;REM-01;30;Unidad\nBuzo Friza;28900;Mujeres;Buzos|Invierno;BUZ-02;12;Unidad`}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:bg-white"
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-3">
+                  <span className="font-semibold text-slate-700">Si ya existe el SKU o Nombre:</span>
+                  <select
+                    value={csvConflictMode}
+                    onChange={(e) =>
+                      setCsvConflictMode(e.target.value as 'upsert' | 'only_new')
+                    }
+                    className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-900"
+                  >
+                    <option value="upsert">Actualizar precio/stock existente y agregar nuevos</option>
+                    <option value="only_new">Solo agregar nuevos (omitir repetidos)</option>
+                  </select>
+                </div>
+
+                {csvRawInput.trim() && (
+                  <div className="text-xs font-mono tabular-nums">
+                    <span className="font-bold text-emerald-700">
+                      {parsedCsvPreview.validRows.length} válida(s)
+                    </span>
+                    {parsedCsvPreview.errors.length > 0 && (
+                      <span className="ml-2 font-bold text-rose-700">
+                        · {parsedCsvPreview.errors.length} con error
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {parsedCsvPreview.errors.length > 0 && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 space-y-1 text-[11px] text-rose-900">
+                  <div className="font-bold">Filas omitidas por formato:</div>
+                  {parsedCsvPreview.errors.slice(0, 4).map((err) => (
+                    <div key={err.rowNumber} className="truncate font-mono">
+                      Fila {err.rowNumber}: {err.reason}
+                    </div>
+                  ))}
+                  {parsedCsvPreview.errors.length > 4 && (
+                    <div>... y {parsedCsvPreview.errors.length - 4} fila(s) más.</div>
+                  )}
+                </div>
+              )}
+
+              {parsedCsvPreview.validRows.length > 0 && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="max-h-56 overflow-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-[11px] text-slate-600 sticky top-0">
+                        <tr>
+                          <th className="px-3 py-2 font-bold">Producto</th>
+                          <th className="px-3 py-2 font-bold">Categoría</th>
+                          <th className="px-3 py-2 font-bold">SKU</th>
+                          <th className="px-3 py-2 font-bold text-right">Stock</th>
+                          <th className="px-3 py-2 font-bold text-right">Precio</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {parsedCsvPreview.validRows.slice(0, 40).map((r) => (
+                          <tr key={r.rowNumber} className="bg-white">
+                            <td className="px-3 py-1.5 font-semibold text-slate-900 max-w-[200px] truncate">
+                              {r.name}
+                            </td>
+                            <td className="px-3 py-1.5 text-slate-600">{r.category}</td>
+                            <td className="px-3 py-1.5 font-mono text-slate-500">{r.sku || '-'}</td>
+                            <td className="px-3 py-1.5 font-mono tabular-nums text-right text-slate-700">
+                              {typeof r.stockQuantity === 'number' ? `${r.stockQuantity} u.` : 'Libre'}
+                            </td>
+                            <td className="px-3 py-1.5 font-mono tabular-nums text-right font-bold text-slate-900">
+                              {formatCurrency(r.price, currency)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {parsedCsvPreview.validRows.length > 40 && (
+                    <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500">
+                      Mostrando 40 de {parsedCsvPreview.validRows.length} filas listas para importar.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-slate-100 flex items-center justify-end gap-2 bg-slate-50/50">
+              <button
+                type="button"
+                onClick={() => setIsCsvImportModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={parsedCsvPreview.validRows.length === 0}
+                onClick={handleConfirmCsvImport}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-40 text-white cursor-pointer"
+              >
+                Importar {parsedCsvPreview.validRows.length} producto(s)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL DETALLE DE VENTA WEB (FOTOS AMPLIABLES Y CÓDIGOS) */}
       <WebOrderDetailModal
         isOpen={Boolean(activeOrderForDetail)}
@@ -2991,7 +7679,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         onOpenReceipt={(ord) => handleDispatchAndOpenReceipt(ord)}
         onBillOrder={onBillOrder}
         onChangePaymentMethod={handleUpdateOrderPaymentMethod}
+        onConfirmPayment={handleConfirmOrderPayment}
+        onSendProcessWhatsApp={handleSendOrderProcessWhatsApp}
         onWhatsAppCollect={handleWhatsAppCustomerCollectPayment}
+        onVerifyTransferReceipt={handleVerifyOrderTransferReceipt}
       />
     </div>
   );

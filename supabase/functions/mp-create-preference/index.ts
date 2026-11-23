@@ -27,7 +27,153 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
     const body = await req.json();
-    const scope = body?.scope === 'client_order' ? 'client_order' : 'tenant_subscription';
+    const scope =
+      body?.scope === 'client_order'
+        ? 'client_order'
+        : body?.scope === 'catalog_order'
+        ? 'catalog_order'
+        : 'tenant_subscription';
+
+    if (scope === 'catalog_order') {
+      const orderId = String(body?.orderId || '').trim();
+      const catalogHandle = String(body?.catalogHandle || '').trim();
+      const mpSubOption =
+        body?.mpSubOption === 'tarjetas_todos' ? 'tarjetas_todos' : 'dinero_en_cuenta';
+      const rawReturnUrl = String(body?.returnUrl || '').trim();
+      const safeBaseReturn =
+        rawReturnUrl && /^https?:\/\//i.test(rawReturnUrl) ? rawReturnUrl.split('?')[0] : '';
+
+      if (!orderId) {
+        return jsonResponse({ ok: false, error: 'Falta orderId.' }, 400);
+      }
+
+      const publicOrderKey = `catalog_order_${orderId}`;
+      const { data: orderRow } = await supabase
+        .from('app_cloud_store')
+        .select('value')
+        .eq('key', publicOrderKey)
+        .maybeSingle();
+
+      const order = orderRow?.value;
+      if (!order) {
+        return jsonResponse({ ok: false, error: 'Pedido web no encontrado.' }, 404);
+      }
+
+      const tenantId = String(order.tenantId || body?.tenantId || '').trim();
+      let accessToken = '';
+      if (tenantId) {
+        const { data: merchantRow } = await supabase
+          .from('app_cloud_store')
+          .select('value')
+          .eq('key', `merchant_mp_token_${tenantId}`)
+          .maybeSingle();
+        accessToken = String(merchantRow?.value?.accessToken || '').trim();
+      }
+      if (!accessToken) {
+        accessToken = (Deno.env.get('MERCADOPAGO_ACCESS_TOKEN') || '').trim();
+      }
+
+      if (!accessToken) {
+        return jsonResponse({ ok: false, fallbackReason: 'missing_access_token' });
+      }
+
+      const handleQuery = catalogHandle ? `catalog=${encodeURIComponent(catalogHandle)}&` : '';
+      const successUrl = safeBaseReturn
+        ? `${safeBaseReturn}?${handleQuery}order_id=${encodeURIComponent(orderId)}&mp_status=approved`
+        : undefined;
+      const notificationUrl = `${supabaseUrl}/functions/v1/mp-webhook?scope=catalog_order&orderId=${encodeURIComponent(orderId)}&tenantId=${encodeURIComponent(tenantId)}`;
+
+      const itemsList = Array.isArray(order.items) && order.items.length > 0
+        ? order.items.map((it: any) => ({
+            id: String(it.productId || order.orderNumber),
+            title: String(it.productName || 'Producto').slice(0, 200),
+            quantity: Math.max(1, Math.floor(Number(it.quantity || 1))),
+            currency_id: 'ARS',
+            unit_price: Math.round(Number(it.unitPrice || 0) * 100) / 100,
+          }))
+        : [
+            {
+              id: order.orderNumber || orderId,
+              title: `${order.storeName || 'Tienda'} · Pedido #${order.orderNumber}`,
+              quantity: 1,
+              currency_id: 'ARS',
+              unit_price: Math.round(Number(order.totalAmount || 0) * 100) / 100,
+            },
+          ];
+
+      const prefBody: Record<string, unknown> = {
+        items: itemsList,
+        external_reference: `catord::${orderId}`,
+        notification_url: notificationUrl,
+        ...(mpSubOption === 'dinero_en_cuenta'
+          ? {
+              purpose: 'wallet_purchase',
+              payment_methods: {
+                excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }],
+              },
+            }
+          : {}),
+        ...(successUrl
+          ? {
+              back_urls: {
+                success: successUrl,
+                pending: `${safeBaseReturn}?${handleQuery}order_id=${encodeURIComponent(orderId)}&mp_status=pending`,
+                failure: `${safeBaseReturn}?${handleQuery}order_id=${encodeURIComponent(orderId)}&mp_status=failure`,
+              },
+              auto_return: 'approved',
+            }
+          : {}),
+      };
+
+      const mpRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(prefBody),
+      });
+
+      const mpData = await mpRes.json();
+      if (!mpRes.ok || !mpData?.init_point) {
+        return jsonResponse({
+          ok: false,
+          fallbackReason: 'mp_api_error',
+          error: mpData?.message || 'Mercado Pago rechazó la creación de la preferencia.',
+        });
+      }
+
+      const nowIso = new Date().toISOString();
+      const updatedOrder = {
+        ...order,
+        mpSubOption,
+        mpInitPoint: mpData.init_point,
+        mpPreferenceId: mpData.id,
+        paymentStatus: order.paymentStatus === 'acreditado' ? 'acreditado' : 'en_proceso',
+        updatedAt: nowIso,
+      };
+
+      await supabase
+        .from('app_cloud_store')
+        .update({ value: updatedOrder, updated_at: nowIso })
+        .eq('key', publicOrderKey);
+
+      if (tenantId) {
+        await supabase
+          .from('app_cloud_store')
+          .update({ value: updatedOrder, updated_at: nowIso })
+          .eq('key', `rec:${tenantId}:catalogOrders:${orderId}`);
+      }
+
+      return jsonResponse({
+        ok: true,
+        mode: 'mercadopago_api',
+        initPoint: mpData.init_point,
+        sandboxInitPoint: mpData.sandbox_init_point,
+        preferenceId: mpData.id,
+        order: updatedOrder,
+      });
+    }
 
     if (scope === 'tenant_subscription') {
       const tenantId = String(body?.tenantId || '').trim();

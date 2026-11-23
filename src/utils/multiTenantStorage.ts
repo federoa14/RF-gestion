@@ -17,6 +17,8 @@ import {
   CatalogProduct,
   CatalogPickupOrder,
   CatalogStockAlertRequest,
+  CatalogPromoSubscriber,
+  CatalogLoyaltyAccount,
 } from '../types';
 import { applyRubroProfileToConfig, getRubroProfile } from './businessMode';
 import {
@@ -189,6 +191,8 @@ export interface TenantData {
   catalogProducts?: CatalogProduct[];
   catalogOrders?: CatalogPickupOrder[];
   catalogStockAlerts?: CatalogStockAlertRequest[];
+  catalogPromoSubscribers?: CatalogPromoSubscriber[];
+  catalogLoyaltyAccounts?: CatalogLoyaltyAccount[];
 }
 
 // TENANTS STORAGE
@@ -648,12 +652,16 @@ export function loadTenantData(tenantId: string): TenantData {
       catalogProducts: [],
       catalogOrders: [],
       catalogStockAlerts: [],
+      catalogPromoSubscribers: [],
+      catalogLoyaltyAccounts: [],
     };
   }
 
   if (!data.catalogProducts) data.catalogProducts = [];
   if (!data.catalogOrders) data.catalogOrders = [];
   if (!data.catalogStockAlerts) data.catalogStockAlerts = [];
+  if (!data.catalogPromoSubscribers) data.catalogPromoSubscribers = [];
+  if (!data.catalogLoyaltyAccounts) data.catalogLoyaltyAccounts = [];
   if (!data.catalogSettings) {
     const tenants = loadTenants();
     const currentTenant = tenants.find((t) => t.id === tenantId);
@@ -964,6 +972,8 @@ export function registerSelfServiceTrialTenant(
     catalogProducts: [],
     catalogOrders: [],
     catalogStockAlerts: [],
+    catalogPromoSubscribers: [],
+    catalogLoyaltyAccounts: [],
   });
 
   saveTenants([...tenants, newTenant]);

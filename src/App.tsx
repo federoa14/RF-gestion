@@ -48,7 +48,9 @@ import {
   OnlineCatalogSettings,
   CatalogProduct,
   CatalogPickupOrder,
+  CatalogPromoSubscriber,
   CatalogStockAlertRequest,
+  CatalogLoyaltyAccount,
   PublishedPublicCatalog,
   SaleLineItem,
 } from './types';
@@ -84,6 +86,7 @@ import {
   calculateExcessPaymentAllocation,
 } from './utils/businessMode';
 import { analyzeColdClientsForIndumentaria } from './utils/coldClientsRadar';
+import { applyOrderStockDeltaToProducts } from './utils/catalogStock';
 import { Header } from './components/Header';
 import { SidebarNav } from './components/SidebarNav';
 import { QuickGuideModal } from './components/QuickGuideModal';
@@ -181,14 +184,19 @@ import {
 import { SUPABASE_SYNC_EVENT } from './utils/supabaseSync';
 import { ensureCloudHydrated } from './utils/localInternalDb';
 import {
+  fetchCatalogLoyaltyAccountsForTenantFromSupabase,
   fetchCatalogOrdersForTenantFromSupabase,
+  fetchCatalogPromoSubscribersForTenantFromSupabase,
   fetchCatalogStockAlertsForTenantFromSupabase,
   fetchPendingReconciliationOrdersFromSupabase,
   fetchVerifiedTenantPaymentStatusFromSupabase,
   markClientPaymentOrderReconciledInSupabase,
   publishPublicCatalogToSupabase,
   saveMerchantMpAccessTokenSecret,
+  syncCatalogOrderToSupabase,
+  upsertCatalogLoyaltyAccountToSupabase,
   verifyAndRecordTenantPaymentInSupabase,
+  verifyCatalogTransferReceiptViaServer,
 } from './utils/supabaseServices';
 import {
   executeBlockedChargeAlertDirect,
@@ -276,6 +284,22 @@ export default function App() {
     }
     return [];
   });
+  const [catalogPromoSubscribers, setCatalogPromoSubscribers] = useState<CatalogPromoSubscriber[]>(
+    () => {
+      const user = getCurrentSessionUser();
+      if (user && user.role !== 'superadmin' && user.tenantId) {
+        return loadTenantData(user.tenantId).catalogPromoSubscribers || [];
+      }
+      return [];
+    }
+  );
+  const [catalogLoyaltyAccounts, setCatalogLoyaltyAccounts] = useState<CatalogLoyaltyAccount[]>(() => {
+    const user = getCurrentSessionUser();
+    if (user && user.role !== 'superadmin' && user.tenantId) {
+      return loadTenantData(user.tenantId).catalogLoyaltyAccounts || [];
+    }
+    return [];
+  });
 
   // Helper to load complete dataset for a specific tenant
   const loadDataForTenant = (tenantId: string) => {
@@ -303,6 +327,8 @@ export default function App() {
     setCatalogProducts(data.catalogProducts || []);
     setCatalogOrders(data.catalogOrders || []);
     setCatalogStockAlerts(data.catalogStockAlerts || []);
+    setCatalogPromoSubscribers(data.catalogPromoSubscribers || []);
+    setCatalogLoyaltyAccounts(data.catalogLoyaltyAccounts || []);
   };
 
   // Sync data whenever selected tenant changes (local cache + Supabase cloud refresh)
@@ -395,6 +421,9 @@ export default function App() {
       selectedTenant
     ) {
       void handleRefreshCatalogOrders();
+      if (activeTab === 'catalogo' || activeTab === 'ventas_web') {
+        void handleRefreshCatalogLoyaltyAccounts();
+      }
       if (activeTab === 'catalogo' || activeTab === 'boletas') {
         void handleRefreshCatalogStockAlerts();
       }
@@ -873,7 +902,8 @@ export default function App() {
     overrideConfig?: DistributorConfig
   ) => {
     if (!selectedTenant) return;
-    const cfg = overrideConfig || config;
+    const tenantCfg = loadTenantData(selectedTenant.id).config;
+    const cfg = overrideConfig || tenantCfg || config;
     const activeCatalogRubro =
       selectedTenant.catalogRubro ||
       nextSettings.catalogRubro ||
@@ -921,6 +951,21 @@ export default function App() {
       merchantPaymentBank: cfg.merchantPaymentBank,
       merchantPaymentHolder: cfg.merchantPaymentHolder,
       merchantMpCheckoutLink: cfg.merchantMpCheckoutLink,
+      hasMerchantMpAccessToken: Boolean(cfg.hasMerchantMpAccessToken),
+      cashOrTransferDiscountPercent: nextSettings.cashOrTransferDiscountPercent,
+      coupons: (nextSettings.coupons || []).filter((c) => c.active !== false),
+      enablePromoClub: nextSettings.enablePromoClub !== false,
+      promoClubTitle: nextSettings.promoClubTitle,
+      promoClubIncentive: nextSettings.promoClubIncentive,
+      promoClubWelcomeCoupon: nextSettings.promoClubWelcomeCoupon,
+      promoBanners: (nextSettings.promoBanners || []).filter((b) => b.active !== false),
+      enableLoyaltyProgram: Boolean(nextSettings.enableLoyaltyProgram),
+      loyaltyPointsPerUnit:
+        typeof nextSettings.loyaltyPointsPerUnit === 'number'
+          ? nextSettings.loyaltyPointsPerUnit
+          : 10,
+      loyaltyTiers: nextSettings.loyaltyTiers,
+      loyaltyRestrictRedeemMethods: nextSettings.loyaltyRestrictRedeemMethods !== false,
       currencySymbol: nextSettings.currencySymbol || cfg.currencySymbol || '$',
       products: scopedProducts,
       updatedAt: new Date().toISOString(),
@@ -934,7 +979,7 @@ export default function App() {
       const cur = loadTenantData(selectedTenant.id);
       cur.catalogSettings = updated;
       saveTenantData(selectedTenant.id, cur);
-      publishCatalogSnapshot(updated, cur.catalogProducts || catalogProducts);
+      publishCatalogSnapshot(updated, cur.catalogProducts || catalogProducts, cur.config);
     }
   };
 
@@ -944,7 +989,7 @@ export default function App() {
       const cur = loadTenantData(selectedTenant.id);
       cur.catalogProducts = updated;
       saveTenantData(selectedTenant.id, cur);
-      publishCatalogSnapshot(cur.catalogSettings || catalogSettings, updated);
+      publishCatalogSnapshot(cur.catalogSettings || catalogSettings, updated, cur.config);
     }
   };
 
@@ -952,8 +997,22 @@ export default function App() {
     setCatalogOrders(updated);
     if (selectedTenant) {
       const cur = loadTenantData(selectedTenant.id);
+      const prevById = new Map((cur.catalogOrders || catalogOrders).map((o) => [o.id, o]));
       cur.catalogOrders = updated;
       saveTenantData(selectedTenant.id, cur);
+      updated.forEach((order) => {
+        const prev = prevById.get(order.id);
+        if (
+          !prev ||
+          prev.updatedAt !== order.updatedAt ||
+          prev.status !== order.status ||
+          prev.paymentStatus !== order.paymentStatus ||
+          prev.confirmedPaymentMethod !== order.confirmedPaymentMethod ||
+          (prev.stageNotifications?.length || 0) !== (order.stageNotifications?.length || 0)
+        ) {
+          void syncCatalogOrderToSupabase(order);
+        }
+      });
     }
   };
 
@@ -986,6 +1045,134 @@ export default function App() {
     handleSaveCatalogStockAlerts(merged);
   };
 
+  const handleSaveCatalogPromoSubscribers = (updated: CatalogPromoSubscriber[]) => {
+    setCatalogPromoSubscribers(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.catalogPromoSubscribers = updated;
+      saveTenantData(selectedTenant.id, cur);
+    }
+  };
+
+  const handleRefreshCatalogPromoSubscribers = async () => {
+    if (!selectedTenant) return;
+    const remoteSubs = await fetchCatalogPromoSubscribersForTenantFromSupabase(selectedTenant.id);
+    if (remoteSubs.length === 0) return;
+    const curTenantData = loadTenantData(selectedTenant.id);
+    const localSubs = curTenantData.catalogPromoSubscribers || catalogPromoSubscribers;
+    const mergedMap = new Map<string, CatalogPromoSubscriber>();
+    for (const s of localSubs) mergedMap.set(s.id, s);
+    for (const r of remoteSubs) {
+      const existing = mergedMap.get(r.id);
+      if (!existing || ((r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt))) {
+        mergedMap.set(r.id, r);
+      }
+    }
+    const merged = Array.from(mergedMap.values()).sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
+    handleSaveCatalogPromoSubscribers(merged);
+  };
+
+  const handleSaveCatalogLoyaltyAccounts = (updated: CatalogLoyaltyAccount[]) => {
+    setCatalogLoyaltyAccounts(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      const prevById = new Map(
+        (cur.catalogLoyaltyAccounts || catalogLoyaltyAccounts).map((acc) => [acc.id, acc])
+      );
+      cur.catalogLoyaltyAccounts = updated;
+      saveTenantData(selectedTenant.id, cur);
+      updated.forEach((acc) => {
+        const prev = prevById.get(acc.id);
+        if (!prev || prev.updatedAt !== acc.updatedAt || prev.pointsBalance !== acc.pointsBalance) {
+          void upsertCatalogLoyaltyAccountToSupabase(acc);
+        }
+      });
+    }
+  };
+
+  const handleRefreshCatalogLoyaltyAccounts = async () => {
+    if (!selectedTenant) return;
+    const remoteAccounts = await fetchCatalogLoyaltyAccountsForTenantFromSupabase(selectedTenant.id);
+    const curTenantData = loadTenantData(selectedTenant.id);
+    const localAccounts = curTenantData.catalogLoyaltyAccounts || catalogLoyaltyAccounts;
+    if (remoteAccounts.length === 0 && localAccounts.length === 0) return;
+    const mergedMap = new Map<string, CatalogLoyaltyAccount>();
+    for (const acc of localAccounts) mergedMap.set(acc.dni, acc);
+    for (const r of remoteAccounts) {
+      const existing = mergedMap.get(r.dni);
+      if (!existing || (r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt)) {
+        mergedMap.set(r.dni, r);
+      }
+    }
+    const merged = Array.from(mergedMap.values()).sort((a, b) =>
+      (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+    );
+    setCatalogLoyaltyAccounts(merged);
+    const cur = loadTenantData(selectedTenant.id);
+    cur.catalogLoyaltyAccounts = merged;
+    saveTenantData(selectedTenant.id, cur);
+  };
+
+  const handleVerifyWebOrderTransferReceipt = async (order: CatalogPickupOrder) => {
+    if (!order.transferReceiptImageUrl) {
+      showToast('Este pedido no tiene imagen de comprobante adjunta.');
+      return;
+    }
+    const knownUsedOperationIds = catalogOrders
+      .filter((o) => o.id !== order.id && o.status !== 'cancelado' && (o.transferOperationId || o.transferReference))
+      .map((o) => ({
+        orderId: o.id,
+        operationId: String(o.transferOperationId || o.transferReference || '').trim(),
+      }))
+      .filter((entry) => Boolean(entry.operationId));
+
+    const res = await verifyCatalogTransferReceiptViaServer({
+      tenantId: order.tenantId,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      storeName: order.storeName || config.distributorName || 'Comercio',
+      expectedAmount: order.totalAmount,
+      alias: config.merchantPaymentAlias,
+      cvu: config.merchantPaymentCvu,
+      holderName: config.merchantPaymentHolder,
+      imageBase64: order.transferReceiptImageUrl,
+      knownUsedOperationIds,
+    });
+
+    const now = new Date().toISOString();
+    const updatedOrder: CatalogPickupOrder = {
+      ...order,
+      transferOperationId: res.operationId || order.transferOperationId,
+      transferReference: order.transferReference || res.operationId,
+      transferVerifiedAt: res.approved ? res.verifiedAt || now : order.transferVerifiedAt,
+      transferVerificationSummary: res.verificationSummary || res.message,
+      transferVerificationStatus: res.duplicate
+        ? 'duplicado'
+        : res.approved
+        ? 'verificado_auto'
+        : res.success
+        ? 'rechazado'
+        : 'pendiente',
+      paymentStatus: res.approved
+        ? 'acreditado'
+        : order.paymentStatus || 'comprobante_en_revision',
+      confirmedPaymentMethod: res.approved
+        ? order.confirmedPaymentMethod || 'transferencia'
+        : order.confirmedPaymentMethod,
+      updatedAt: now,
+    };
+    handleSaveCatalogOrders(catalogOrders.map((o) => (o.id === order.id ? updatedOrder : o)));
+    if (res.duplicate) {
+      showToast(res.message || 'Comprobante duplicado: ya fue usado en otro pedido.');
+    } else if (res.approved) {
+      showToast(`Comprobante verificado y acreditado automáticamente (${res.operationId || 'OK'}).`);
+    } else {
+      showToast(res.message || 'No se pudo validar automáticamente; revisá los datos del comprobante.');
+    }
+  };
+
   const handleMarkWebOrderRetirado = (order: CatalogPickupOrder) => {
     const now = new Date().toISOString();
     const receiptNumber =
@@ -1002,6 +1189,10 @@ export default function App() {
       dispatchReceiptNumber: receiptNumber,
       dispatchedAt: order.dispatchedAt || now,
       confirmedPaymentMethod: resolvedPayment,
+      paymentStatus:
+        resolvedPayment === 'fiado'
+          ? order.paymentStatus || 'pendiente'
+          : 'acreditado',
       updatedAt: now,
     };
 
@@ -1030,6 +1221,8 @@ export default function App() {
     const paymentMethodLabel =
       paymentKey === 'transferencia'
         ? 'Transferencia bancaria / Alias'
+        : paymentKey === 'mercadopago_dinero_cuenta'
+        ? 'Mercado Pago (Dinero en cuenta)'
         : paymentKey === 'link_pago'
         ? 'Link de Pago / Mercado Pago'
         : paymentKey === 'efectivo'
@@ -1064,20 +1257,24 @@ export default function App() {
       totalPaidAccumulated: isPaidOnDispatch ? order.totalAmount : 0,
       remainingBalance: isPaidOnDispatch ? 0 : order.totalAmount,
       receivedBy: activeAdmin?.name || currentUser?.fullName || 'Administración',
-      notes: order.notes,
+      notes: order.customerSpecificRequest || order.notes,
       isFullSettlement: isPaidOnDispatch,
       isDispatchReceipt: true,
       dispatchModalityLabel: isDelivery ? 'Envío a domicilio' : 'Retiro en tienda',
       deliveryAddress: addressForReceipt,
       hideUnitModeTag: true,
-      items: order.items.map((it, idx) => ({
-        id: `web-ord-rcpt-${order.id}-${idx}`,
-        name: it.unitLabel ? `${it.productName} (${it.unitLabel})` : it.productName,
-        quantity: it.quantity,
-        unitPrice: it.unitPrice,
-        subtotal: it.subtotal,
-        paymentMode: paymentKey === 'fiado' ? 'un_pago_fiado' : 'contado_hoy',
-      })),
+      items: order.items.map((it, idx) => {
+        const variantSuffix = it.variantLabel ? ` · ${it.variantLabel}` : '';
+        const unitSuffix = it.unitLabel ? ` (${it.unitLabel})` : '';
+        return {
+          id: `web-ord-rcpt-${order.id}-${idx}`,
+          name: `${it.productName}${variantSuffix}${unitSuffix}`,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          subtotal: it.subtotal,
+          paymentMode: paymentKey === 'fiado' ? 'un_pago_fiado' : 'contado_hoy',
+        };
+      }),
       initialPhone: order.customerPhone,
       saleModeLabel: isDelivery
         ? 'COMPROBANTE VENTA WEB · ENVÍO A DOMICILIO'
@@ -1095,19 +1292,14 @@ export default function App() {
     const mergedMap = new Map<string, CatalogPickupOrder>();
     for (const o of currentLocalOrders) mergedMap.set(o.id, o);
 
-    const qtyToDeductByProductId = new Map<string, number>();
+    const itemsToDeduct: CatalogPickupOrder['items'] = [];
 
     for (const r of remoteOrders) {
       const existing = mergedMap.get(r.id);
       if (!existing) {
         const shouldDeduct = !r.stockDeducted && r.status !== 'cancelado';
-        if (shouldDeduct) {
-          r.items.forEach((it) => {
-            qtyToDeductByProductId.set(
-              it.productId,
-              (qtyToDeductByProductId.get(it.productId) || 0) + it.quantity
-            );
-          });
+        if (shouldDeduct && Array.isArray(r.items)) {
+          itemsToDeduct.push(...r.items);
         }
         mergedMap.set(r.id, shouldDeduct ? { ...r, stockDeducted: true } : r);
       } else if ((r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt)) {
@@ -1115,22 +1307,14 @@ export default function App() {
       }
     }
 
-    if (qtyToDeductByProductId.size > 0) {
+    if (itemsToDeduct.length > 0) {
       const baseProducts = curTenantData.catalogProducts || catalogProducts;
-      let productsChanged = false;
-      const nowIso = new Date().toISOString();
-      const updatedProducts = baseProducts.map((p) => {
-        if (typeof p.stockQuantity !== 'number') return p;
-        const deduct = qtyToDeductByProductId.get(p.id) || 0;
-        if (deduct <= 0) return p;
-        productsChanged = true;
-        return {
-          ...p,
-          stockQuantity: Math.max(0, Math.floor(p.stockQuantity - deduct)),
-          updatedAt: nowIso,
-        };
-      });
-      if (productsChanged) {
+      const { updatedProducts, changed } = applyOrderStockDeltaToProducts(
+        baseProducts,
+        itemsToDeduct,
+        'deduct'
+      );
+      if (changed) {
         handleSaveCatalogProducts(updatedProducts);
       }
     }
@@ -1212,23 +1396,28 @@ export default function App() {
     const dueDate = addDaysToDate(todayStr, termDays);
     const boletaNumber = `WEB-${Date.now().toString().slice(-6)}`;
 
-    const lineItems: SaleLineItem[] = order.items.map((it, idx) => ({
-      id: `item-${Date.now()}-${idx}`,
-      name: it.unitLabel ? `${it.productName} (${it.unitLabel})` : it.productName,
-      quantity: it.quantity,
-      unitPrice: it.unitPrice,
-      subtotal: it.subtotal,
-      paymentMode: 'contado_hoy',
-    }));
+    const lineItems: SaleLineItem[] = order.items.map((it, idx) => {
+      const variantSuffix = it.variantLabel ? ` · ${it.variantLabel}` : '';
+      const unitSuffix = it.unitLabel ? ` (${it.unitLabel})` : '';
+      return {
+        id: `item-${Date.now()}-${idx}`,
+        name: `${it.productName}${variantSuffix}${unitSuffix}`,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        subtotal: it.subtotal,
+        paymentMode: 'contado_hoy',
+      };
+    });
 
     const itemSummary = order.items
-      .map((it) => `${it.quantity}x ${it.productName}`)
+      .map((it) => `${it.quantity}x ${it.productName}${it.variantLabel ? ` (${it.variantLabel})` : ''}`)
       .join(', ');
 
     const modalityLabel =
       order.deliveryMethod === 'envio'
         ? `Envío a domicilio: ${order.deliveryAddress || 'A coordinar'}`
         : 'Retiro en tienda';
+    const orderObs = (order.customerSpecificRequest || order.notes || '').trim();
 
     const newBoleta: Boleta = {
       id: `bol-${Date.now()}`,
@@ -1248,7 +1437,7 @@ export default function App() {
       termDays,
       dueDate,
       notes: `Pedido Catálogo #${order.orderNumber} (${modalityLabel})${
-        order.notes ? ` · ${order.notes}` : ''
+        orderObs ? ` · Obs: ${orderObs}` : ''
       }`,
       isSigned: false,
       status: 'pending',
@@ -1461,6 +1650,11 @@ export default function App() {
     const { merchantMpAccessToken: _stripped, ...cleanUpdated } = updated;
     if (rawMpToken && selectedTenant) {
       void saveMerchantMpAccessTokenSecret(selectedTenant.id, rawMpToken);
+      void fetch('/api/merchant/mp-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId: selectedTenant.id, mpAccessToken: rawMpToken }),
+      }).catch(() => {});
     }
     const normalizedConfig: DistributorConfig = {
       ...cleanUpdated,
@@ -4299,13 +4493,28 @@ export default function App() {
               products={catalogProducts}
               orders={catalogOrders}
               stockAlerts={catalogStockAlerts}
+              promoSubscribers={catalogPromoSubscribers}
+              loyaltyAccounts={catalogLoyaltyAccounts}
               activeUserName={activeAdmin?.name || currentUser?.fullName || 'Administración'}
               onSaveSettings={handleSaveCatalogSettings}
+              onSaveMerchantPaymentConfig={(paymentCfg) => {
+                persistConfigUpdate(
+                  {
+                    ...config,
+                    ...paymentCfg,
+                  },
+                  'Datos de Alias, CVU y Mercado Pago del catálogo actualizados.'
+                );
+              }}
               onSaveProducts={handleSaveCatalogProducts}
               onSaveOrders={handleSaveCatalogOrders}
               onSaveStockAlerts={handleSaveCatalogStockAlerts}
+              onSavePromoSubscribers={handleSaveCatalogPromoSubscribers}
+              onSaveLoyaltyAccounts={handleSaveCatalogLoyaltyAccounts}
               onRefreshOrders={handleRefreshCatalogOrders}
               onRefreshStockAlerts={handleRefreshCatalogStockAlerts}
+              onRefreshPromoSubscribers={handleRefreshCatalogPromoSubscribers}
+              onRefreshLoyaltyAccounts={handleRefreshCatalogLoyaltyAccounts}
               onBillOrder={handleBillCatalogOrder}
               onOpenReceipt={(receipt) => setActiveReceiptData(receipt)}
               onOpenPublicPreview={(handle) => {
@@ -4620,6 +4829,7 @@ export default function App() {
         onOpenReceipt={handleOpenReceiptForWebOrder}
         onBillOrder={handleBillCatalogOrder}
         onChangePaymentMethod={handleUpdateWebOrderPaymentMethod}
+        onVerifyTransferReceipt={handleVerifyWebOrderTransferReceipt}
       />
     </div>
   );

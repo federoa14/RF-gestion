@@ -14,6 +14,11 @@ import {
   MessageCircle,
   Barcode,
   PackageCheck,
+  FileCheck2,
+  Send,
+  ShieldCheck,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
@@ -21,7 +26,11 @@ import {
   DistributorConfig,
 } from '../types';
 import { formatCurrency } from '../utils/alerts';
-import { createWhatsAppUrl } from '../utils/whatsapp';
+import {
+  CatalogOrderProcessStage,
+  createWhatsAppUrl,
+  generateCatalogOrderCustomerProcessMessage,
+} from '../utils/whatsapp';
 
 interface WebOrderDetailModalProps {
   isOpen: boolean;
@@ -37,7 +46,13 @@ interface WebOrderDetailModalProps {
     orderId: string,
     method: NonNullable<CatalogPickupOrder['confirmedPaymentMethod']>
   ) => void;
+  onConfirmPayment?: (order: CatalogPickupOrder) => void;
+  onSendProcessWhatsApp?: (
+    order: CatalogPickupOrder,
+    stage: CatalogOrderProcessStage
+  ) => void;
   onWhatsAppCollect?: (order: CatalogPickupOrder) => void;
+  onVerifyTransferReceipt?: (order: CatalogPickupOrder) => Promise<void> | void;
 }
 
 function resolvePaymentLabel(
@@ -47,6 +62,8 @@ function resolvePaymentLabel(
   switch (method) {
     case 'transferencia':
       return 'Transferencia bancaria / Alias';
+    case 'mercadopago_dinero_cuenta':
+      return 'Mercado Pago (Dinero en cuenta)';
     case 'link_pago':
       return 'Link de Pago / Mercado Pago';
     case 'efectivo':
@@ -94,9 +111,13 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
   onOpenReceipt,
   onBillOrder,
   onChangePaymentMethod,
+  onConfirmPayment,
+  onSendProcessWhatsApp,
   onWhatsAppCollect,
+  onVerifyTransferReceipt,
 }) => {
   const [checkedItemIndices, setCheckedItemIndices] = useState<Record<number, boolean>>({});
+  const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
   const [zoomedImage, setZoomedImage] = useState<{
     src: string;
     title: string;
@@ -148,17 +169,34 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
           productLookup.byId.get(it.productId) ||
           productLookup.byName.get(it.productName.trim().toLowerCase());
         const code = (it.sku || matched?.sku || '').trim();
-        return `• ${it.quantity} × ${it.productName}${code ? ` [Cód: ${code}]` : ''} (${formatCurrency(
+        const variantSuffix = it.variantLabel ? ` (${it.variantLabel})` : '';
+        return `• ${it.quantity} × ${it.productName}${variantSuffix}${code ? ` [Cód: ${code}]` : ''} (${formatCurrency(
           it.subtotal,
           currency
         )})`;
       })
       .join('\n');
+    const obsText = (order.customerSpecificRequest || order.notes || '').trim();
     const msg =
       `Hola ${order.customerName}! Te escribimos de *${order.storeName}* por tu pedido *#${order.orderNumber}*:\n\n` +
       `${itemsText}\n\n` +
+      (obsText ? `📝 *Observación / pedido específico:* ${obsText}\n\n` : '') +
       `Total: *${formatCurrency(order.totalAmount, currency)}*\n` +
       `${isDelivery ? 'Modalidad: Envío a domicilio' : 'Modalidad: Retiro en tienda'}`;
+    window.open(createWhatsAppUrl(order.customerPhone, msg), '_blank', 'noopener,noreferrer');
+  };
+
+  const handleTriggerProcessStage = (stage: CatalogOrderProcessStage) => {
+    if (onSendProcessWhatsApp) {
+      onSendProcessWhatsApp(order, stage);
+      return;
+    }
+    const msg = generateCatalogOrderCustomerProcessMessage({
+      order,
+      stage,
+      storeName: order.storeName,
+      pickupAddress: pickupAddressFallback,
+    });
     window.open(createWhatsAppUrl(order.customerPhone, msg), '_blank', 'noopener,noreferrer');
   };
 
@@ -222,6 +260,18 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
               <div className="font-mono tabular-nums text-slate-600 dark:text-[#CBD5E1]">
                 WhatsApp: {order.customerPhone || 'Sin teléfono'}
               </div>
+              {order.customerDni && (
+                <div className="font-mono tabular-nums text-slate-700 dark:text-[#E2E8F0]">
+                  DNI (Programa de Puntos): <strong>{order.customerDni}</strong>
+                  {typeof order.loyaltyPointsEarned === 'number' && order.loyaltyPointsEarned > 0
+                    ? ` · +${order.loyaltyPointsEarned} pts sumados`
+                    : ''}
+                  {typeof order.loyaltyPointsRedeemed === 'number' &&
+                  order.loyaltyPointsRedeemed > 0
+                    ? ` · -${order.loyaltyPointsRedeemed} pts canjeados`
+                    : ''}
+                </div>
+              )}
               <div className="flex items-start gap-1.5 text-slate-700 dark:text-[#E2E8F0] pt-0.5">
                 {isDelivery ? (
                   <Truck className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
@@ -265,6 +315,38 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                 <span>{paymentMethodLabel}</span>
               </div>
 
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span
+                  className={`text-[11px] font-bold ${
+                    order.paymentStatus === 'acreditado'
+                      ? 'text-emerald-700 dark:text-emerald-400'
+                      : order.paymentStatus === 'comprobante_en_revision'
+                      ? 'text-sky-700 dark:text-sky-300'
+                      : 'text-amber-700 dark:text-amber-300'
+                  }`}
+                >
+                  {order.paymentStatus === 'acreditado'
+                    ? 'Pago acreditado / confirmado'
+                    : order.paymentStatus === 'comprobante_en_revision'
+                    ? 'Comprobante subido (para revisar)'
+                    : order.paymentStatus === 'en_proceso'
+                    ? 'Pago en proceso'
+                    : 'Pendiente de cobro'}
+                </span>
+
+                {onConfirmPayment &&
+                  order.paymentStatus !== 'acreditado' &&
+                  order.status !== 'cancelado' && (
+                    <button
+                      type="button"
+                      onClick={() => onConfirmPayment(order)}
+                      className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                    >
+                      Confirmar Pago
+                    </button>
+                  )}
+              </div>
+
               {onChangePaymentMethod && order.status !== 'cancelado' && (
                 <div>
                   <select
@@ -280,6 +362,7 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                   >
                     <option value="acordar">Pago: A coordinar</option>
                     <option value="transferencia">Pago: Transferencia / Alias</option>
+                    <option value="mercadopago_dinero_cuenta">Pago: Mercado Pago (Dinero en cuenta)</option>
                     <option value="link_pago">Pago: Link de Pago / MP</option>
                     <option value="efectivo">
                       {isDelivery ? 'Pago: Efectivo contra entrega' : 'Pago: Efectivo en local'}
@@ -289,8 +372,114 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                 </div>
               )}
 
-              {(order.linkedBoletaNumber || order.dispatchReceiptNumber) && (
+              {order.transferReceiptImageUrl && (
+                <div className="p-2.5 rounded-lg bg-white dark:bg-[#0B1933] border border-sky-200 dark:border-sky-400/30 space-y-2">
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setZoomedImage({
+                          src: order.transferReceiptImageUrl!,
+                          title: `Comprobante de pago · Pedido #${order.orderNumber}`,
+                          sku:
+                            order.transferOperationId || order.transferReference
+                              ? `Op: ${order.transferOperationId || order.transferReference}`
+                              : undefined,
+                        })
+                      }
+                      className="relative w-12 h-12 rounded-md overflow-hidden border border-slate-200 dark:border-[#B6C2D2]/25 shrink-0 cursor-zoom-in"
+                      title="Ampliar comprobante de pago"
+                    >
+                      <img
+                        src={order.transferReceiptImageUrl}
+                        alt="Comprobante de transferencia"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[11px] font-bold text-[#0B1933] dark:text-white flex items-center gap-1">
+                        <FileCheck2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>Comprobante del cliente</span>
+                      </div>
+                      {(order.transferOperationId || order.transferReference) && (
+                        <div className="text-[10px] font-mono text-slate-500 dark:text-[#94A3B8] truncate">
+                          Op: {order.transferOperationId || order.transferReference}
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setZoomedImage({
+                            src: order.transferReceiptImageUrl!,
+                            title: `Comprobante de pago · Pedido #${order.orderNumber}`,
+                            sku:
+                              order.transferOperationId || order.transferReference
+                                ? `Op: ${order.transferOperationId || order.transferReference}`
+                                : undefined,
+                          })
+                        }
+                        className="text-[11px] font-semibold text-sky-700 dark:text-sky-300 hover:underline cursor-pointer"
+                      >
+                        Ver comprobante grande
+                      </button>
+                    </div>
+                  </div>
+
+                  {order.transferVerificationSummary && (
+                    <div
+                      className={`p-2 rounded-lg text-[11px] border flex items-start gap-1.5 ${
+                        order.transferVerificationStatus === 'verificado_auto'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-200'
+                          : order.transferVerificationStatus === 'duplicado' ||
+                            order.transferVerificationStatus === 'rechazado'
+                          ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-500/30 text-rose-800 dark:text-rose-200'
+                          : 'bg-slate-50 dark:bg-[#071021] border-slate-200 dark:border-[#B6C2D2]/20 text-slate-700 dark:text-[#CBD5E1]'
+                      }`}
+                    >
+                      {order.transferVerificationStatus === 'verificado_auto' ? (
+                        <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      )}
+                      <span>{order.transferVerificationSummary}</span>
+                    </div>
+                  )}
+
+                  {onVerifyTransferReceipt &&
+                    order.status !== 'cancelado' &&
+                    order.transferVerificationStatus !== 'verificado_auto' && (
+                      <button
+                        type="button"
+                        disabled={isVerifyingReceipt}
+                        onClick={async () => {
+                          setIsVerifyingReceipt(true);
+                          try {
+                            await onVerifyTransferReceipt(order);
+                          } finally {
+                            setIsVerifyingReceipt(false);
+                          }
+                        }}
+                        className="inline-flex items-center justify-center gap-1.5 w-full py-1.5 px-2.5 rounded-lg text-[11px] font-bold bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-60 text-white cursor-pointer"
+                      >
+                        {isVerifyingReceipt ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                        )}
+                        <span>
+                          {isVerifyingReceipt
+                            ? 'Analizando comprobante...'
+                            : 'Verificar Comprobante Automáticamente'}
+                        </span>
+                      </button>
+                    )}
+                </div>
+              )}
+
+              {(order.linkedBoletaNumber || order.dispatchReceiptNumber || order.mpPaymentId) && (
                 <div className="text-[11px] font-mono tabular-nums text-emerald-700 dark:text-emerald-400 space-y-0.5">
+                  {order.mpPaymentId && <div>Pago MP #{order.mpPaymentId}</div>}
                   {order.linkedBoletaNumber && <div>Boleta vinculada: #{order.linkedBoletaNumber}</div>}
                   {order.dispatchReceiptNumber && (
                     <div>Comprobante despacho: {order.dispatchReceiptNumber}</div>
@@ -298,13 +487,62 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                 </div>
               )}
 
-              {order.notes && (
-                <div className="pt-1 text-xs text-slate-700 dark:text-[#CBD5E1]">
-                  <span className="font-semibold">Nota del cliente:</span> {order.notes}
+              {order.status === 'cancelado' && order.stockRestoredAt && (
+                <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 pt-1">
+                  Stock reintegrado al catálogo ({formatDateTimeEs(order.stockRestoredAt)}).
                 </div>
               )}
             </div>
           </div>
+
+          {/* Dedicated Customer Observations / Specific Request Block */}
+          {(order.customerSpecificRequest || order.notes) && (
+            <div className="p-3.5 rounded-xl bg-amber-50/75 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-500/30 space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                Observaciones y pedido específico del cliente
+              </div>
+              <p className="text-xs sm:text-sm font-medium text-[#0B1933] dark:text-white leading-relaxed">
+                {order.customerSpecificRequest || order.notes}
+              </p>
+            </div>
+          )}
+
+          {/* Customer Process WhatsApp Stage Notifications */}
+          {order.customerPhone && order.status !== 'cancelado' && (
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#071021] border border-slate-200 dark:border-[#B6C2D2]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="space-y-0.5">
+                <div className="text-xs font-bold text-[#0B1933] dark:text-white flex items-center gap-1.5">
+                  <Send className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Avisar proceso del pedido al WhatsApp del cliente</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-[#94A3B8]">
+                  Enviá en 1 clic la etapa actual ({order.customerPhone}): armado o listo para {isDelivery ? 'envío' : 'buscar'}.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handleTriggerProcessStage('en_proceso_armando')}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border border-slate-200 dark:border-[#B6C2D2]/25 bg-white dark:bg-[#0B1933] text-slate-800 dark:text-white hover:bg-slate-100 dark:hover:bg-[#13264A] cursor-pointer whitespace-nowrap"
+                >
+                  <MessageCircle className="w-3 h-3 text-amber-600" />
+                  <span>1. Armando / Pago en proceso</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleTriggerProcessStage(isDelivery ? 'en_camino' : 'listo_para_retirar')
+                  }
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer whitespace-nowrap"
+                >
+                  <MessageCircle className="w-3 h-3 text-emerald-300" />
+                  <span>
+                    {isDelivery ? '2. En viaje a domicilio' : '2. Listo para pasar a buscar'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Items Picking List (Photos + SKU Codes + Quantities) */}
           <div className="space-y-2.5">
@@ -403,6 +641,12 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                          {item.variantLabel && (
+                            <span className="inline-flex items-center font-bold text-indigo-800 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-400/30 px-2 py-0.5 rounded-md">
+                              Variante: {item.variantLabel}
+                            </span>
+                          )}
+
                           {resolvedSku ? (
                             <span className="inline-flex items-center gap-1 font-mono tabular-nums font-bold text-[#0B1933] dark:text-sky-300 bg-slate-100 dark:bg-[#13264A] border border-slate-200 dark:border-sky-400/25 px-2 py-0.5 rounded-md">
                               <Barcode className="w-3.5 h-3.5 shrink-0" />
@@ -447,7 +691,36 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
 
         {/* Footer Summary + Actions */}
         <div className="px-5 py-4 border-t border-slate-200 dark:border-[#B6C2D2]/20 bg-slate-50 dark:bg-[#071021] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
+          <div className="space-y-0.5">
+            {(Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) ||
+              Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) ||
+              Boolean(order.loyaltyDiscountAmount && order.loyaltyDiscountAmount > 0) ||
+              Boolean(order.paymentMethodDiscountAmount && order.paymentMethodDiscountAmount > 0)) && (
+              <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium space-y-0.5">
+                {Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) && (
+                  <div>
+                    Ahorro precio mayorista: -{formatCurrency(order.wholesaleSavings || 0, currency)}
+                  </div>
+                )}
+                {Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) && (
+                  <div>
+                    Cupón {order.couponCode || ''}: -{formatCurrency(order.couponDiscountAmount || 0, currency)}
+                  </div>
+                )}
+                {Boolean(order.loyaltyDiscountAmount && order.loyaltyDiscountAmount > 0) && (
+                  <div>
+                    Canje Puntos DNI ({order.loyaltyDiscountPercent || 0}%): -
+                    {formatCurrency(order.loyaltyDiscountAmount || 0, currency)}
+                  </div>
+                )}
+                {Boolean(order.paymentMethodDiscountAmount && order.paymentMethodDiscountAmount > 0) && (
+                  <div>
+                    Bonificación Efectivo/Transf. ({order.paymentMethodDiscountPercent || 0}%): -
+                    {formatCurrency(order.paymentMethodDiscountAmount || 0, currency)}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="text-[11px] font-semibold text-slate-500 dark:text-[#94A3B8]">
               Valor final del pedido ({totalUnits} u.)
             </div>

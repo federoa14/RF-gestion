@@ -49,15 +49,21 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
     const body = await req.json();
-    const scope = body?.scope === 'client_order' ? 'client_order' : 'tenant_subscription';
+    const scope =
+      body?.scope === 'client_order'
+        ? 'client_order'
+        : body?.scope === 'catalog_order'
+        ? 'catalog_order'
+        : 'tenant_subscription';
     const paymentId = String(body?.paymentId || '').trim();
     const tenantId = String(body?.tenantId || '').trim();
     const orderToken = String(body?.orderToken || '').trim();
+    const orderId = String(body?.orderId || '').trim();
     const monthKey = String(body?.monthKey || '').trim();
     const planType = body?.planType === 'annual' ? 'annual' : 'monthly';
 
     let accessToken = '';
-    if (scope === 'client_order' && tenantId) {
+    if ((scope === 'client_order' || scope === 'catalog_order') && tenantId) {
       const { data: merchantRow } = await supabase
         .from('app_cloud_store')
         .select('value')
@@ -104,6 +110,8 @@ Deno.serve(async (req) => {
       const extRef =
         scope === 'client_order' && orderToken
           ? `cpay::${orderToken}`
+          : scope === 'catalog_order' && orderId
+          ? `catord::${orderId}`
           : tenantId && monthKey
           ? `sub::${tenantId}::${monthKey}::${planType}`
           : '';
@@ -150,6 +158,37 @@ Deno.serve(async (req) => {
           verificationSummary: `Verificado contra API de Mercado Pago (#${approvedPayment.id})`,
         };
         await upsertCloudKey(supabase, orderKey, updatedOrder);
+        return jsonResponse({ verified: true, status: 'approved', order: updatedOrder });
+      }
+    }
+
+    if (scope === 'catalog_order' && orderId) {
+      const publicOrderKey = `catalog_order_${orderId}`;
+      const { data: orderRow } = await supabase
+        .from('app_cloud_store')
+        .select('value')
+        .eq('key', publicOrderKey)
+        .maybeSingle();
+
+      if (orderRow?.value) {
+        const prev = orderRow.value;
+        const nextMethod =
+          prev.mpSubOption === 'dinero_en_cuenta' || body?.mpSubOption === 'dinero_en_cuenta'
+            ? 'mercadopago_dinero_cuenta'
+            : 'link_pago';
+        const nowIso = new Date().toISOString();
+        const updatedOrder = {
+          ...prev,
+          paymentStatus: 'acreditado',
+          confirmedPaymentMethod: nextMethod,
+          mpPaymentId: String(approvedPayment.id),
+          updatedAt: nowIso,
+        };
+        await upsertCloudKey(supabase, publicOrderKey, updatedOrder);
+        const effTenantId = String(prev.tenantId || tenantId || '').trim();
+        if (effTenantId) {
+          await upsertCloudKey(supabase, `rec:${effTenantId}:catalogOrders:${orderId}`, updatedOrder);
+        }
         return jsonResponse({ verified: true, status: 'approved', order: updatedOrder });
       }
     }

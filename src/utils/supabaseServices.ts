@@ -1,7 +1,9 @@
 import type {
   BusinessRubro,
+  CatalogLoyaltyAccount,
   CatalogPickupOrder,
   CatalogProduct,
+  CatalogPromoSubscriber,
   CatalogStockAlertRequest,
   ClientPaymentOrder,
   PlatformAnnouncement,
@@ -10,6 +12,7 @@ import type {
   PublishedPublicCatalog,
   Tenant,
 } from '../types';
+import { normalizeDni } from './catalogStock';
 import { dbGetItem, dbSetItem } from './localInternalDb';
 import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
 import {
@@ -828,6 +831,20 @@ export async function setPublicCatalogSuperAdminEnabledInSupabase(
       enabledBySuperAdmin: enabled,
       logoUrl: tenant.config?.distributorLogoUrl || tenant.logoUrl || existing.logoUrl,
       icon: tenant.config?.distributorIcon || tenant.icon || existing.icon,
+      merchantPaymentAlias:
+        tenant.config?.merchantPaymentAlias ?? existing.merchantPaymentAlias,
+      merchantPaymentCvu:
+        tenant.config?.merchantPaymentCvu ?? existing.merchantPaymentCvu,
+      merchantPaymentBank:
+        tenant.config?.merchantPaymentBank ?? existing.merchantPaymentBank,
+      merchantPaymentHolder:
+        tenant.config?.merchantPaymentHolder ?? existing.merchantPaymentHolder,
+      merchantMpCheckoutLink:
+        tenant.config?.merchantMpCheckoutLink ?? existing.merchantMpCheckoutLink,
+      hasMerchantMpAccessToken:
+        typeof tenant.config?.hasMerchantMpAccessToken === 'boolean'
+          ? tenant.config.hasMerchantMpAccessToken
+          : existing.hasMerchantMpAccessToken,
       catalogRubro: overrides?.catalogRubro ?? tenant.catalogRubro ?? existing.catalogRubro,
       rubroFilters: overrides?.rubroFilters ?? existing.rubroFilters,
       customSubfilters: overrides?.customSubfilters ?? existing.customSubfilters,
@@ -859,7 +876,13 @@ export async function setPublicCatalogSuperAdminEnabledInSupabase(
       allowDelivery: true,
       pickupAddress: tenant.address || '',
       pickupHours: 'Lunes a Sábado · 9:00 a 19:00 hs',
-      paymentNote: 'Efectivo, transferencia o link de pago',
+      paymentNote: 'Efectivo, transferencia o Mercado Pago',
+      merchantPaymentAlias: tenant.config?.merchantPaymentAlias,
+      merchantPaymentCvu: tenant.config?.merchantPaymentCvu,
+      merchantPaymentBank: tenant.config?.merchantPaymentBank,
+      merchantPaymentHolder: tenant.config?.merchantPaymentHolder,
+      merchantMpCheckoutLink: tenant.config?.merchantMpCheckoutLink,
+      hasMerchantMpAccessToken: Boolean(tenant.config?.hasMerchantMpAccessToken),
       currencySymbol: tenant.config?.currencySymbol || '$',
       products: overrides?.products || [],
       updatedAt: nowIso,
@@ -1045,6 +1068,20 @@ export async function fetchPublicCatalogFromSupabase(
           resolvedTenantObj.config?.distributorIcon ||
           resolvedTenantObj.icon ||
           resolvedCatalog.icon,
+        merchantPaymentAlias:
+          resolvedTenantObj.config?.merchantPaymentAlias ?? resolvedCatalog.merchantPaymentAlias,
+        merchantPaymentCvu:
+          resolvedTenantObj.config?.merchantPaymentCvu ?? resolvedCatalog.merchantPaymentCvu,
+        merchantPaymentBank:
+          resolvedTenantObj.config?.merchantPaymentBank ?? resolvedCatalog.merchantPaymentBank,
+        merchantPaymentHolder:
+          resolvedTenantObj.config?.merchantPaymentHolder ?? resolvedCatalog.merchantPaymentHolder,
+        merchantMpCheckoutLink:
+          resolvedTenantObj.config?.merchantMpCheckoutLink ?? resolvedCatalog.merchantMpCheckoutLink,
+        hasMerchantMpAccessToken:
+          typeof resolvedTenantObj.config?.hasMerchantMpAccessToken === 'boolean'
+            ? resolvedTenantObj.config.hasMerchantMpAccessToken
+            : resolvedCatalog.hasMerchantMpAccessToken,
         catalogRubro:
           resolvedTenantObj.catalogRubro ||
           resolvedCatalog.catalogRubro ||
@@ -1262,3 +1299,684 @@ export async function fetchCatalogStockAlertsForTenantFromSupabase(
   return Array.from(mergedMap.values());
 }
 
+export async function syncCatalogOrderToSupabase(
+  order: CatalogPickupOrder
+): Promise<boolean> {
+  if (!order?.id || !order?.tenantId) return false;
+  const publicOrderKey = `catalog_order_${order.id}`;
+  const tenantEntityKey = `rec:${order.tenantId}:catalogOrders:${order.id}`;
+
+  try {
+    const cacheKey = `public_orders_cache_${order.tenantId}`;
+    const raw = dbGetItem(cacheKey);
+    const existing: CatalogPickupOrder[] = raw ? JSON.parse(raw) : [];
+    const filtered = Array.isArray(existing) ? existing.filter((o) => o.id !== order.id) : [];
+    dbSetItem(cacheKey, JSON.stringify([order, ...filtered].slice(0, 200)));
+  } catch {
+    // ignore local cache update issue
+  }
+
+  const [okPublic, okEntity] = await Promise.all([
+    insertOrUpdateCloudStoreKey(publicOrderKey, order),
+    insertOrUpdateCloudStoreKey(tenantEntityKey, order),
+  ]);
+  return okPublic || okEntity;
+}
+
+export async function fetchPublicCatalogOrderFromSupabase(
+  orderId: string,
+  tenantIdHint?: string
+): Promise<CatalogPickupOrder | null> {
+  const cleanId = (orderId || '').trim();
+  if (!cleanId) return null;
+
+  let localFallback: CatalogPickupOrder | null = null;
+  if (tenantIdHint) {
+    try {
+      const raw = dbGetItem(`public_orders_cache_${tenantIdHint}`);
+      const arr: CatalogPickupOrder[] = raw ? JSON.parse(raw) : [];
+      localFallback = arr.find((o) => o.id === cleanId) || null;
+    } catch {
+      localFallback = null;
+    }
+  }
+
+  const remote = await readCloudJsonRecord<CatalogPickupOrder>(`catalog_order_${cleanId}`);
+  if (remote && remote.id) {
+    if (
+      !localFallback ||
+      (remote.updatedAt || remote.createdAt) >= (localFallback.updatedAt || localFallback.createdAt)
+    ) {
+      return remote;
+    }
+  }
+  return localFallback || remote;
+}
+
+export async function createCatalogOrderMercadoPagoPreference(params: {
+  order: CatalogPickupOrder;
+  catalogHandle: string;
+  mpSubOption: 'dinero_en_cuenta' | 'tarjetas_todos';
+  originUrl?: string;
+}): Promise<{
+  ok: boolean;
+  mode?: 'mercadopago_api' | 'checkout_link' | 'alias_checkout';
+  initPoint?: string;
+  sandboxInitPoint?: string;
+  preferenceId?: string;
+  fallbackReason?: string;
+  error?: string;
+}> {
+  const { order, catalogHandle, mpSubOption, originUrl } = params;
+  const safeOrigin =
+    originUrl && /^https?:\/\//i.test(originUrl)
+      ? originUrl.split('?')[0]
+      : typeof window !== 'undefined' && /^https?:\/\//i.test(window.location.href)
+      ? window.location.href.split('?')[0]
+      : '';
+
+  // 1. Intentar vía backend Express (/api/catalog/mp-create-preference)
+  try {
+    const res = await fetch('/api/catalog/mp-create-preference', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        tenantId: order.tenantId,
+        storeName: order.storeName,
+        customerName: order.customerName,
+        amount: order.totalAmount,
+        items: order.items.map((it) => ({
+          id: it.productId,
+          title: it.productName,
+          quantity: it.quantity,
+          unit_price: it.unitPrice,
+        })),
+        catalogHandle,
+        mpSubOption,
+        returnUrl: safeOrigin,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.ok && data?.initPoint) {
+        return {
+          ok: true,
+          mode: 'mercadopago_api',
+          initPoint: data.initPoint,
+          sandboxInitPoint: data.sandboxInitPoint,
+          preferenceId: data.preferenceId,
+        };
+      }
+    }
+  } catch {
+    // Fallback to Supabase Edge Function below
+  }
+
+  // 2. Intentar vía Supabase Edge Function (mp-create-preference con scope catalog_order)
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.functions.invoke('mp-create-preference', {
+        body: {
+          scope: 'catalog_order',
+          orderId: order.id,
+          tenantId: order.tenantId,
+          catalogHandle,
+          mpSubOption,
+          returnUrl: safeOrigin,
+        },
+      });
+      if (!error && data?.ok && data?.initPoint) {
+        return {
+          ok: true,
+          mode: 'mercadopago_api',
+          initPoint: data.initPoint,
+          sandboxInitPoint: data.sandboxInitPoint,
+          preferenceId: data.preferenceId,
+        };
+      }
+      return {
+        ok: false,
+        fallbackReason: data?.fallbackReason || (error ? 'edge_invoke_error' : 'missing_access_token'),
+        error: data?.error,
+      };
+    } catch {
+      return { ok: false, fallbackReason: 'edge_invoke_exception' };
+    }
+  }
+
+  return { ok: false, fallbackReason: 'missing_access_token' };
+}
+
+export async function verifyCatalogOrderMercadoPagoPayment(params: {
+  orderId: string;
+  tenantId: string;
+  paymentId?: string;
+  collectionStatus?: string;
+  mpSubOption?: 'dinero_en_cuenta' | 'tarjetas_todos';
+}): Promise<{
+  verified: boolean;
+  status?: string;
+  order?: CatalogPickupOrder;
+  message?: string;
+}> {
+  const { orderId, tenantId, paymentId, collectionStatus, mpSubOption } = params;
+
+  try {
+    const res = await fetch('/api/catalog/mp-verify-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId,
+        tenantId,
+        paymentId,
+        collectionStatus,
+        mpSubOption,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.verified) {
+        return { verified: true, status: 'approved', order: data.order, message: data.message };
+      }
+    }
+  } catch {
+    // Try Supabase Edge Function next
+  }
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase.functions.invoke('mp-verify-payment', {
+        body: {
+          scope: 'catalog_order',
+          orderId,
+          tenantId,
+          paymentId,
+          mpSubOption,
+        },
+      });
+      if (!error && data?.verified) {
+        return { verified: true, status: 'approved', order: data.order };
+      }
+      if (data?.message) {
+        return { verified: false, status: data.status, message: data.message };
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Fallback si Mercado Pago redirigió con collectionStatus === 'approved' sin API en preview local
+  if (collectionStatus === 'approved') {
+    const existing = await fetchPublicCatalogOrderFromSupabase(orderId, tenantId);
+    if (existing) {
+      const nextMethod =
+        existing.mpSubOption === 'dinero_en_cuenta' || mpSubOption === 'dinero_en_cuenta'
+          ? 'mercadopago_dinero_cuenta'
+          : 'link_pago';
+      const updated: CatalogPickupOrder = {
+        ...existing,
+        paymentStatus: 'acreditado',
+        confirmedPaymentMethod: nextMethod,
+        mpPaymentId: paymentId || existing.mpPaymentId,
+        updatedAt: new Date().toISOString(),
+      };
+      await syncCatalogOrderToSupabase(updated);
+      return { verified: true, status: 'approved', order: updated };
+    }
+  }
+
+  return { verified: false };
+}
+
+export async function notifyCatalogOrderCustomerStageViaServer(params: {
+  order: CatalogPickupOrder;
+  stage: 'en_proceso_armando' | 'listo_para_retirar' | 'en_camino' | 'retirado';
+  message: string;
+  config?: {
+    whatsappProvider?: string;
+    whatsappApiToken?: string;
+    whatsappPhoneNumberId?: string;
+    twilioAccountSid?: string;
+    twilioAuthToken?: string;
+    twilioFromPhone?: string;
+    webhookGatewayUrl?: string;
+    webhookAuthKey?: string;
+  };
+}): Promise<{
+  success: boolean;
+  deliveryStatus?: string;
+  info?: string;
+}> {
+  const { order, stage, message, config } = params;
+  if (!order?.customerPhone?.trim() || !message.trim()) {
+    return { success: false, info: 'Sin teléfono de cliente' };
+  }
+  try {
+    const res = await fetch('/api/catalog/notify-customer-stage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantId: order.tenantId,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        stage,
+        message,
+        ...(config ? { whatsappConfig: config } : {}),
+      }),
+    });
+    if (!res.ok) {
+      return { success: false, info: `HTTP ${res.status}` };
+    }
+    const data = await res.json();
+    return {
+      success: Boolean(data?.success),
+      deliveryStatus: data?.deliveryStatus,
+      info: data?.info,
+    };
+  } catch {
+    return { success: false, info: 'Servidor no disponible' };
+  }
+}
+
+export async function testMerchantMercadoPagoConnection(params: {
+  tenantId: string;
+  mpAccessToken?: string;
+}): Promise<{
+  ok: boolean;
+  valid: boolean;
+  hasSavedToken?: boolean;
+  account?: {
+    id?: number | string;
+    nickname?: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    siteId?: string;
+  };
+  webhookUrls?: {
+    serverWebhookUrl?: string;
+    supabaseWebhookUrl?: string;
+  };
+  error?: string;
+}> {
+  try {
+    const res = await fetch('/api/merchant/mp-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantId: params.tenantId,
+        ...(params.mpAccessToken?.trim()
+          ? { mpAccessToken: params.mpAccessToken.trim() }
+          : {}),
+      }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data) {
+      return {
+        ok: false,
+        valid: false,
+        error: 'El servidor backend de pruebas no respondió en esta vista.',
+      };
+    }
+    return data;
+  } catch {
+    return {
+      ok: false,
+      valid: false,
+      error: 'No se pudo conectar con el servidor para probar las credenciales de Mercado Pago.',
+    };
+  }
+}
+
+export async function notifyCatalogStockAlertViaServer(params: {
+  alert: CatalogStockAlertRequest;
+  message: string;
+}): Promise<{ success: boolean; deliveryStatus?: string; info?: string }> {
+  if (!params.alert?.customerPhone?.trim() || !params.message.trim()) {
+    return { success: false, info: 'Sin teléfono del cliente' };
+  }
+  try {
+    const res = await fetch('/api/catalog/notify-stock-alert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        alertId: params.alert.id,
+        tenantId: params.alert.tenantId,
+        customerPhone: params.alert.customerPhone,
+        message: params.message,
+      }),
+    });
+    if (!res.ok) return { success: false, info: `HTTP ${res.status}` };
+    const data = await res.json();
+    return {
+      success: Boolean(data?.success),
+      deliveryStatus: data?.deliveryStatus,
+      info: data?.info,
+    };
+  } catch {
+    return { success: false, info: 'Servidor no disponible' };
+  }
+}
+
+export async function verifyCatalogTransferReceiptViaServer(params: {
+  tenantId: string;
+  orderId: string;
+  orderNumber: string;
+  storeName: string;
+  expectedAmount: number;
+  alias?: string;
+  cvu?: string;
+  holderName?: string;
+  imageBase64: string;
+  knownUsedOperationIds?: Array<{ orderId: string; operationId: string }>;
+}): Promise<{
+  success: boolean;
+  approved: boolean;
+  duplicate?: boolean;
+  operationId?: string;
+  detectedAmount?: number;
+  platform?: string;
+  verificationSummary?: string;
+  verifiedAt?: string;
+  message?: string;
+}> {
+  try {
+    const res = await fetch('/api/catalog/verify-transfer-receipt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json().catch(() => null);
+    if (!data) {
+      return {
+        success: false,
+        approved: false,
+        message: 'No se pudo conectar con el verificador automático de comprobantes.',
+      };
+    }
+    return {
+      success: Boolean(data.success),
+      approved: Boolean(data.approved),
+      duplicate: Boolean(data.duplicate),
+      operationId: data.operationId,
+      detectedAmount: data.detectedAmount,
+      platform: data.platform,
+      verificationSummary: data.verificationSummary,
+      verifiedAt: data.verifiedAt,
+      message: data.message,
+    };
+  } catch {
+    return {
+      success: false,
+      approved: false,
+      message: 'Servicio de verificación momentáneamente no disponible.',
+    };
+  }
+}
+
+export async function submitCatalogPromoSubscriberToSupabase(
+  subscriber: CatalogPromoSubscriber
+): Promise<boolean> {
+  if (!subscriber?.id || !subscriber?.tenantId) return false;
+  const publicKey = `catalog_promo_sub_${subscriber.id}`;
+  const tenantEntityKey = `rec:${subscriber.tenantId}:catalogPromoSubscribers:${subscriber.id}`;
+
+  try {
+    const cacheKey = `public_promo_subs_cache_${subscriber.tenantId}`;
+    const raw = dbGetItem(cacheKey);
+    const existing: CatalogPromoSubscriber[] = raw ? JSON.parse(raw) : [];
+    const filtered = Array.isArray(existing)
+      ? existing.filter((s) => s.id !== subscriber.id)
+      : [];
+    dbSetItem(cacheKey, JSON.stringify([subscriber, ...filtered].slice(0, 500)));
+  } catch {
+    // ignore local cache write error
+  }
+
+  const [okPublic, okEntity] = await Promise.all([
+    insertOrUpdateCloudStoreKey(publicKey, subscriber),
+    insertOrUpdateCloudStoreKey(tenantEntityKey, subscriber),
+  ]);
+  return okPublic || okEntity;
+}
+
+export async function fetchCatalogPromoSubscribersForTenantFromSupabase(
+  tenantId: string
+): Promise<CatalogPromoSubscriber[]> {
+  if (!tenantId) return [];
+  const mergedMap = new Map<string, CatalogPromoSubscriber>();
+
+  try {
+    const rawLocal = dbGetItem(`public_promo_subs_cache_${tenantId}`);
+    if (rawLocal) {
+      const localList = JSON.parse(rawLocal);
+      if (Array.isArray(localList)) {
+        for (const s of localList) {
+          if (s && s.id && s.tenantId === tenantId) mergedMap.set(s.id, s);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return Array.from(mergedMap.values());
+
+  try {
+    const { data, error } = await supabase
+      .from(CLOUD_TABLE)
+      .select('value')
+      .like('key', 'rec:%:catalogPromoSubscribers:%')
+      .eq('value->>tenantId', tenantId)
+      .order('updated_at', { ascending: false })
+      .limit(500);
+    if (!error && Array.isArray(data)) {
+      for (const row of data) {
+        const s = row?.value as CatalogPromoSubscriber | undefined;
+        if (s && s.id && s.tenantId === tenantId) {
+          const prev = mergedMap.get(s.id);
+          if (!prev || (s.updatedAt || s.createdAt) >= (prev.updatedAt || prev.createdAt)) {
+            mergedMap.set(s.id, s);
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return Array.from(mergedMap.values());
+}
+
+export async function sendCatalogPromoWhatsAppViaServer(params: {
+  subscriberId: string;
+  customerPhone: string;
+  message: string;
+}): Promise<{ success: boolean; deliveryStatus?: string; info?: string }> {
+  if (!params.customerPhone?.trim() || !params.message.trim()) {
+    return { success: false, info: 'Sin teléfono del suscriptor' };
+  }
+  try {
+    const res = await fetch('/api/catalog/send-promo-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) return { success: false, info: `HTTP ${res.status}` };
+    const data = await res.json();
+    return {
+      success: Boolean(data?.success),
+      deliveryStatus: data?.deliveryStatus,
+      info: data?.info,
+    };
+  } catch {
+    return { success: false, info: 'Servidor no disponible' };
+  }
+}
+
+export async function fetchPublicCatalogLoyaltyAccountFromSupabase(
+  tenantId: string,
+  rawDni: string
+): Promise<CatalogLoyaltyAccount | null> {
+  const cleanDni = normalizeDni(rawDni);
+  if (!tenantId || cleanDni.length < 6) return null;
+  const publicKey = `catalog_loyalty_${tenantId}_${cleanDni}`;
+  const cacheKey = `public_loyalty_cache_${tenantId}_${cleanDni}`;
+
+  let localAccount: CatalogLoyaltyAccount | null = null;
+  try {
+    const rawLocal = dbGetItem(cacheKey);
+    if (rawLocal) {
+      const parsed = JSON.parse(rawLocal) as CatalogLoyaltyAccount;
+      if (parsed && parsed.tenantId === tenantId && parsed.dni === cleanDni) {
+        localAccount = parsed;
+      }
+    }
+  } catch {
+    // ignore local cache read error
+  }
+
+  const supabase = getSupabaseClient();
+  if (!supabase) return localAccount;
+
+  try {
+    const { data, error } = await supabase
+      .from(CLOUD_TABLE)
+      .select('value')
+      .eq('key', publicKey)
+      .maybeSingle();
+
+    if (!error && data?.value) {
+      const remoteAcc = data.value as CatalogLoyaltyAccount;
+      if (remoteAcc && remoteAcc.tenantId === tenantId && remoteAcc.dni === cleanDni) {
+        if (!localAccount || (remoteAcc.updatedAt || '') >= (localAccount.updatedAt || '')) {
+          try {
+            dbSetItem(cacheKey, JSON.stringify(remoteAcc));
+          } catch {
+            // ignore
+          }
+          return remoteAcc;
+        }
+      }
+    }
+  } catch {
+    // fallback to local cache if remote fails
+  }
+
+  return localAccount;
+}
+
+export async function upsertCatalogLoyaltyAccountToSupabase(
+  account: CatalogLoyaltyAccount
+): Promise<boolean> {
+  const cleanDni = normalizeDni(account.dni);
+  if (!account?.tenantId || cleanDni.length < 6) return false;
+  const normalizedAcc: CatalogLoyaltyAccount = {
+    ...account,
+    id: account.id || `lyl-${account.tenantId}-${cleanDni}`,
+    dni: cleanDni,
+    pointsBalance: Math.max(0, Math.floor(Number(account.pointsBalance) || 0)),
+    totalPointsEarned: Math.max(0, Math.floor(Number(account.totalPointsEarned) || 0)),
+    totalPointsRedeemed: Math.max(0, Math.floor(Number(account.totalPointsRedeemed) || 0)),
+    ordersCount: Math.max(0, Math.floor(Number(account.ordersCount) || 0)),
+    updatedAt: account.updatedAt || new Date().toISOString(),
+  };
+
+  const publicKey = `catalog_loyalty_${normalizedAcc.tenantId}_${cleanDni}`;
+  const tenantEntityKey = `rec:${normalizedAcc.tenantId}:catalogLoyaltyAccounts:${normalizedAcc.id}`;
+  const cacheKey = `public_loyalty_cache_${normalizedAcc.tenantId}_${cleanDni}`;
+  const indexKey = `public_loyalty_index_${normalizedAcc.tenantId}`;
+
+  try {
+    dbSetItem(cacheKey, JSON.stringify(normalizedAcc));
+    const rawIdx = dbGetItem(indexKey);
+    const prevIdx: string[] = rawIdx ? (JSON.parse(rawIdx) as string[]) : [];
+    const nextIdx = Array.from(
+      new Set([cleanDni, ...(Array.isArray(prevIdx) ? prevIdx : [])])
+    );
+    dbSetItem(indexKey, JSON.stringify(nextIdx));
+  } catch {
+    // ignore cache write error
+  }
+
+  const [okPublic, okEntity] = await Promise.all([
+    insertOrUpdateCloudStoreKey(publicKey, normalizedAcc),
+    insertOrUpdateCloudStoreKey(tenantEntityKey, normalizedAcc),
+  ]);
+  return okPublic || okEntity;
+}
+
+export async function fetchCatalogLoyaltyAccountsForTenantFromSupabase(
+  tenantId: string
+): Promise<CatalogLoyaltyAccount[]> {
+  if (!tenantId) return [];
+  const mergedMap = new Map<string, CatalogLoyaltyAccount>();
+
+  const mergeEntry = (acc: CatalogLoyaltyAccount | undefined) => {
+    if (!acc || !acc.dni || acc.tenantId !== tenantId) return;
+    const cleanDni = normalizeDni(acc.dni);
+    if (cleanDni.length < 6) return;
+    const prev = mergedMap.get(cleanDni);
+    if (!prev || (acc.updatedAt || acc.createdAt) >= (prev.updatedAt || prev.createdAt)) {
+      mergedMap.set(cleanDni, { ...acc, dni: cleanDni });
+    }
+  };
+
+  try {
+    const rawIdx = dbGetItem(`public_loyalty_index_${tenantId}`);
+    const dnis: string[] = rawIdx ? (JSON.parse(rawIdx) as string[]) : [];
+    if (Array.isArray(dnis)) {
+      for (const d of dnis) {
+        const cleanD = normalizeDni(d);
+        if (!cleanD) continue;
+        const rawLocal = dbGetItem(`public_loyalty_cache_${tenantId}_${cleanD}`);
+        if (rawLocal) {
+          mergeEntry(JSON.parse(rawLocal) as CatalogLoyaltyAccount);
+        }
+      }
+    }
+  } catch {
+    // ignore local index read error
+  }
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(CLOUD_TABLE)
+        .select('value')
+        .like('key', `rec:${tenantId}:catalogLoyaltyAccounts:%`)
+        .limit(1000);
+
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          mergeEntry(row?.value as CatalogLoyaltyAccount | undefined);
+        }
+      }
+
+      const { data: publicRows, error: pubErr } = await supabase
+        .from(CLOUD_TABLE)
+        .select('value')
+        .like('key', `catalog_loyalty_${tenantId}_%`)
+        .limit(1000);
+
+      if (!pubErr && Array.isArray(publicRows)) {
+        for (const row of publicRows) {
+          mergeEntry(row?.value as CatalogLoyaltyAccount | undefined);
+        }
+      }
+    } catch {
+      // ignore remote query error
+    }
+  }
+
+  return Array.from(mergedMap.values()).sort((a, b) =>
+    (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+  );
+}

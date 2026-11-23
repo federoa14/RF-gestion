@@ -269,6 +269,16 @@ interface ServerState {
   verifiedTenantPayments?: Record<string, VerifiedTenantPaymentRecord>;
   clientPaymentOrders?: Record<string, ClientPaymentOrderServer>;
   merchantMpTokensByTenantId?: Record<string, string>;
+  usedCatalogTransferRefs?: Record<
+    string,
+    {
+      orderId: string;
+      orderNumber: string;
+      operationId: string;
+      detectedAmount: number;
+      verifiedAt: string;
+    }
+  >;
 }
 
 const DEFAULT_SERVER_PLATFORM_BILLING: PlatformBillingServerConfig = {
@@ -321,6 +331,7 @@ function getServerState(): ServerState {
           verifiedTenantPayments: parsed.verifiedTenantPayments || {},
           clientPaymentOrders: parsed.clientPaymentOrders || {},
           merchantMpTokensByTenantId: parsed.merchantMpTokensByTenantId || {},
+          usedCatalogTransferRefs: parsed.usedCatalogTransferRefs || {},
         };
       }
     } catch {
@@ -341,6 +352,7 @@ function getServerState(): ServerState {
     verifiedTenantPayments: {},
     clientPaymentOrders: {},
     merchantMpTokensByTenantId: {},
+    usedCatalogTransferRefs: {},
   };
 }
 
@@ -2182,6 +2194,91 @@ app.post('/api/merchant/mp-token', (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/merchant/mp-test', async (req: Request, res: Response) => {
+  try {
+    const { tenantId = '', mpAccessToken = '' } = req.body || {};
+    const cleanTenantId = String(tenantId || '').trim();
+    const state = getServerState();
+
+    let resolvedToken = String(mpAccessToken || '').trim();
+    if (!resolvedToken && cleanTenantId) {
+      resolvedToken = state.merchantMpTokensByTenantId?.[cleanTenantId] || '';
+    }
+    if (!resolvedToken && cleanTenantId && serverSupabase) {
+      const { data: cloudRow } = await serverSupabase
+        .from('app_cloud_store')
+        .select('value')
+        .eq('key', `merchant_mp_token_${cleanTenantId}`)
+        .maybeSingle();
+      const cloudSecret = cloudRow?.value as { accessToken?: string } | null;
+      if (cloudSecret && typeof cloudSecret.accessToken === 'string') {
+        resolvedToken = cloudSecret.accessToken.trim();
+        if (resolvedToken) {
+          state.merchantMpTokensByTenantId = state.merchantMpTokensByTenantId || {};
+          state.merchantMpTokensByTenantId[cleanTenantId] = resolvedToken;
+          saveServerState(state);
+        }
+      }
+    }
+
+    const reqOrigin = `${req.protocol}://${req.get('host')}`;
+    const safeOrigin = reqOrigin.replace(/\/$/, '');
+    const supabaseUrlEnv = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+    const webhookUrls = {
+      serverWebhookUrl: `${safeOrigin}/api/client-payments/webhook`,
+      supabaseWebhookUrl: supabaseUrlEnv ? `${supabaseUrlEnv}/functions/v1/mp-webhook` : undefined,
+    };
+
+    if (!resolvedToken) {
+      return res.json({
+        ok: false,
+        valid: false,
+        hasSavedToken: false,
+        webhookUrls,
+        error: 'Todavía no hay un Access Token de Mercado Pago guardado o ingresado para probar.',
+      });
+    }
+
+    const mpRes = await fetch('https://api.mercadopago.com/users/me', {
+      headers: { Authorization: `Bearer ${resolvedToken}` },
+    });
+    const mpUser: any = await mpRes.json().catch(() => null);
+
+    if (!mpRes.ok || !mpUser?.id) {
+      return res.json({
+        ok: false,
+        valid: false,
+        hasSavedToken: Boolean(cleanTenantId && state.merchantMpTokensByTenantId?.[cleanTenantId]),
+        webhookUrls,
+        error:
+          mpUser?.message ||
+          `Mercado Pago rechazó el token (código ${mpRes.status}). Verificá que sea el Access Token de Producción vigente.`,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      valid: true,
+      hasSavedToken: Boolean(cleanTenantId && state.merchantMpTokensByTenantId?.[cleanTenantId]),
+      account: {
+        id: mpUser.id,
+        nickname: mpUser.nickname || '',
+        email: mpUser.email || '',
+        firstName: mpUser.first_name || '',
+        lastName: mpUser.last_name || '',
+        siteId: mpUser.site_id || '',
+      },
+      webhookUrls,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      ok: false,
+      valid: false,
+      error: error.message || 'Error verificando credenciales en Mercado Pago.',
+    });
+  }
+});
+
 app.post('/api/client-payments/create-link', async (req: Request, res: Response) => {
   try {
     const {
@@ -2433,6 +2530,571 @@ app.post('/api/client-payments/verify', async (req: Request, res: Response) => {
     return res.json({ success: true, approved: false });
   } catch (error: any) {
     return res.status(500).json({ error: error.message || 'Error verificando pago de cliente.' });
+  }
+});
+
+// ============================================================================
+// PEDIDOS DEL CATÁLOGO WEB: MERCADO PAGO (DINERO EN CUENTA / TARJETAS) + WHATSAPP POR ETAPA
+// ============================================================================
+
+function getSafeHttpBaseUrl(rawUrl: unknown, fallbackOrigin: string): string {
+  const candidate = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (candidate && /^https?:\/\//i.test(candidate)) {
+    return candidate.split('?')[0].replace(/\/$/, '');
+  }
+  return fallbackOrigin.replace(/\/$/, '');
+}
+
+app.post('/api/catalog/mp-create-preference', async (req: Request, res: Response) => {
+  try {
+    const {
+      orderId,
+      orderNumber,
+      tenantId = '',
+      storeName = 'Tienda',
+      customerName = 'Cliente',
+      amount,
+      items = [],
+      catalogHandle = '',
+      mpSubOption = 'dinero_en_cuenta',
+      returnUrl,
+    } = req.body || {};
+
+    const cleanOrderId = String(orderId || '').trim();
+    const cleanTenantId = String(tenantId || '').trim();
+    const numericAmount = Number(amount || 0);
+
+    if (!cleanOrderId || numericAmount <= 0) {
+      return res.status(400).json({ ok: false, error: 'orderId y monto positivo requeridos.' });
+    }
+
+    const state = getServerState();
+    const mpToken =
+      (cleanTenantId && state.merchantMpTokensByTenantId?.[cleanTenantId]) ||
+      process.env.MERCADOPAGO_ACCESS_TOKEN ||
+      '';
+
+    if (!mpToken) {
+      return res.json({ ok: false, fallbackReason: 'missing_access_token' });
+    }
+
+    const reqOrigin = `${req.protocol}://${req.get('host')}`;
+    const safeBase = getSafeHttpBaseUrl(returnUrl, reqOrigin);
+    const handlePart = catalogHandle
+      ? `catalog=${encodeURIComponent(String(catalogHandle).trim())}&`
+      : '';
+    const subMode = mpSubOption === 'tarjetas_todos' ? 'tarjetas_todos' : 'dinero_en_cuenta';
+
+    const mpItems =
+      Array.isArray(items) && items.length > 0
+        ? items.map((it: any, idx: number) => ({
+            id: String(it.id || `${cleanOrderId}-${idx}`),
+            title: String(it.title || 'Producto').slice(0, 200),
+            quantity: Math.max(1, Math.floor(Number(it.quantity || 1))),
+            currency_id: 'ARS',
+            unit_price: Math.round(Number(it.unit_price || 0) * 100) / 100,
+          }))
+        : [
+            {
+              id: String(orderNumber || cleanOrderId),
+              title: `${String(storeName).slice(0, 80)} · Pedido #${String(orderNumber || cleanOrderId)}`,
+              description: `Compra web de ${String(customerName).slice(0, 60)}`,
+              quantity: 1,
+              currency_id: 'ARS',
+              unit_price: Math.round(numericAmount * 100) / 100,
+            },
+          ];
+
+    const prefPayload: Record<string, unknown> = {
+      items: mpItems,
+      external_reference: `catord::${cleanOrderId}`,
+      back_urls: {
+        success: `${safeBase}/?${handlePart}order_id=${encodeURIComponent(cleanOrderId)}&mp_status=approved`,
+        pending: `${safeBase}/?${handlePart}order_id=${encodeURIComponent(cleanOrderId)}&mp_status=pending`,
+        failure: `${safeBase}/?${handlePart}order_id=${encodeURIComponent(cleanOrderId)}&mp_status=failure`,
+      },
+      auto_return: 'approved',
+      notification_url: `${safeBase}/api/client-payments/webhook`,
+      statement_descriptor: String(storeName || 'TIENDA').slice(0, 22),
+      ...(subMode === 'dinero_en_cuenta'
+        ? {
+            purpose: 'wallet_purchase',
+            payment_methods: {
+              excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }],
+            },
+          }
+        : {}),
+    };
+
+    const mpRes = await fetch('https://api.mercadopago.com/checkout/preferences', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${mpToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(prefPayload),
+    });
+
+    const mpData: any = await mpRes.json();
+    if (mpRes.ok && mpData?.init_point) {
+      return res.json({
+        ok: true,
+        mode: 'mercadopago_api',
+        initPoint: mpData.init_point,
+        sandboxInitPoint: mpData.sandbox_init_point,
+        preferenceId: mpData.id || '',
+      });
+    }
+
+    return res.json({
+      ok: false,
+      fallbackReason: 'mp_api_error',
+      error: mpData?.message || 'Mercado Pago rechazó la generación del checkout.',
+    });
+  } catch (error: any) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error en preferencia MP catálogo.' });
+  }
+});
+
+app.post('/api/catalog/mp-verify-payment', async (req: Request, res: Response) => {
+  try {
+    const { orderId, tenantId = '', paymentId, collectionStatus } = req.body || {};
+    const cleanOrderId = String(orderId || '').trim();
+    const cleanTenantId = String(tenantId || '').trim();
+    if (!cleanOrderId) {
+      return res.status(400).json({ verified: false, error: 'orderId requerido.' });
+    }
+
+    const state = getServerState();
+    const mpToken =
+      (cleanTenantId && state.merchantMpTokensByTenantId?.[cleanTenantId]) ||
+      process.env.MERCADOPAGO_ACCESS_TOKEN ||
+      '';
+
+    if (mpToken) {
+      const cleanPaymentId = String(paymentId || '').trim();
+      if (cleanPaymentId && /^\d+$/.test(cleanPaymentId)) {
+        const mpRes = await fetch(`https://api.mercadopago.com/v1/payments/${encodeURIComponent(cleanPaymentId)}`, {
+          headers: { Authorization: `Bearer ${mpToken}` },
+        });
+        if (mpRes.ok) {
+          const info: any = await mpRes.json();
+          if (info?.status === 'approved') {
+            return res.json({
+              verified: true,
+              status: 'approved',
+              mpPaymentId: String(info.id),
+            });
+          }
+          return res.json({
+            verified: false,
+            status: info?.status || 'pending',
+            message: `El pago #${cleanPaymentId} figura como "${info?.status || 'pendiente'}" en Mercado Pago.`,
+          });
+        }
+      } else {
+        const searchRes = await fetch(
+          `https://api.mercadopago.com/v1/payments/search?external_reference=${encodeURIComponent(`catord::${cleanOrderId}`)}&sort=date_created&criteria=desc`,
+          { headers: { Authorization: `Bearer ${mpToken}` } }
+        );
+        if (searchRes.ok) {
+          const sData: any = await searchRes.json();
+          const hit = Array.isArray(sData?.results)
+            ? sData.results.find((p: any) => p?.status === 'approved')
+            : null;
+          if (hit) {
+            return res.json({
+              verified: true,
+              status: 'approved',
+              mpPaymentId: String(hit.id),
+            });
+          }
+        }
+      }
+    }
+
+    return res.json({
+      verified: collectionStatus === 'approved',
+      status: collectionStatus === 'approved' ? 'approved' : 'pending',
+    });
+  } catch (error: any) {
+    return res.status(500).json({ verified: false, error: error.message || 'Error verificando pago web.' });
+  }
+});
+
+app.post('/api/catalog/notify-customer-stage', async (req: Request, res: Response) => {
+  try {
+    const {
+      orderId = '',
+      orderNumber = '',
+      customerPhone = '',
+      stage = '',
+      message = '',
+      whatsappConfig,
+    } = req.body || {};
+
+    const cleanPhone = cleanPhoneNumber(String(customerPhone || ''));
+    const cleanMsg = String(message || '').trim();
+    const validStages = ['en_proceso_armando', 'listo_para_retirar', 'en_camino', 'retirado'];
+
+    if (!cleanPhone || !cleanMsg || !validStages.includes(String(stage))) {
+      return res.status(400).json({ success: false, info: 'Datos incompletos para notificar al cliente.' });
+    }
+
+    const state = getServerState();
+    const effectiveConfig = whatsappConfig && typeof whatsappConfig === 'object'
+      ? whatsappConfig
+      : state.config || {};
+
+    const dispatchRes = await sendDirectWhatsAppMessage(cleanPhone, cleanMsg, effectiveConfig);
+
+    console.log(
+      `[CATALOG ORDER WHATSAPP] Pedido #${String(orderNumber || orderId)} -> etapa "${String(stage)}" a ${cleanPhone}: ${dispatchRes.deliveryStatus}`
+    );
+
+    return res.json({
+      success: dispatchRes.success,
+      deliveryStatus: dispatchRes.deliveryStatus,
+      info: dispatchRes.info,
+      sentAt: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || 'Error enviando WhatsApp de etapa.' });
+  }
+});
+
+app.post('/api/catalog/notify-stock-alert', async (req: Request, res: Response) => {
+  try {
+    const { alertId = '', customerPhone = '', message = '', whatsappConfig } = req.body || {};
+    const cleanPhone = cleanPhoneNumber(String(customerPhone || ''));
+    const cleanMsg = String(message || '').trim();
+    if (!cleanPhone || !cleanMsg) {
+      return res.status(400).json({ success: false, info: 'Teléfono y mensaje requeridos.' });
+    }
+    const state = getServerState();
+    const effectiveConfig =
+      whatsappConfig && typeof whatsappConfig === 'object' ? whatsappConfig : state.config || {};
+    const dispatchRes = await sendDirectWhatsAppMessage(cleanPhone, cleanMsg, effectiveConfig);
+    console.log(
+      `[CATALOG STOCK ALERT WA] Aviso ${String(alertId)} -> ${cleanPhone}: ${dispatchRes.deliveryStatus}`
+    );
+    return res.json({
+      success: dispatchRes.success,
+      deliveryStatus: dispatchRes.deliveryStatus,
+      info: dispatchRes.info,
+      sentAt: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || 'Error enviando aviso de stock.' });
+  }
+});
+
+app.post('/api/catalog/send-promo-message', async (req: Request, res: Response) => {
+  try {
+    const { subscriberId = '', customerPhone = '', message = '', whatsappConfig } = req.body || {};
+    const cleanPhone = cleanPhoneNumber(String(customerPhone || ''));
+    const cleanMsg = String(message || '').trim();
+    if (!cleanPhone || !cleanMsg) {
+      return res.status(400).json({ success: false, info: 'Teléfono y mensaje requeridos.' });
+    }
+    const state = getServerState();
+    const effectiveConfig =
+      whatsappConfig && typeof whatsappConfig === 'object' ? whatsappConfig : state.config || {};
+    const dispatchRes = await sendDirectWhatsAppMessage(cleanPhone, cleanMsg, effectiveConfig);
+    console.log(
+      `[CATALOG PROMO WA] Suscriptor ${String(subscriberId)} -> ${cleanPhone}: ${dispatchRes.deliveryStatus}`
+    );
+    return res.json({
+      success: dispatchRes.success,
+      deliveryStatus: dispatchRes.deliveryStatus,
+      info: dispatchRes.info,
+      sentAt: new Date().toISOString(),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message || 'Error enviando promoción por WhatsApp.' });
+  }
+});
+
+app.post('/api/catalog/verify-transfer-receipt', async (req: Request, res: Response) => {
+  try {
+    const {
+      tenantId = 'default-tenant',
+      orderId = '',
+      orderNumber = '',
+      storeName = 'Comercio',
+      expectedAmount = 0,
+      alias = '',
+      cvu = '',
+      holderName = '',
+      imageBase64 = '',
+      mimeType: providedMimeType,
+      knownUsedOperationIds = [],
+    } = req.body || {};
+
+    const expectedAmtNum = Number(expectedAmount) || 0;
+    if (!imageBase64 || expectedAmtNum <= 0) {
+      return res.status(400).json({
+        success: false,
+        approved: false,
+        message: 'Se requiere la imagen del comprobante y un monto mayor a cero.',
+      });
+    }
+
+    const dataUriMatch = String(imageBase64).match(/^data:([^;]+);base64,(.+)$/);
+    const mimeType = dataUriMatch?.[1] || providedMimeType || 'image/jpeg';
+    const cleanBase64 = dataUriMatch?.[2] || String(imageBase64).replace(/^data:[^;]+;base64,/, '');
+
+    if (!/^image\/(jpeg|jpg|png|webp|gif)$/i.test(mimeType)) {
+      return res.status(400).json({
+        success: false,
+        approved: false,
+        message: 'Formato de imagen no permitido. Subí una captura JPG, PNG o WebP.',
+      });
+    }
+
+    if (!cleanBase64 || cleanBase64.length < 100) {
+      return res.status(400).json({
+        success: false,
+        approved: false,
+        message: 'La imagen del comprobante parece estar vacía o dañada.',
+      });
+    }
+
+    if (cleanBase64.length > 10 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        approved: false,
+        message: 'La imagen del comprobante supera el tamaño máximo permitido.',
+      });
+    }
+
+    const ai = getGenAIClient();
+    const promptText = `Analizá rigurosamente esta captura para verificar si es un comprobante REAL de transferencia bancaria, billetera virtual o pago digital.
+
+Datos esperados del pedido web:
+- Comercio receptor: ${String(storeName)}
+- Importe esperado: $${expectedAmtNum} ARS
+- Alias esperado de destino: ${String(alias || '(no especificado)')}
+- Titular esperado de destino: ${String(holderName || '(no especificado)')}
+- CVU/CBU esperado de destino: ${String(cvu || '(no especificado)')}
+
+Reglas estrictas:
+1. "isValidPaymentReceipt": true SOLO si es claramente un comprobante o ticket real de transferencia o pago aprobado.
+2. "paymentStatus": "approved" si está realizada/aprobada/enviada con éxito, "pending" si está pendiente/en proceso, "rejected" si fue rechazada, "unknown" si no queda claro.
+3. "detectedAmount": monto numérico exacto transferido (0 si no se ve).
+4. "detectedAliasOrCvu": Alias, CVU o CBU destinatario si figura visible.
+5. "detectedRecipientName": nombre completo del destinatario si figura visible.
+6. "operationId": número o código único de operación/comprobante/referencia (ej. 1234567890).
+7. "paymentDate": fecha/hora visible.
+8. "platform": billetera o banco emisor visible (Mercado Pago, Banco Galicia, MODO, Brubank, Naranja X, Ualá, etc.).
+9. "reasonSummary": explicación breve en español.`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-4-hydrogen',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: cleanBase64 } },
+            { text: promptText },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            isValidPaymentReceipt: { type: Type.BOOLEAN },
+            paymentStatus: { type: Type.STRING },
+            detectedAmount: { type: Type.NUMBER },
+            detectedAliasOrCvu: { type: Type.STRING },
+            detectedRecipientName: { type: Type.STRING },
+            operationId: { type: Type.STRING },
+            paymentDate: { type: Type.STRING },
+            platform: { type: Type.STRING },
+            reasonSummary: { type: Type.STRING },
+          },
+          required: [
+            'isValidPaymentReceipt',
+            'paymentStatus',
+            'detectedAmount',
+            'detectedAliasOrCvu',
+            'detectedRecipientName',
+            'operationId',
+            'paymentDate',
+            'platform',
+            'reasonSummary',
+          ],
+        },
+      },
+    });
+
+    let analysis: any = {};
+    try {
+      analysis = JSON.parse(response.text || '{}');
+    } catch {
+      return res.json({
+        success: true,
+        approved: false,
+        message: 'No se pudo leer con claridad el comprobante. Subí una captura más nítida o revisalo manualmente.',
+      });
+    }
+
+    if (
+      !analysis.isValidPaymentReceipt ||
+      String(analysis.paymentStatus || '').toLowerCase() !== 'approved'
+    ) {
+      return res.json({
+        success: true,
+        approved: false,
+        analysis,
+        message:
+          analysis.reasonSummary ||
+          'La imagen no confirma una transferencia aprobada/realizada.',
+      });
+    }
+
+    const detectedAmount = Number(analysis.detectedAmount || 0);
+    if (!detectedAmount || detectedAmount < expectedAmtNum * 0.98) {
+      return res.json({
+        success: true,
+        approved: false,
+        analysis,
+        message: `El monto leído ($ ${detectedAmount.toLocaleString('es-AR')}) es menor al total del pedido ($ ${expectedAmtNum.toLocaleString('es-AR')}).`,
+      });
+    }
+
+    const normalizeText = (v: string) =>
+      v
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[@\s]/g, '')
+        .trim();
+
+    const detectedAliasNorm = normalizeText(String(analysis.detectedAliasOrCvu || ''));
+    const detectedNameNorm = normalizeText(String(analysis.detectedRecipientName || ''));
+    const targetAliasNorm = normalizeText(String(alias || ''));
+    const targetCvuNorm = normalizeText(String(cvu || ''));
+    const targetHolderNorm = normalizeText(String(holderName || ''));
+
+    const hasDetectedAlias =
+      detectedAliasNorm.length >= 4 &&
+      !['nofigura', 'na', 'sinalias', 'nodisponible'].includes(detectedAliasNorm);
+    const hasDetectedName =
+      detectedNameNorm.length >= 3 &&
+      !['nofigura', 'na', 'nodisponible'].includes(detectedNameNorm);
+
+    if (hasDetectedAlias || hasDetectedName) {
+      const aliasMatches =
+        Boolean(targetAliasNorm) &&
+        Boolean(detectedAliasNorm) &&
+        (detectedAliasNorm.includes(targetAliasNorm) || targetAliasNorm.includes(detectedAliasNorm));
+      const cvuMatches =
+        Boolean(targetCvuNorm) &&
+        Boolean(detectedAliasNorm) &&
+        (detectedAliasNorm.includes(targetCvuNorm) || targetCvuNorm.includes(detectedAliasNorm));
+      const holderTokens = String(holderName || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3);
+      const holderMatches =
+        holderTokens.length > 0 &&
+        Boolean(detectedNameNorm) &&
+        holderTokens.some((tok) => detectedNameNorm.includes(tok));
+
+      const explicitAliasMismatch =
+        hasDetectedAlias && targetAliasNorm && !aliasMatches && !cvuMatches && !holderMatches;
+      const explicitHolderMismatch =
+        !hasDetectedAlias && hasDetectedName && targetHolderNorm && !holderMatches;
+
+      if (explicitAliasMismatch || explicitHolderMismatch) {
+        return res.json({
+          success: true,
+          approved: false,
+          analysis,
+          message: `El destinatario detectado (${analysis.detectedAliasOrCvu || analysis.detectedRecipientName}) no coincide con el Alias (${alias || 'N/A'}) ni titular (${holderName || 'N/A'}) de la tienda.`,
+        });
+      }
+    }
+
+    const rawOpId = String(analysis.operationId || '').trim();
+    const normOpId = rawOpId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    const cleanTenantId = String(tenantId || 'default-tenant').trim();
+    const state = getServerState();
+    state.usedCatalogTransferRefs = state.usedCatalogTransferRefs || {};
+
+    if (normOpId.length >= 4) {
+      const registryKey = `${cleanTenantId}::${normOpId}`;
+      const existingRef = state.usedCatalogTransferRefs[registryKey];
+      if (existingRef && existingRef.orderId !== String(orderId || '')) {
+        return res.json({
+          success: true,
+          approved: false,
+          duplicate: true,
+          operationId: rawOpId,
+          analysis,
+          message: `Comprobante duplicado: el N° de operación ${rawOpId} ya fue utilizado para acreditar el pedido #${existingRef.orderNumber || existingRef.orderId}.`,
+        });
+      }
+
+      if (Array.isArray(knownUsedOperationIds)) {
+        const clientDuplicate = knownUsedOperationIds.some(
+          (entry: any) =>
+            entry &&
+            String(entry.orderId || '') !== String(orderId || '') &&
+            String(entry.operationId || '')
+              .replace(/[^a-zA-Z0-9]/g, '')
+              .toUpperCase() === normOpId
+        );
+        if (clientDuplicate) {
+          return res.json({
+            success: true,
+            approved: false,
+            duplicate: true,
+            operationId: rawOpId,
+            analysis,
+            message: `Comprobante duplicado: el N° de operación ${rawOpId} ya figura acreditado en otro pedido de la tienda.`,
+          });
+        }
+      }
+
+      if (!String(orderId || '').startsWith('preview-')) {
+        state.usedCatalogTransferRefs[registryKey] = {
+          orderId: String(orderId || orderNumber || `ord-${Date.now()}`),
+          orderNumber: String(orderNumber || orderId || ''),
+          operationId: rawOpId,
+          detectedAmount,
+          verifiedAt: new Date().toISOString(),
+        };
+        saveServerState(state);
+      }
+    }
+
+    const finalOpId = rawOpId || `TRF-${Date.now().toString().slice(-6)}`;
+    const verificationSummary = `${analysis.platform || 'Transferencia'} · Op #${finalOpId} · $ ${detectedAmount.toLocaleString('es-AR')} · ${analysis.reasonSummary || 'Verificado'}`;
+
+    return res.json({
+      success: true,
+      approved: true,
+      duplicate: false,
+      operationId: finalOpId,
+      detectedAmount,
+      platform: analysis.platform || 'Transferencia',
+      verificationSummary,
+      verifiedAt: new Date().toISOString(),
+      analysis,
+    });
+  } catch (error: any) {
+    console.error('Error en /api/catalog/verify-transfer-receipt:', error);
+    return res.status(500).json({
+      success: false,
+      approved: false,
+      message: error.message || 'No se pudo analizar automáticamente el comprobante.',
+    });
   }
 });
 

@@ -532,6 +532,88 @@ export interface SalespersonRendicion {
 // CATÁLOGO ONLINE Y PEDIDOS PARA RETIRAR POR WHATSAPP
 // ============================================================================
 
+export interface CatalogProductVariant {
+  id: string;
+  label: string; // Ej: "Talle M", "Negro · L", "38"
+  sku?: string;
+  stockQuantity?: number; // undefined = stock sin límite; 0 = sin stock
+  price?: number; // precio opcional distinto para esta variante
+}
+
+export interface CatalogCoupon {
+  id: string;
+  code: string; // Ej: "BIENVENIDO10"
+  discountType: 'percent' | 'fixed';
+  value: number;
+  minPurchase?: number;
+  active: boolean;
+  description?: string;
+}
+
+export interface CatalogPromoBanner {
+  id: string;
+  mode?: 'built' | 'image'; // 'built' = armado en página, 'image' = imagen subida o URL
+  imageUrl?: string;
+  badgeText?: string;
+  title: string;
+  subtitle?: string;
+  theme: 'navy' | 'emerald' | 'amber' | 'rose';
+  filterCategory?: string;
+  filterSubfilter?: string;
+  couponCode?: string;
+  ctaLabel?: string;
+  active: boolean;
+}
+
+export interface CatalogLoyaltyTier {
+  id: string;
+  minPoints: number;
+  discountPercent: number; // 10, 15, 20, 30, 40, 50...
+  label?: string;
+}
+
+export interface CatalogLoyaltyMovement {
+  id: string;
+  date: string;
+  type: 'earned' | 'redeemed' | 'manual_adjustment' | 'reversed';
+  pointsDelta: number;
+  orderId?: string;
+  orderNumber?: string;
+  note?: string;
+}
+
+export interface CatalogLoyaltyAccount {
+  id: string;
+  tenantId: string;
+  dni: string;
+  customerName?: string;
+  customerPhone?: string;
+  pointsBalance: number;
+  totalPointsEarned: number;
+  totalPointsRedeemed: number;
+  ordersCount: number;
+  lastOrderAt?: string;
+  history?: CatalogLoyaltyMovement[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CatalogPromoSubscriber {
+  id: string;
+  tenantId: string;
+  name: string;
+  phone: string;
+  email?: string;
+  birthDate?: string;
+  preferredCategory?: string;
+  source: 'storefront_form' | 'checkout_opt_in';
+  active: boolean;
+  lastPromoSentAt?: string;
+  lastBirthdayGreetingYear?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface CatalogProduct {
   id: string;
   name: string;
@@ -542,10 +624,16 @@ export interface CatalogProduct {
   subfilters?: string[]; // Subfiltros asignados al producto (ej. Remeras, Jeans, Invierno)
   unitLabel?: string;
   imageUrl?: string;
+  additionalImageUrls?: string[]; // Hasta 3 fotos extra para galería (total 4 fotos)
   available: boolean;
   featured?: boolean;
   sku?: string;
   stockQuantity?: number; // undefined = stock sin límite; 0 = Sin stock (habilita "Avisar cuando haya stock")
+  lowStockThreshold?: number; // Umbral opcional propio de alerta de stock bajo
+  wholesaleMinQty?: number; // Cantidad mínima para precio mayorista (ej. 3 o 6)
+  wholesalePrice?: number; // Precio unitario llevando >= wholesaleMinQty
+  loyaltyPoints?: number; // Puntos personalizados que suma por unidad (si es undefined usa default de la tienda)
+  variants?: CatalogProductVariant[]; // Variantes (Talle / Color / Medida) con stock propio
   createdAt: string;
   updatedAt: string;
 }
@@ -556,6 +644,8 @@ export interface CatalogStockAlertRequest {
   productId: string;
   productName: string;
   productSku?: string;
+  variantId?: string;
+  variantLabel?: string;
   customerName: string;
   customerPhone: string;
   status: 'pending' | 'notified';
@@ -581,6 +671,18 @@ export interface OnlineCatalogSettings {
   pickupInstructions?: string;
   paymentNote?: string;
   currencySymbol?: string;
+  defaultLowStockThreshold?: number; // Alerta cuando queden <= N unidades (por defecto 2)
+  cashOrTransferDiscountPercent?: number; // % descuento pagando Efectivo / Transferencia
+  coupons?: CatalogCoupon[];
+  enablePromoClub?: boolean; // Permitir dejar datos en la web para recibir promos y descuentos
+  promoClubTitle?: string;
+  promoClubIncentive?: string;
+  promoClubWelcomeCoupon?: string;
+  promoBanners?: CatalogPromoBanner[];
+  enableLoyaltyProgram?: boolean; // Habilitar programa de puntos por DNI en el catálogo web
+  loyaltyPointsPerUnit?: number; // Puntos que suma cada prenda/unidad por defecto
+  loyaltyTiers?: CatalogLoyaltyTier[]; // Escala de % de descuento según cantidad de puntos
+  loyaltyRestrictRedeemMethods?: boolean; // Si true (defecto), canje válido con retiro en local, transferencia o Dinero en cuenta MP
   updatedAt?: string;
 }
 
@@ -588,11 +690,29 @@ export interface CatalogPickupOrderItem {
   productId: string;
   productName: string;
   sku?: string;
+  variantId?: string;
+  variantLabel?: string;
   imageUrl?: string;
   unitLabel?: string;
   unitPrice: number;
+  regularUnitPrice?: number;
+  appliedWholesale?: boolean;
   quantity: number;
   subtotal: number;
+}
+
+export type CatalogPaymentMethod =
+  | 'efectivo'
+  | 'transferencia'
+  | 'link_pago'
+  | 'mercadopago_dinero_cuenta'
+  | 'acordar';
+
+export interface CatalogOrderStageNotification {
+  stage: 'en_proceso_armando' | 'listo_para_retirar' | 'en_camino' | 'retirado';
+  sentAt: string;
+  channel: 'whatsapp_api' | 'whatsapp_link';
+  summary: string;
 }
 
 export interface CatalogPickupOrder {
@@ -603,17 +723,43 @@ export interface CatalogPickupOrder {
   storeName: string;
   customerName: string;
   customerPhone: string;
+  customerDni?: string;
   deliveryMethod?: 'retiro' | 'envio';
   deliveryAddress?: string;
   preferredPickupWindow?: string;
-  preferredPaymentMethod?: 'efectivo' | 'transferencia' | 'link_pago' | 'acordar';
-  confirmedPaymentMethod?: 'efectivo' | 'transferencia' | 'link_pago' | 'fiado' | 'acordar';
+  preferredPaymentMethod?: CatalogPaymentMethod;
+  confirmedPaymentMethod?: CatalogPaymentMethod | 'fiado';
+  mpSubOption?: 'dinero_en_cuenta' | 'tarjetas_todos';
+  paymentStatus?: 'pendiente' | 'en_proceso' | 'comprobante_en_revision' | 'acreditado';
+  transferReceiptImageUrl?: string;
+  transferReference?: string;
+  transferOperationId?: string;
+  transferVerifiedAt?: string;
+  transferVerificationSummary?: string;
+  transferVerificationStatus?: 'pendiente' | 'verificado_auto' | 'rechazado' | 'duplicado';
+  mpInitPoint?: string;
+  mpPreferenceId?: string;
+  mpPaymentId?: string;
+  stageNotifications?: CatalogOrderStageNotification[];
   notes?: string;
+  customerSpecificRequest?: string;
   items: CatalogPickupOrderItem[];
+  subtotalBeforeDiscount?: number;
+  wholesaleSavings?: number;
+  couponCode?: string;
+  couponDiscountAmount?: number;
+  paymentMethodDiscountPercent?: number;
+  paymentMethodDiscountAmount?: number;
+  loyaltyDiscountPercent?: number;
+  loyaltyDiscountAmount?: number;
+  loyaltyPointsEarned?: number;
+  loyaltyPointsRedeemed?: number;
+  loyaltyPointsSettled?: boolean;
   totalAmount: number;
   currencySymbol: string;
   status: 'pendiente_retiro' | 'listo_para_retirar' | 'en_camino' | 'retirado' | 'cancelado';
   stockDeducted?: boolean;
+  stockRestoredAt?: string;
   linkedBoletaId?: string;
   linkedBoletaNumber?: string;
   dispatchReceiptNumber?: string;
@@ -648,6 +794,18 @@ export interface PublishedPublicCatalog {
   merchantPaymentBank?: string;
   merchantPaymentHolder?: string;
   merchantMpCheckoutLink?: string;
+  hasMerchantMpAccessToken?: boolean;
+  cashOrTransferDiscountPercent?: number;
+  coupons?: CatalogCoupon[];
+  enablePromoClub?: boolean;
+  promoClubTitle?: string;
+  promoClubIncentive?: string;
+  promoClubWelcomeCoupon?: string;
+  promoBanners?: CatalogPromoBanner[];
+  enableLoyaltyProgram?: boolean;
+  loyaltyPointsPerUnit?: number;
+  loyaltyTiers?: CatalogLoyaltyTier[];
+  loyaltyRestrictRedeemMethods?: boolean;
   currencySymbol: string;
   products: CatalogProduct[];
   updatedAt: string;
