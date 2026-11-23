@@ -417,11 +417,18 @@ export default function App() {
 
   useEffect(() => {
     if (
-      (activeTab === 'catalogo' || activeTab === 'ventas_web' || activeTab === 'boletas') &&
+      (activeTab === 'catalogo' ||
+        activeTab === 'ventas_web' ||
+        activeTab === 'boletas' ||
+        (activeTab === 'clientes' && selectedTenant?.catalogEnabled !== false)) &&
       selectedTenant
     ) {
       void handleRefreshCatalogOrders();
-      if (activeTab === 'catalogo' || activeTab === 'ventas_web') {
+      if (
+        activeTab === 'catalogo' ||
+        activeTab === 'ventas_web' ||
+        activeTab === 'clientes'
+      ) {
         void handleRefreshCatalogLoyaltyAccounts();
       }
       if (activeTab === 'catalogo' || activeTab === 'boletas') {
@@ -4454,6 +4461,24 @@ export default function App() {
                 setIsNewBoletaOpen(true);
               }}
               onQuickSendStatement={(client) => openQuickStatementForClient(client)}
+              catalogEnabled={selectedTenant?.catalogEnabled !== false}
+              catalogLoyaltyAccounts={catalogLoyaltyAccounts}
+              catalogOrders={catalogOrders}
+              catalogProducts={catalogProducts}
+              catalogSettings={catalogSettings}
+              catalogPublicUrl={
+                typeof window !== 'undefined'
+                  ? `${window.location.origin}/?catalog=${encodeURIComponent(
+                      catalogSettings.slug?.trim() ||
+                        config.tenantCode?.trim() ||
+                        selectedTenant?.tenantCode?.trim() ||
+                        selectedTenant?.id ||
+                        ''
+                    )}`
+                  : undefined
+              }
+              onRefreshCatalogLoyaltyAccounts={handleRefreshCatalogLoyaltyAccounts}
+              showToast={showToast}
             />
           </Suspense>
         )}

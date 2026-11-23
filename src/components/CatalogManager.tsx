@@ -119,6 +119,7 @@ import {
 import { BrandMark } from './BrandMark';
 import type { ReceiptModalData } from './PaymentReceiptModal';
 import { WebOrderDetailModal } from './WebOrderDetailModal';
+import { WebLoyaltyClientsPanel } from './WebLoyaltyClientsPanel';
 
 interface CatalogManagerProps {
   config: DistributorConfig;
@@ -261,7 +262,13 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   showToast,
 }) => {
   const [subTab, setSubTab] = useState<
-    'productos' | 'pedidos' | 'avisos_stock' | 'club_promos' | 'estadisticas' | 'configuracion'
+    | 'productos'
+    | 'pedidos'
+    | 'avisos_stock'
+    | 'club_promos'
+    | 'clientes_web'
+    | 'estadisticas'
+    | 'configuracion'
   >('productos');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
@@ -2746,6 +2753,22 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             <button
               type="button"
               onClick={() => {
+                setSubTab('clientes_web');
+                void onRefreshOrders?.();
+                void onRefreshLoyaltyAccounts?.();
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'clientes_web'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <UserCheck className="w-3.5 h-3.5 text-indigo-700" />
+              <span>Clientes Web ({loyaltyAccounts.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 setSubTab('estadisticas');
                 void onRefreshLoyaltyAccounts?.();
               }}
@@ -4397,6 +4420,48 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       {/* SUB-TAB 2C: CLUB DE PROMOS Y DESCUENTOS (SUSCRIPTORES) */}
       {subTab === 'club_promos' && (
         <div className="space-y-4">
+          {/* Store Toggle Card: Habilitar / Deshabilitar Club de Promos y Descuentos */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Gift className="w-4 h-4 text-emerald-600" />
+                <span>Club de Promos y Descuentos en tu tienda web</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {settings.enablePromoClub !== false
+                  ? 'Habilitado: tus clientes pueden dejar sus datos para recibir promos, cupones y saludos de cumpleaños.'
+                  : 'Deshabilitado: el formulario de suscripción al Club de Promos no se muestra en tu catálogo web.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const nextEnabled = settings.enablePromoClub === false;
+                const updated: OnlineCatalogSettings = {
+                  ...settings,
+                  enablePromoClub: nextEnabled,
+                  updatedAt: new Date().toISOString(),
+                };
+                setDraftSettings((prev) => ({ ...prev, enablePromoClub: nextEnabled }));
+                onSaveSettings(updated);
+                showToast(
+                  nextEnabled
+                    ? 'Club de Promos y Descuentos habilitado en tu tienda web.'
+                    : 'Club de Promos y Descuentos deshabilitado en tu tienda web.'
+                );
+              }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer shrink-0 transition-colors ${
+                settings.enablePromoClub !== false
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                  : 'bg-[#0B1933] text-white hover:bg-[#13264A]'
+              }`}
+            >
+              {settings.enablePromoClub !== false
+                ? 'Habilitado · Clic para desactivar'
+                : 'Desactivado · Clic para habilitar'}
+            </button>
+          </div>
+
           {/* Birthday Automation Panel */}
           <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -4730,6 +4795,78 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 2C-BIS: CLIENTES WEB (PROGRAMA DE PUNTOS POR DNI) */}
+      {subTab === 'clientes_web' && (
+        <div className="space-y-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Award className="w-4 h-4 text-emerald-700" />
+                <span>Estado del Club de Puntos y Descuentos por DNI</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {settings.enableLoyaltyProgram
+                  ? 'Activo en tu catálogo web: los compradores ingresan su DNI al entrar, suman puntos y desbloquean descuentos.'
+                  : 'Desactivado en tu catálogo web: activalo cuando quieras ofrecer suma de puntos y descuentos por DNI.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const nextEnabled = !settings.enableLoyaltyProgram;
+                const updated: OnlineCatalogSettings = {
+                  ...settings,
+                  enableLoyaltyProgram: nextEnabled,
+                  loyaltyPointsPerUnit:
+                    typeof settings.loyaltyPointsPerUnit === 'number'
+                      ? settings.loyaltyPointsPerUnit
+                      : 10,
+                  loyaltyTiers:
+                    settings.loyaltyTiers && settings.loyaltyTiers.length > 0
+                      ? settings.loyaltyTiers
+                      : getDefaultLoyaltyTiers(),
+                  loyaltyRestrictRedeemMethods: settings.loyaltyRestrictRedeemMethods !== false,
+                  updatedAt: new Date().toISOString(),
+                };
+                setDraftSettings((prev) => ({
+                  ...prev,
+                  enableLoyaltyProgram: nextEnabled,
+                  loyaltyPointsPerUnit: updated.loyaltyPointsPerUnit,
+                  loyaltyTiers: updated.loyaltyTiers,
+                  loyaltyRestrictRedeemMethods: updated.loyaltyRestrictRedeemMethods,
+                }));
+                onSaveSettings(updated);
+                showToast(
+                  nextEnabled
+                    ? 'Club de Descuentos / Puntos por DNI habilitado en tu catálogo web.'
+                    : 'Club de Descuentos / Puntos por DNI deshabilitado.'
+                );
+              }}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer shrink-0 transition-colors ${
+                settings.enableLoyaltyProgram
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100'
+                  : 'bg-[#0B1933] text-white hover:bg-[#13264A]'
+              }`}
+            >
+              {settings.enableLoyaltyProgram
+                ? 'Habilitado · Clic para desactivar'
+                : 'Desactivado · Clic para habilitar'}
+            </button>
+          </div>
+
+          <WebLoyaltyClientsPanel
+            loyaltyAccounts={loyaltyAccounts}
+            orders={orders}
+            products={products}
+            settings={settings}
+            currencySymbol={currency}
+            catalogPublicUrl={publicUrl}
+            onRefreshLoyaltyAccounts={onRefreshLoyaltyAccounts}
+            showToast={showToast}
+          />
         </div>
       )}
 
@@ -5254,6 +5391,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
                       />
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setSubTab('clientes_web')}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer"
+                    >
+                      <UserCheck className="w-3.5 h-3.5 text-emerald-300" />
+                      <span>Ver Ficha Clientes Web y Promos</span>
+                    </button>
                     {onRefreshLoyaltyAccounts && (
                       <button
                         type="button"

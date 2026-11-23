@@ -91,6 +91,29 @@ CREATE INDEX IF NOT EXISTS idx_app_cloud_store_catalog_orders_dispatch
   ON public.app_cloud_store USING btree ((value->>'tenantId'), (value->>'deliveryMethod'), (value->>'dispatchReceiptNumber'), updated_at DESC)
   WHERE key LIKE 'rec:%:catalogOrders:%';
 
+-- Índice JSONB para pedidos por DNI del cliente (Programa de Puntos por DNI)
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_catalog_orders_loyalty_dni
+  ON public.app_cloud_store USING btree ((value->>'tenantId'), (value->>'customerDni'), updated_at DESC)
+  WHERE key LIKE 'catalog_order_%' OR key LIKE 'rec:%:catalogOrders:%';
+
+-- Índices parciales para Programa de Puntos por DNI ('catalog_loyalty_<tenantId>_<dni>' y 'rec:<tenantId>:catalogLoyaltyAccounts:<id>')
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_loyalty_public
+  ON public.app_cloud_store USING btree (key text_pattern_ops, (value->>'tenantId'), (value->>'dni'), updated_at DESC)
+  WHERE key LIKE 'catalog_loyalty_%';
+
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_loyalty_tenant
+  ON public.app_cloud_store USING btree (key text_pattern_ops, (value->>'tenantId'), updated_at DESC)
+  WHERE key LIKE 'rec:%:catalogLoyaltyAccounts:%';
+
+-- Índice parcial para Club de Promociones ('catalog_promo_sub_<id>') y Avisos de Stock ('catalog_stock_alert_<id>')
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_catalog_promo_subs
+  ON public.app_cloud_store USING btree ((value->>'tenantId'), updated_at DESC)
+  WHERE key LIKE 'catalog_promo_sub_%';
+
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_catalog_stock_alerts
+  ON public.app_cloud_store USING btree ((value->>'tenantId'), (value->>'productId'), updated_at DESC)
+  WHERE key LIKE 'catalog_stock_alert_%';
+
 -- Índice GIN para consultas sobre atributos internos del JSONB
 CREATE INDEX IF NOT EXISTS idx_app_cloud_store_value_gin
   ON public.app_cloud_store USING gin (value jsonb_path_ops);

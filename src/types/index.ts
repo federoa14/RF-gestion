@@ -690,6 +690,8 @@ export interface CatalogPickupOrderItem {
   productId: string;
   productName: string;
   sku?: string;
+  category?: string;
+  subfilters?: string[];
   variantId?: string;
   variantLabel?: string;
   imageUrl?: string;

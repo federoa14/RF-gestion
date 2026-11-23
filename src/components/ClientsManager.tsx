@@ -30,8 +30,18 @@ import {
   ShoppingBag,
   Eye,
   Snowflake,
+  UserCheck,
 } from 'lucide-react';
-import { Client, Boleta, Salesperson, DistributorConfig } from '../types';
+import {
+  Client,
+  Boleta,
+  Salesperson,
+  DistributorConfig,
+  CatalogLoyaltyAccount,
+  CatalogPickupOrder,
+  CatalogProduct,
+  OnlineCatalogSettings,
+} from '../types';
 import { formatCurrency, formatDateEs, getBoletaBalance } from '../utils/alerts';
 import { createWhatsAppUrl } from '../utils/whatsapp';
 import { getBusinessLabels, ExcessPaymentAllocationPlan } from '../utils/businessMode';
@@ -41,6 +51,7 @@ import { ClientAccountStatementModal } from './ClientAccountStatementModal';
 import { ClientDetailModal } from './ClientDetailModal';
 import { ColdClientsRadarPanel } from './ColdClientsRadarPanel';
 import { ClientStatementQuickShareModal } from './ClientStatementQuickShareModal';
+import { WebLoyaltyClientsPanel } from './WebLoyaltyClientsPanel';
 
 interface ClientsManagerProps {
   clients: Client[];
@@ -68,7 +79,15 @@ interface ClientsManagerProps {
   onNavigateToSalespeople?: () => void;
   onCreateSaleForClient?: (client: Client) => void;
   onQuickSendStatement?: (client: Client) => void;
-  initialSection?: 'directory' | 'cold_radar';
+  initialSection?: 'directory' | 'cold_radar' | 'web_clients';
+  catalogEnabled?: boolean;
+  catalogLoyaltyAccounts?: CatalogLoyaltyAccount[];
+  catalogOrders?: CatalogPickupOrder[];
+  catalogProducts?: CatalogProduct[];
+  catalogSettings?: OnlineCatalogSettings;
+  catalogPublicUrl?: string;
+  onRefreshCatalogLoyaltyAccounts?: () => Promise<void> | void;
+  showToast?: (msg: string) => void;
 }
 
 export const ClientsManager: React.FC<ClientsManagerProps> = ({
@@ -87,11 +106,23 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
   onCreateSaleForClient,
   onQuickSendStatement,
   initialSection = 'directory',
+  catalogEnabled = false,
+  catalogLoyaltyAccounts = [],
+  catalogOrders = [],
+  catalogProducts = [],
+  catalogSettings = { published: true },
+  catalogPublicUrl,
+  onRefreshCatalogLoyaltyAccounts,
+  showToast,
 }) => {
   const labels = getBusinessLabels(config);
   const isIndumentaria = config.businessRubro === 'indumentaria';
-  const [sectionMode, setSectionMode] = useState<'directory' | 'cold_radar'>(
-    isIndumentaria && initialSection === 'cold_radar' ? 'cold_radar' : 'directory'
+  const [sectionMode, setSectionMode] = useState<'directory' | 'cold_radar' | 'web_clients'>(
+    isIndumentaria && initialSection === 'cold_radar'
+      ? 'cold_radar'
+      : catalogEnabled && initialSection === 'web_clients'
+      ? 'web_clients'
+      : 'directory'
   );
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSellerFilter, setSelectedSellerFilter] = useState<string>('all');
@@ -99,12 +130,16 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
 
   React.useEffect(() => {
-    if (!isIndumentaria) {
+    if (sectionMode === 'cold_radar' && !isIndumentaria) {
       setSectionMode('directory');
-    } else if (initialSection === 'cold_radar') {
+    } else if (sectionMode === 'web_clients' && !catalogEnabled) {
+      setSectionMode('directory');
+    } else if (isIndumentaria && initialSection === 'cold_radar') {
       setSectionMode('cold_radar');
+    } else if (catalogEnabled && initialSection === 'web_clients') {
+      setSectionMode('web_clients');
     }
-  }, [isIndumentaria, initialSection]);
+  }, [isIndumentaria, catalogEnabled, initialSection]);
 
   const coldClientsCount = React.useMemo(() => {
     if (!isIndumentaria) return 0;
@@ -324,10 +359,10 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
         </div>
       </div>
 
-      {/* Sub-navigation exclusively for Rubro Indumentaria: Padrón vs Radar de Clientes Fríos */}
-      {isIndumentaria && (
+      {/* Sub-navigation for Rubro Indumentaria and/or Web Catalog (Clientes Web con DNI) */}
+      {(isIndumentaria || catalogEnabled) && (
         <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-[#0B1933] px-4 py-2.5 rounded-xl border border-[#CBD5E1] dark:border-[#B6C2D2]/20">
-          <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-[#F4F6F9] dark:bg-[#071021] border border-[#CBD5E1] dark:border-[#B6C2D2]/20">
+          <div className="inline-flex flex-wrap items-center gap-1 p-1 rounded-lg bg-[#F4F6F9] dark:bg-[#071021] border border-[#CBD5E1] dark:border-[#B6C2D2]/20">
             <button
               type="button"
               onClick={() => setSectionMode('directory')}
@@ -340,26 +375,60 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
               <Users className="w-3.5 h-3.5" />
               <span>Cartera Completa ({totalClientsCount})</span>
             </button>
-            <button
-              type="button"
-              onClick={() => setSectionMode('cold_radar')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
-                sectionMode === 'cold_radar'
-                  ? 'bg-[#0B1933] text-white dark:bg-[#E2E8F0] dark:text-[#091428]'
-                  : 'text-slate-600 dark:text-[#94A3B8] hover:text-[#0B1933] dark:hover:text-white'
-              }`}
-            >
-              <Snowflake className="w-3.5 h-3.5" />
-              <span>Radar de Clientes Fríos ({coldClientsCount})</span>
-            </button>
+            {isIndumentaria && (
+              <button
+                type="button"
+                onClick={() => setSectionMode('cold_radar')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  sectionMode === 'cold_radar'
+                    ? 'bg-[#0B1933] text-white dark:bg-[#E2E8F0] dark:text-[#091428]'
+                    : 'text-slate-600 dark:text-[#94A3B8] hover:text-[#0B1933] dark:hover:text-white'
+                }`}
+              >
+                <Snowflake className="w-3.5 h-3.5" />
+                <span>Radar de Clientes Fríos ({coldClientsCount})</span>
+              </button>
+            )}
+            {catalogEnabled && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSectionMode('web_clients');
+                  void onRefreshCatalogLoyaltyAccounts?.();
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                  sectionMode === 'web_clients'
+                    ? 'bg-[#0B1933] text-white dark:bg-[#E2E8F0] dark:text-[#091428]'
+                    : 'text-slate-600 dark:text-[#94A3B8] hover:text-[#0B1933] dark:hover:text-white'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Clientes Web (DNI · {catalogLoyaltyAccounts.length})</span>
+              </button>
+            )}
           </div>
           <span className="text-[11px] text-slate-500 dark:text-[#94A3B8]">
-            Exclusivo rubro Indumentaria · Detecta inactividad y sugiere qué prenda ofrecer por WhatsApp
+            {sectionMode === 'web_clients'
+              ? 'Participantes del Programa de Puntos por DNI · Sugerencias y promos por WhatsApp'
+              : isIndumentaria
+              ? 'Exclusivo rubro Indumentaria · Detecta inactividad y sugiere qué prenda ofrecer por WhatsApp'
+              : 'Clientes Web marcados automáticamente por su DNI para campañas y seguimiento'}
           </span>
         </div>
       )}
 
-      {isIndumentaria && sectionMode === 'cold_radar' ? (
+      {catalogEnabled && sectionMode === 'web_clients' ? (
+        <WebLoyaltyClientsPanel
+          loyaltyAccounts={catalogLoyaltyAccounts}
+          orders={catalogOrders}
+          products={catalogProducts}
+          settings={catalogSettings}
+          currencySymbol={config.currencySymbol || '$'}
+          catalogPublicUrl={catalogPublicUrl}
+          onRefreshLoyaltyAccounts={onRefreshCatalogLoyaltyAccounts}
+          showToast={showToast}
+        />
+      ) : isIndumentaria && sectionMode === 'cold_radar' ? (
         <ColdClientsRadarPanel
           clients={clients}
           boletas={boletas}

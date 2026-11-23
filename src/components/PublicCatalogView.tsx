@@ -1243,6 +1243,11 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
             productId: entry.product.id,
             productName: entry.product.name,
             sku: entry.variant?.sku?.trim() || entry.product.sku?.trim() || undefined,
+            category: liveP.category?.trim() || undefined,
+            subfilters:
+              Array.isArray(liveP.subfilters) && liveP.subfilters.length > 0
+                ? liveP.subfilters
+                : undefined,
             variantId: entry.variant?.id,
             variantLabel: entry.variant?.label,
             imageUrl: await createCompactOrderThumbnail(entry.product.imageUrl),
@@ -1430,7 +1435,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         }
       }
 
-      if (optInPromoClub) {
+      if (catalog.enablePromoClub !== false && optInPromoClub) {
         const promoSub: CatalogPromoSubscriber = {
           id: `prm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           tenantId: catalog.tenantId,
