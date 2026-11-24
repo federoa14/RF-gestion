@@ -117,23 +117,23 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
 
   const defaultReasonTitle =
     triggerContext?.reasonKey === 'limit_rubros'
-      ? `Alcanzaste el límite de ${PLAN_WEB_MAX_RUBROS} rubros de la Sección 2`
+      ? `Alcanzaste el límite de ${PLAN_WEB_MAX_RUBROS} rubros de tu Plan 2`
       : triggerContext?.reasonKey === 'limit_products'
-      ? `Alcanzaste el límite de ${PLAN_WEB_MAX_PRODUCTS} prendas / objetos de la Sección 2`
+      ? `Alcanzaste el límite de ${PLAN_WEB_MAX_PRODUCTS} prendas / objetos de tu Plan 2`
       : triggerContext?.reasonKey === 'manual_switch'
-      ? 'Elegí a qué plan querés cambiar (Sección 1, Sección 2 o Sección 3)'
-      : 'Función exclusiva de Sección 3 · Plan Full';
+      ? 'Elegí a qué plan querés cambiar (Plan 1, Plan 2 o Plan 3)'
+      : 'Función exclusiva de Plan 3 · Full';
 
   const displayTitle = triggerContext?.title || defaultReasonTitle;
   const displayDetail =
     triggerContext?.detail ||
     (triggerContext?.reasonKey === 'limit_rubros'
-      ? `Tu plan actual (${currentDef.sectionBadge} · ${currentDef.shortName}) permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros. Para agregar un rubro más necesitás ampliar tu plan a Sección 3 · Plan Full.`
+      ? `Tu plan actual (${currentDef.sectionBadge} · ${currentDef.shortName}) permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros. Para agregar un rubro más necesitás ampliar a Plan 3 · Full.`
       : triggerContext?.reasonKey === 'limit_products'
-      ? `Tu plan actual (${currentDef.sectionBadge} · ${currentDef.shortName}) permite cargar hasta ${PLAN_WEB_MAX_PRODUCTS} prendas u objetos con manejo de stock. Para seguir cargando artículos necesitás ampliar a Sección 3 · Plan Full.`
+      ? `Tu plan actual (${currentDef.sectionBadge} · ${currentDef.shortName}) permite cargar hasta ${PLAN_WEB_MAX_PRODUCTS} prendas u objetos con manejo de stock. Para seguir cargando artículos necesitás ampliar a Plan 3 · Full.`
       : triggerContext?.reasonKey === 'manual_switch'
-      ? `Actualmente estás en ${currentDef.sectionBadge} · ${currentDef.shortName}. Podés subir o volver a cualquier otra sección cuando lo necesites aceptando los Términos y Condiciones de Uso y Manejo.`
-      : `Tu plan actual (${currentDef.sectionBadge} · ${currentDef.shortName}) no incluye esta herramienta. Ampliá a Sección 3 · Plan Full para habilitar ofertas, seguimiento de clientes, SuperClub y descuentos.`);
+      ? `Actualmente estás en ${currentDef.sectionBadge} · ${currentDef.shortName}. Podés subir o volver a cualquier otro plan cuando lo necesites aceptando los Términos y Condiciones de Uso y Manejo.`
+      : `Tu plan actual (${currentDef.sectionBadge} · ${currentDef.shortName}) no incluye esta herramienta. Ampliá a Plan 3 · Full para habilitar ofertas, seguimiento de clientes, SuperClub y descuentos.`);
 
   const canonicalReasonLabel =
     triggerContext?.reasonKey === 'limit_rubros'
@@ -169,13 +169,13 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
             <div className="min-w-0">
               <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
                 {step === 'overview'
-                  ? 'Gestión de Plan · Cambio entre Secciones (1 ↔ 2 ↔ 3)'
+                  ? 'Gestión de Planes · Cambio Bidireccional (Plan 1 ↔ 2 ↔ 3)'
                   : `Paso Final · Términos y Condiciones (v${TERMS_VERSION})`}
               </div>
               <h3 className="text-base sm:text-lg font-bold tracking-tight truncate">
                 {step === 'overview'
                   ? isManualSwitch
-                    ? 'Cambiar de Plan o Sección de Servicio'
+                    ? 'Cambiar de Plan de Servicio'
                     : `Cambiar a ${targetDef.sectionBadge} · ${targetDef.shortName}`
                   : `Confirmar Cambio: ${currentDef.sectionBadge} → ${targetDef.sectionBadge}`}
               </h3>
@@ -201,7 +201,7 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
                   : 'bg-emerald-50 text-emerald-800 border-emerald-200'
               }`}
             >
-              <span>1. Elegir Sección y Valor</span>
+              <span>1. Elegir Plan y Valor</span>
             </div>
             <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <div
@@ -478,7 +478,7 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
                   onClick={() => setStep('overview')}
                   className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
                 >
-                  ← Volver a elegir sección
+                  ← Volver a elegir plan
                 </button>
                 <button
                   type="button"

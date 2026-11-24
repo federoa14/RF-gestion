@@ -457,7 +457,7 @@ export interface TenantPlanChangeRecord {
 export interface TenantSubscription {
   monthlyFee: number; // Monto mensual fijado (ej. 25000)
   currency: string; // "$"
-  planTier?: SubscriptionPlanTier; // Sección 1 ('basico'), Sección 2 ('web'), Sección 3 ('full')
+  planTier?: SubscriptionPlanTier; // Plan 1 ('basico'), Plan 2 ('web'), Plan 3 ('full')
   planSelectedAt?: string;
   lastPlanChange?: TenantPlanChangeRecord;
   planChangeHistory?: TenantPlanChangeRecord[];

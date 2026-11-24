@@ -43,18 +43,18 @@ export const PLATFORM_TERMS_SECTIONS: TermsClauseSection[] = [
     number: '4',
     title: 'Período de Prueba Gratuita (30 Días) y Abono Mensual',
     paragraphs: [
-      'Las cuentas autogestionadas gozan de 30 (treinta) días corridos de prueba gratuita sin cargo desde la fecha de alta. Finalizado ese plazo, el Comercio deberá seleccionar una de las tipologías de servicio vigentes (Sección 1, Sección 2 o Sección 3) y abonar el arancel mensual o anual correspondiente para continuar operando.',
+      'Las cuentas autogestionadas gozan de 30 (treinta) días corridos de prueba gratuita sin cargo desde la fecha de alta. Finalizado ese plazo, el Comercio deberá seleccionar una de las tipologías de servicio vigentes (Plan 1, Plan 2 o Plan 3) y abonar el arancel mensual o anual correspondiente para continuar operando.',
       'En caso de no abonar al término de la prueba o del ciclo mensual, la cuenta pasará a estado pausado conservando intactos todos sus registros para una futura reactivación.',
     ],
   },
   {
     id: 'planes-cambios',
     number: '5',
-    title: 'Tipologías de Planes y Cambios Bidireccionales (Sección 1 ↔ 2 ↔ 3)',
+    title: 'Tipologías de Planes y Cambios Bidireccionales (Plan 1 ↔ 2 ↔ 3)',
     paragraphs: [
-      'El servicio cuenta con tres secciones: Sección 1 · Básico (solo gestión interna sin página web), Sección 2 · Página Web Básica (gestión + catálogo web con pagos en tienda y stock limitado hasta 5 rubros y 50 prendas/objetos, sin burbujas de ofertas, seguimiento de clientes, SuperClub ni descuentos) y Sección 3 · Plan Full (rubros/artículos ilimitados y acceso total a promociones, fidelización por DNI, Gift Cards QR y automatizaciones).',
-      'Subas de Plan (1→2, 1→3, 2→3): habilitan inmediatamente las funciones, página web y capacidad del plan elegido, actualizando el abono mensual vigente al valor de la nueva sección.',
-      'Bajas o Retornos de Plan (3→1, 3→2, 2→1): el Comercio puede volver a un plan inferior en cualquier momento. Sus datos cargados no se borran, pero se desactivan de inmediato las herramientas exclusivas del plan anterior: al pasar a Sección 1 se deshabilita el catálogo online público y los pedidos web; al pasar a Sección 2 se desactivan ofertas, SuperClub, puntos por DNI y seguimiento web, y rigen los topes de 5 rubros y 50 prendas para nuevas cargas.',
+      'El servicio cuenta con tres planes: Plan 1 · Básico (solo gestión interna sin página web), Plan 2 · Página Web Básica (gestión + catálogo web con pagos en tienda y stock limitado hasta 5 rubros y 50 prendas/objetos, sin burbujas de ofertas, seguimiento de clientes, SuperClub ni descuentos) y Plan 3 · Full (rubros/artículos ilimitados y acceso total a promociones, fidelización por DNI, Gift Cards QR y automatizaciones).',
+      'Subas de Plan (1→2, 1→3, 2→3): habilitan inmediatamente las funciones, página web y capacidad del plan elegido, actualizando el abono mensual vigente al valor del nuevo plan.',
+      'Bajas o Retornos de Plan (3→1, 3→2, 2→1): el Comercio puede volver a un plan inferior en cualquier momento. Sus datos cargados no se borran, pero se desactivan de inmediato las herramientas exclusivas del plan anterior: al pasar a Plan 1 se deshabilita el catálogo online público y los pedidos web; al pasar a Plan 2 se desactivan ofertas, SuperClub, puntos por DNI y seguimiento web, y rigen los topes de 5 rubros y 50 prendas para nuevas cargas.',
     ],
   },
   {
@@ -62,7 +62,7 @@ export const PLATFORM_TERMS_SECTIONS: TermsClauseSection[] = [
     number: '6',
     title: 'Constancia de Aceptación y Auditoría',
     paragraphs: [
-      'Cada aceptación de estos Términos y Condiciones durante el registro inicial o al efectuar un cambio de plan queda asentada con fecha, hora, versión vigente y transición de sección en el historial de la cuenta y en el panel de SuperGestión.',
+      'Cada aceptación de estos Términos y Condiciones durante el registro inicial o al efectuar un cambio de plan queda asentada con fecha, hora, versión vigente y transición de plan en el historial de la cuenta y en el panel de SuperGestión.',
     ],
   },
 ];
@@ -81,9 +81,9 @@ const TIER_RANK: Record<SubscriptionPlanTier, number> = {
 };
 
 export function getPlanSectionShortTitle(tier: SubscriptionPlanTier): string {
-  if (tier === 'basico') return 'Sección 1 · Básico (Sin Web)';
-  if (tier === 'web') return 'Sección 2 · Página Web Básica';
-  return 'Sección 3 · Plan Full';
+  if (tier === 'basico') return 'Plan 1 · Básico (Sin Web)';
+  if (tier === 'web') return 'Plan 2 · Página Web Básica';
+  return 'Plan 3 · Full';
 }
 
 export function getPlanTransitionImpactSummary(
@@ -142,14 +142,14 @@ export function getPlanTransitionImpactSummary(
   ];
   if (toTier === 'basico') {
     bullets.push(
-      'Al pasar a Sección 1 (Sin Web) se desactiva inmediatamente tu catálogo online público, carrito web y módulos promocionales.'
+      'Al pasar a Plan 1 (Sin Web) se desactiva inmediatamente tu catálogo online público, carrito web y módulos promocionales.'
     );
     bullets.push(
       'Tu panel queda enfocado al 100% en gestión interna de cobranzas, boletas, rutas y cartera de clientes.'
     );
   } else if (toTier === 'web') {
     bullets.push(
-      'Al volver a Sección 2 (Web Básica) se desactivan burbujas de ofertas, Outlet, seguimiento de clientes web, SuperClub, puntos por DNI y descuentos.'
+      'Al volver a Plan 2 (Web Básica) se desactivan burbujas de ofertas, Outlet, seguimiento de clientes web, SuperClub, puntos por DNI y descuentos.'
     );
     bullets.push(
       'Aplicarán los topes de hasta 5 rubros y 50 prendas/objetos para nuevas altas en catálogo (lo ya cargado permanece guardado).'

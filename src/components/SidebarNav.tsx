@@ -181,7 +181,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         {
           id: 'automatizacion',
           label: 'WhatsApp Automático',
-          hint: canShowFullSuite ? 'Envío diario programado' : 'Exclusivo Plan Full (Sección 3)',
+          hint: canShowFullSuite ? 'Envío diario programado' : 'Exclusivo Plan 3 · Full',
           icon: Bot,
           badge: !canShowFullSuite ? 'Full' : undefined,
           badgeTone: 'navy',
@@ -224,7 +224,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         {
           id: 'promociones',
           label: 'Estudio de Flyers',
-          hint: canShowFullSuite ? 'Promociones para clientes' : 'Exclusivo Plan Full (Sección 3)',
+          hint: canShowFullSuite ? 'Promociones para clientes' : 'Exclusivo Plan 3 · Full',
           icon: Sparkles,
           badge: !canShowFullSuite ? 'Full' : undefined,
           badgeTone: 'navy',

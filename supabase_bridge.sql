@@ -114,6 +114,24 @@ CREATE INDEX IF NOT EXISTS idx_app_cloud_store_catalog_stock_alerts
   ON public.app_cloud_store USING btree ((value->>'tenantId'), (value->>'productId'), updated_at DESC)
   WHERE key LIKE 'catalog_stock_alert_%';
 
+-- Índices parciales para Gift Cards QR y Carritos Abandonados
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_catalog_gift_cards
+  ON public.app_cloud_store USING btree ((value->>'tenantId'), (value->>'code'), updated_at DESC)
+  WHERE key LIKE 'catalog_gift_card_%' OR key LIKE 'rec:%:catalogGiftCards:%';
+
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_catalog_abandoned_carts
+  ON public.app_cloud_store USING btree ((value->>'tenantId'), updated_at DESC)
+  WHERE key LIKE 'catalog_abandoned_cart_%' OR key LIKE 'rec:%:catalogAbandonedCarts:%';
+
+-- Índice parcial para empresas, clasificación por plan (1/2/3) y órdenes de abono
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_platform_tenants
+  ON public.app_cloud_store USING btree (key text_pattern_ops, (value->>'tenantCode'), updated_at DESC)
+  WHERE key LIKE 'rec:platform:tenants:%';
+
+CREATE INDEX IF NOT EXISTS idx_app_cloud_store_tenant_sub_pay_orders
+  ON public.app_cloud_store USING btree ((value->>'tenantId'), (value->>'status'), updated_at DESC)
+  WHERE key LIKE 'tenant_sub_pay_%';
+
 -- Índice GIN para consultas sobre atributos internos del JSONB
 CREATE INDEX IF NOT EXISTS idx_app_cloud_store_value_gin
   ON public.app_cloud_store USING gin (value jsonb_path_ops);
@@ -147,13 +165,23 @@ CREATE TRIGGER trg_app_cloud_store_updated_at
 
 ALTER TABLE public.app_cloud_store ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "app_cloud_store_rw_policy" ON public.app_cloud_store;
-CREATE POLICY "app_cloud_store_rw_policy"
-  ON public.app_cloud_store
-  FOR ALL
-  TO anon, authenticated
-  USING (true)
-  WITH CHECK (true);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'app_cloud_store'
+      AND policyname = 'app_cloud_store_rw_policy'
+  ) THEN
+    CREATE POLICY "app_cloud_store_rw_policy"
+      ON public.app_cloud_store
+      FOR ALL
+      TO anon, authenticated
+      USING (true)
+      WITH CHECK (true);
+  END IF;
+END $$;
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON TABLE public.app_cloud_store TO anon, authenticated, service_role;
@@ -175,9 +203,79 @@ EXCEPTION
 END $$;
 
 -- ============================================================================
--- 2. COLUMNAS NECESARIAS PARA MERCADO PAGO / WEBHOOKS EN TABLAS RELACIONALES
---    (Solo aplica si esas tablas existen en tu esquema)
+-- 2. TABLAS ESPEJO OPCIONALES Y COLUMNAS DE PLANES / T&C / MERCADO PAGO
+--    Usa CREATE TABLE IF NOT EXISTS y ADD COLUMN IF NOT EXISTS:
+--    si la tabla o columna ya existe, la conserva intacta y sigue con la siguiente.
 -- ============================================================================
+
+CREATE TABLE IF NOT EXISTS public.platform_billing_config (
+  id TEXT PRIMARY KEY,
+  alias TEXT NOT NULL DEFAULT '',
+  cvu TEXT NOT NULL DEFAULT '',
+  account_holder_name TEXT NOT NULL DEFAULT '',
+  bank_or_wallet_name TEXT NOT NULL DEFAULT 'Mercado Pago',
+  default_monthly_fee NUMERIC NOT NULL DEFAULT 25000,
+  annual_discount_percent NUMERIC NOT NULL DEFAULT 0,
+  plan_prices JSONB,
+  mp_checkout_link TEXT NOT NULL DEFAULT '',
+  mp_public_key TEXT NOT NULL DEFAULT '',
+  has_mp_access_token BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.platform_support_config (
+  id TEXT PRIMARY KEY,
+  contact_name TEXT NOT NULL DEFAULT '',
+  whatsapp_phone TEXT NOT NULL DEFAULT '',
+  email TEXT NOT NULL DEFAULT '',
+  attention_hours TEXT NOT NULL DEFAULT '',
+  welcome_message TEXT NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.platform_announcements (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'info',
+  audience TEXT NOT NULL DEFAULT 'all',
+  cta_type TEXT NOT NULL DEFAULT 'none',
+  cta_label TEXT NOT NULL DEFAULT '',
+  cta_url TEXT NOT NULL DEFAULT '',
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  expires_at TEXT,
+  author_name TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.client_payment_orders (
+  token TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  distributor_name TEXT NOT NULL DEFAULT '',
+  client_id TEXT NOT NULL,
+  client_name TEXT NOT NULL DEFAULT '',
+  client_phone TEXT,
+  amount NUMERIC NOT NULL DEFAULT 0,
+  currency_symbol TEXT NOT NULL DEFAULT '$',
+  boleta_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  boleta_numbers JSONB NOT NULL DEFAULT '[]'::jsonb,
+  alias TEXT,
+  cvu TEXT,
+  holder_name TEXT,
+  bank_name TEXT,
+  mp_checkout_link TEXT,
+  mp_init_point TEXT,
+  mp_preference_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  payment_method TEXT,
+  mp_payment_id TEXT,
+  paid_at TEXT,
+  reconciled_in_app BOOLEAN NOT NULL DEFAULT FALSE,
+  reconciled_at TIMESTAMPTZ,
+  verification_summary TEXT,
+  receipt_image_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 DO $$
 BEGIN
@@ -190,16 +288,63 @@ BEGIN
       ADD COLUMN IF NOT EXISTS paid_at TEXT,
       ADD COLUMN IF NOT EXISTS reconciled_in_app BOOLEAN NOT NULL DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS reconciled_at TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS verification_summary TEXT;
+      ADD COLUMN IF NOT EXISTS verification_summary TEXT,
+      ADD COLUMN IF NOT EXISTS receipt_image_url TEXT;
   END IF;
 
   IF to_regclass('public.platform_billing_config') IS NOT NULL THEN
     ALTER TABLE public.platform_billing_config
       ADD COLUMN IF NOT EXISTS annual_discount_percent NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS plan_prices JSONB,
       ADD COLUMN IF NOT EXISTS mp_checkout_link TEXT,
       ADD COLUMN IF NOT EXISTS mp_public_key TEXT,
       ADD COLUMN IF NOT EXISTS has_mp_access_token BOOLEAN NOT NULL DEFAULT FALSE;
   END IF;
+
+  IF to_regclass('public.tenants') IS NOT NULL THEN
+    ALTER TABLE public.tenants
+      ADD COLUMN IF NOT EXISTS plan_tier TEXT,
+      ADD COLUMN IF NOT EXISTS terms_accepted BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS terms_version TEXT;
+  END IF;
+EXCEPTION
+  WHEN OTHERS THEN
+    NULL;
+END $$;
+
+DO $$
+DECLARE
+  t TEXT;
+  opt_tbls TEXT[] := ARRAY[
+    'platform_billing_config',
+    'platform_support_config',
+    'platform_announcements',
+    'client_payment_orders'
+  ];
+BEGIN
+  FOREACH t IN ARRAY opt_tbls LOOP
+    IF to_regclass(format('public.%I', t)) IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_policies
+        WHERE schemaname = 'public'
+          AND tablename = t
+          AND policyname = t || '_rw_policy'
+      ) THEN
+        EXECUTE format(
+          'CREATE POLICY %I ON public.%I FOR ALL TO anon, authenticated USING (true) WITH CHECK (true)',
+          t || '_rw_policy',
+          t
+        );
+      END IF;
+      EXECUTE format('GRANT ALL ON TABLE public.%I TO anon, authenticated, service_role', t);
+    END IF;
+  END LOOP;
+EXCEPTION
+  WHEN OTHERS THEN
+    NULL;
 END $$;
 
 -- ============================================================================

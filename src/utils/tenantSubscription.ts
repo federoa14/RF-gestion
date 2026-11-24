@@ -70,8 +70,8 @@ export function getSubscriptionPlanDefinitions(
     {
       tier: 'basico',
       sectionNumber: 1,
-      sectionBadge: 'Sección 1',
-      name: 'Plan Básico · Gestión Sin Web',
+      sectionBadge: 'Plan 1',
+      name: 'Plan 1 · Básico (Gestión Sin Web)',
       shortName: 'Básico (Sin Web)',
       tagline: 'Control integral de cobranzas, boletas, clientes, vendedores y mora interna.',
       monthlyPrice: prices.basico,
@@ -92,8 +92,8 @@ export function getSubscriptionPlanDefinitions(
     {
       tier: 'web',
       sectionNumber: 2,
-      sectionBadge: 'Sección 2',
-      name: 'Plan Comercial · Página Web Básica',
+      sectionBadge: 'Plan 2',
+      name: 'Plan 2 · Página Web Básica',
       shortName: 'Página Web Básica',
       tagline:
         'Página web básica con pagos en tienda y manejo de stock (hasta 5 rubros y 50 prendas/objetos).',
@@ -101,7 +101,7 @@ export function getSubscriptionPlanDefinitions(
       includesWebCatalog: true,
       includesFullSuite: false,
       includedFeatures: [
-        'Todo lo incluido en Plan Básico (Sección 1)',
+        'Todo lo incluido en Plan 1 · Básico (Sin Web)',
         'Página Web / Catálogo Online básico con link y QR propio',
         'Pagos en la tienda (Efectivo, Transferencia / Alias y Mercado Pago)',
         'Manejo de stock por producto y variante · Hasta 5 rubros y 50 prendas/objetos',
@@ -110,14 +110,14 @@ export function getSubscriptionPlanDefinitions(
         'Sin burbujas ni banners de ofertas, Outlet ni Ofertas Relámpago',
         'Sin seguimiento de clientes (Avisos de Stock, Carritos Abandonados, Clientes Web)',
         'Sin SuperClub / Puntos por DNI ni cupones o descuentos',
-        'Tope de 5 rubros y 50 prendas/objetos (ampliable al instante a Plan Full)',
+        'Tope de 5 rubros y 50 prendas/objetos (ampliable al instante a Plan 3 · Full)',
       ],
     },
     {
       tier: 'full',
       sectionNumber: 3,
-      sectionBadge: 'Sección 3',
-      name: 'Plan Full · Todo Incluido',
+      sectionBadge: 'Plan 3',
+      name: 'Plan 3 · Full (Todo Incluido)',
       shortName: 'Full (Todo Incluido)',
       tagline: 'Acceso absoluto a todas las herramientas de venta, fidelización y automatización.',
       monthlyPrice: prices.full,
@@ -125,7 +125,7 @@ export function getSubscriptionPlanDefinitions(
       includesWebCatalog: true,
       includesFullSuite: true,
       includedFeatures: [
-        'Todo lo del Plan Básico + Página Web (Secciones 1 y 2)',
+        'Todo lo de Plan 1 y Plan 2 (Gestión + Página Web)',
         'Programa de Puntos por DNI, Favoritos, Recompra 1-clic y Analítica Web',
         'Recupero automático de Carritos Abandonados + Ofertas Relámpago / Outlet',
         'Gift Cards Digitales con QR + Cambios/Devoluciones con Saldo a Favor por DNI',
@@ -186,7 +186,7 @@ export function getTenantEffectiveFeatureAccess(tenant: Tenant): TenantEffective
   if (explicitTier === 'basico') {
     return {
       tier: 'basico',
-      sectionLabel: 'Sección 1 · Básico (Sin Web)',
+      sectionLabel: 'Plan 1 · Básico (Sin Web)',
       isTrialFullPreview: false,
       canAccessWebCatalog: false,
       canAccessFullFeatures: false,
@@ -196,17 +196,17 @@ export function getTenantEffectiveFeatureAccess(tenant: Tenant): TenantEffective
   if (explicitTier === 'web') {
     return {
       tier: 'web',
-      sectionLabel: 'Sección 2 · Con Página Web',
+      sectionLabel: 'Plan 2 · Con Página Web',
       isTrialFullPreview: false,
       canAccessWebCatalog: tenant.catalogEnabled !== false,
       canAccessFullFeatures: false,
     };
   }
 
-  // Empresas en Sección 3 ('full') o cuentas históricas sin restricción explícita conservan acceso completo
+  // Empresas en Plan 3 ('full') o cuentas históricas sin restricción explícita conservan acceso completo
   return {
     tier: explicitTier || 'full',
-    sectionLabel: explicitTier === 'full' ? 'Sección 3 · Full (Todo Incluido)' : 'Acceso Completo',
+    sectionLabel: explicitTier === 'full' ? 'Plan 3 · Full (Todo Incluido)' : 'Acceso Completo',
     isTrialFullPreview: false,
     canAccessWebCatalog: tenant.catalogEnabled !== false,
     canAccessFullFeatures: true,

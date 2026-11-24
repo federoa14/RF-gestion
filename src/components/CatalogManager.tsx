@@ -658,7 +658,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     if (onRequestUpgradePlan) {
       onRequestUpgradePlan({ reasonKey, title, detail });
     } else {
-      showToast(title || 'Esta capacidad requiere ampliar a Sección 3 · Plan Full.');
+      showToast(title || 'Esta capacidad requiere ampliar a Plan 3 · Full.');
     }
   };
 
@@ -888,7 +888,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         requestPlanUpgrade(
           'limit_rubros',
           `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
-          `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en la tienda básica (actualmente tenés ${currentDistinctRubros.length}). Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+          `Tu Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en la tienda básica (actualmente tenés ${currentDistinctRubros.length}). Para agregar "${clean}", ampliá a Plan 3 · Full.`
         );
         return;
       }
@@ -947,7 +947,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         requestPlanUpgrade(
           'limit_rubros',
           `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
-          `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros. Para agregar "${clean}", pasá a Sección 3 · Plan Full.`
+          `Tu Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros. Para agregar "${clean}", pasá a Plan 3 · Full.`
         );
         return;
       }
@@ -974,7 +974,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       requestPlanUpgrade(
         'limit_products',
         `Límite de ${PLAN_WEB_MAX_PRODUCTS} prendas / objetos alcanzado`,
-        `Ya cargaste ${rubroProducts.length} de ${PLAN_WEB_MAX_PRODUCTS} prendas u objetos permitidos en Sección 2 · Página Web Básica. Ampliá a Sección 3 · Plan Full para cargar productos ilimitados.`
+        `Ya cargaste ${rubroProducts.length} de ${PLAN_WEB_MAX_PRODUCTS} prendas u objetos permitidos en Plan 2 · Página Web Básica. Ampliá a Plan 3 · Full para cargar productos ilimitados.`
       );
       return;
     }
@@ -1128,7 +1128,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       requestPlanUpgrade(
         'limit_products',
         `Límite de ${PLAN_WEB_MAX_PRODUCTS} prendas / objetos alcanzado`,
-        `Ya cargaste ${rubroProducts.length} de ${PLAN_WEB_MAX_PRODUCTS} prendas u objetos permitidos en Sección 2. Ampliá a Sección 3 · Plan Full para seguir agregando artículos.`
+        `Ya cargaste ${rubroProducts.length} de ${PLAN_WEB_MAX_PRODUCTS} prendas u objetos permitidos en Plan 2. Ampliá a Plan 3 · Full para seguir agregando artículos.`
       );
       return;
     }
@@ -1201,7 +1201,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         requestPlanUpgrade(
           'limit_rubros',
           `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
-          `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/categorías. Para crear una nueva categoría o subfiltro fuera de tus ${PLAN_WEB_MAX_RUBROS} activos, ampliá a Sección 3 · Plan Full.`
+          `Tu Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/categorías. Para crear una nueva categoría o subfiltro fuera de tus ${PLAN_WEB_MAX_RUBROS} activos, ampliá a Plan 3 · Full.`
         );
         return;
       }
@@ -1525,7 +1525,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         requestPlanUpgrade(
           'limit_rubros',
           `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
-          `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Quitá alguno antes de guardar o pasá a Plan Full.`
+          `Tu Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Quitá alguno antes de guardar o pasá a Plan 3 · Full.`
         );
         return;
       }
@@ -2508,7 +2508,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           `La importación supera el límite de ${PLAN_WEB_MAX_PRODUCTS} prendas / objetos`,
           `Tenés ${rubroProducts.length} artículos cargados y querés sumar ${createdCount} nuevos (total ${
             rubroProducts.length + createdCount
-          }). El plan Sección 2 permite hasta ${PLAN_WEB_MAX_PRODUCTS}. Ampliá a Plan Full para importación ilimitada.`
+          }). El Plan 2 permite hasta ${PLAN_WEB_MAX_PRODUCTS}. Ampliá a Plan 3 · Full para importación ilimitada.`
         );
         return;
       }
@@ -2518,7 +2518,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         requestPlanUpgrade(
           'limit_rubros',
           `La importación supera el límite de ${PLAN_WEB_MAX_RUBROS} rubros`,
-          `Los rubros/subfiltros del archivo sumarían ${nextCombinedRubros.length} categorías en total y la Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS}. Ampliá a Plan Full para rubros ilimitados.`
+          `Los rubros/subfiltros del archivo sumarían ${nextCombinedRubros.length} categorías en total y el Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS}. Ampliá a Plan 3 · Full para rubros ilimitados.`
         );
         return;
       }
@@ -2943,8 +2943,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 if (isBasicWebPlan) {
                   requestPlanUpgrade(
                     'full_feature',
-                    'Avisos de Stock y Seguimiento de Clientes · Exclusivo Plan Full',
-                    'En Sección 2 no está incluido el seguimiento de clientes ni captura de solicitudes de stock. Ampliá a Sección 3 · Plan Full para activarlo.'
+                    'Avisos de Stock y Seguimiento de Clientes · Exclusivo Plan 3 · Full',
+                    'En Plan 2 no está incluido el seguimiento de clientes ni captura de solicitudes de stock. Ampliá a Plan 3 · Full para activarlo.'
                   );
                   return;
                 }
@@ -2971,8 +2971,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 if (isBasicWebPlan) {
                   requestPlanUpgrade(
                     'full_feature',
-                    'Carritos Abandonados · Exclusivo Plan Full',
-                    'El seguimiento y recupero de carritos abandonados está disponible en Sección 3 · Plan Full.'
+                    'Carritos Abandonados · Exclusivo Plan 3 · Full',
+                    'El seguimiento y recupero de carritos abandonados está disponible en Plan 3 · Full.'
                   );
                   return;
                 }
@@ -3001,8 +3001,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 if (isBasicWebPlan) {
                   requestPlanUpgrade(
                     'full_feature',
-                    'Gift Cards QR · Exclusivo Plan Full',
-                    'La emisión y canje de Gift Cards Digitales con QR requiere Sección 3 · Plan Full.'
+                    'Gift Cards QR · Exclusivo Plan 3 · Full',
+                    'La emisión y canje de Gift Cards Digitales con QR requiere Plan 3 · Full.'
                   );
                   return;
                 }
@@ -3025,8 +3025,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 if (isBasicWebPlan) {
                   requestPlanUpgrade(
                     'full_feature',
-                    'SuperClub y Club de Promos · Exclusivo Plan Full',
-                    'En Sección 2 no está incluido el SuperClub ni campañas de descuentos/cupones. Pasá a Sección 3 · Plan Full para activarlo.'
+                    'SuperClub y Club de Promos · Exclusivo Plan 3 · Full',
+                    'En Plan 2 no está incluido el SuperClub ni campañas de descuentos/cupones. Pasá a Plan 3 · Full para activarlo.'
                   );
                   return;
                 }
@@ -3048,8 +3048,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 if (isBasicWebPlan) {
                   requestPlanUpgrade(
                     'full_feature',
-                    'Seguimiento de Clientes Web y Puntos DNI · Exclusivo Plan Full',
-                    'El seguimiento de clientes web y el programa de puntos por DNI están disponibles en Sección 3 · Plan Full.'
+                    'Seguimiento de Clientes Web y Puntos DNI · Exclusivo Plan 3 · Full',
+                    'El seguimiento de clientes web y el programa de puntos por DNI están disponibles en Plan 3 · Full.'
                   );
                   return;
                 }
@@ -3138,7 +3138,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="space-y-1">
               <div className="text-xs font-bold text-[#0B1933] flex items-center gap-2 flex-wrap">
-                <span>Sección 2 · Página Web Básica (Pagos en tienda y manejo de stock)</span>
+                <span>Plan 2 · Página Web Básica (Pagos en tienda y manejo de stock)</span>
                 <span className="font-mono tabular-nums text-[11px] font-bold text-slate-700">
                   · Rubros: {currentDistinctRubros.length}/{PLAN_WEB_MAX_RUBROS}
                 </span>
@@ -3147,7 +3147,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-600">
-                Sin burbujas de ofertas, seguimiento de clientes, SuperClub ni descuentos. Si necesitás más de {PLAN_WEB_MAX_RUBROS} rubros, más de {PLAN_WEB_MAX_PRODUCTS} artículos o herramientas de fidelización, podés ampliar al Plan Full en un clic.
+                Sin burbujas de ofertas, seguimiento de clientes, SuperClub ni descuentos. Si necesitás más de {PLAN_WEB_MAX_RUBROS} rubros, más de {PLAN_WEB_MAX_PRODUCTS} artículos o herramientas de fidelización, podés ampliar a Plan 3 · Full en un clic.
               </p>
             </div>
             <button
@@ -3155,14 +3155,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               onClick={() =>
                 requestPlanUpgrade(
                   'full_feature',
-                  'Ampliar capacidad y funciones a Sección 3 · Plan Full',
+                  'Ampliar capacidad y funciones a Plan 3 · Full',
                   'Desbloqueá rubros y productos ilimitados, burbujas/banners de ofertas, seguimiento completo de clientes, SuperClub, Puntos por DNI y descuentos.'
                 )
               }
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer shrink-0 whitespace-nowrap self-start lg:self-auto"
             >
               <Crown className="w-3.5 h-3.5 text-amber-300" />
-              <span>Aumentar a Plan Full</span>
+              <span>Aumentar a Plan 3 · Full</span>
             </button>
           </div>
         )}
@@ -4615,10 +4615,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center space-y-3">
           <Lock className="w-8 h-8 text-amber-600 mx-auto" />
           <h3 className="text-sm font-bold text-slate-900">
-            Avisos de Stock y Seguimiento de Clientes · Exclusivo Sección 3 (Plan Full)
+            Avisos de Stock y Seguimiento de Clientes · Exclusivo Plan 3 · Full
           </h3>
           <p className="text-xs text-slate-600 max-w-lg mx-auto">
-            Tu plan Sección 2 · Página Web Básica incluye manejo de stock interno y tienda online básica, sin captura ni seguimiento de clientes.
+            Tu Plan 2 · Página Web Básica incluye manejo de stock interno y tienda online básica, sin captura ni seguimiento de clientes.
           </p>
           <button
             type="button"
@@ -4840,10 +4840,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center space-y-3">
           <Lock className="w-8 h-8 text-amber-600 mx-auto" />
           <h3 className="text-sm font-bold text-slate-900">
-            SuperClub y Club de Promos · Exclusivo Sección 3 (Plan Full)
+            SuperClub y Club de Promos · Exclusivo Plan 3 · Full
           </h3>
           <p className="text-xs text-slate-600 max-w-lg mx-auto">
-            En Sección 2 la página web funciona sin SuperClub, suscripciones promocionales ni descuentos. Ampliá a Plan Full para habilitarlo.
+            En Plan 2 la página web funciona sin SuperClub, suscripciones promocionales ni descuentos. Ampliá a Plan 3 · Full para habilitarlo.
           </p>
           <button
             type="button"
@@ -5300,10 +5300,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               <div className="text-xs text-amber-950 space-y-0.5">
                 <div className="font-bold flex items-center gap-1.5">
                   <Lock className="w-4 h-4 text-amber-700" />
-                  <span>Función exclusiva del Plan Full (Sección 3)</span>
+                  <span>Función exclusiva de Plan 3 · Full</span>
                 </div>
                 <p className="text-amber-900/90">
-                  Tu cuenta está en <strong>Sección 2 · Con Página Web</strong>. Pasate a <strong>Sección 3 · Plan Full</strong> para operar Clientes Web por DNI, Gift Cards QR, Carritos Abandonados y Club Promos sin límites.
+                  Tu cuenta está en <strong>Plan 2 · Con Página Web</strong>. Pasate a <strong>Plan 3 · Full</strong> para operar Clientes Web por DNI, Gift Cards QR, Carritos Abandonados y Club Promos sin límites.
                 </p>
               </div>
               {onRequestUpgradePlan && (
@@ -5340,10 +5340,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               <div className="text-xs text-amber-950 space-y-0.5">
                 <div className="font-bold flex items-center gap-1.5">
                   <Lock className="w-4 h-4 text-amber-700" />
-                  <span>Recupero de Carritos Abandonados — Exclusivo Plan Full (Sección 3)</span>
+                  <span>Recupero de Carritos Abandonados — Exclusivo Plan 3 · Full</span>
                 </div>
                 <p className="text-amber-900/90">
-                  Pasate a <strong>Sección 3 · Plan Full</strong> para activar el recupero automático de carritos abandonados por WhatsApp con link directo de recuperación.
+                  Pasate a <strong>Plan 3 · Full</strong> para activar el recupero automático de carritos abandonados por WhatsApp con link directo de recuperación.
                 </p>
               </div>
               {onRequestUpgradePlan && (
@@ -5600,10 +5600,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               <div className="text-xs text-amber-950 space-y-0.5">
                 <div className="font-bold flex items-center gap-1.5">
                   <Lock className="w-4 h-4 text-amber-700" />
-                  <span>Gift Cards y Vouchers Digitales QR — Exclusivo Plan Full (Sección 3)</span>
+                  <span>Gift Cards y Vouchers Digitales QR — Exclusivo Plan 3 · Full</span>
                 </div>
                 <p className="text-amber-900/90">
-                  Pasate a <strong>Sección 3 · Plan Full</strong> para emitir tarjetas de regalo prepagas con código y QR canjeables en tu catálogo o en el local.
+                  Pasate a <strong>Plan 3 · Full</strong> para emitir tarjetas de regalo prepagas con código y QR canjeables en tu catálogo o en el local.
                 </p>
               </div>
               {onRequestUpgradePlan && (
@@ -6898,7 +6898,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             requestPlanUpgrade(
                               'limit_rubros',
                               `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
-                              `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+                              `Tu Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Plan 3 · Full.`
                             );
                             return;
                           }
@@ -6928,7 +6928,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           requestPlanUpgrade(
                             'limit_rubros',
                             `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
-                            `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+                            `Tu Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Plan 3 · Full.`
                           );
                           return;
                         }
@@ -7002,7 +7002,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             requestPlanUpgrade(
                               'limit_rubros',
                               `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
-                              `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+                              `Tu Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Plan 3 · Full.`
                             );
                             return;
                           }
@@ -7035,7 +7035,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           requestPlanUpgrade(
                             'limit_rubros',
                             `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
-                            `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+                            `Tu Plan 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Plan 3 · Full.`
                           );
                           return;
                         }
@@ -7312,13 +7312,13 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     <Percent className="w-4 h-4 text-emerald-700" />
                     <span>
                       {isBasicWebPlan
-                        ? 'Alertas de Stock Mínimo (Sección 2 · Página Web Básica)'
+                        ? 'Alertas de Stock Mínimo (Plan 2 · Página Web Básica)'
                         : 'Promociones, Cupones, Descuento Efectivo/Transferencia y Alertas de Stock'}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     {isBasicWebPlan
-                      ? 'Definí cuándo recibir alertas por stock bajo. Las herramientas de descuentos, burbujas de ofertas, SuperClub y Puntos por DNI corresponden a Sección 3 · Plan Full.'
+                      ? 'Definí cuándo recibir alertas por stock bajo. Las herramientas de descuentos, burbujas de ofertas, SuperClub y Puntos por DNI corresponden a Plan 3 · Full.'
                       : 'Ofrecé un beneficio por pagar en Efectivo/Transferencia, creá códigos de descuento y definí cuándo avisarte por stock bajo.'}
                   </p>
                 </div>
@@ -7380,7 +7380,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       <span>Ofertas, SuperClub, Descuentos y Puntos por DNI · Exclusivo Plan Full</span>
                     </div>
                     <p className="text-[11px] text-amber-900/90">
-                      Tu plan Sección 2 muestra la página web básica sin burbujas de ofertas, seguimiento de clientes, SuperClub ni cupones/descuentos. Ampliá a Sección 3 para desbloquearlo todo.
+                      Tu Plan 2 muestra la página web básica sin burbujas de ofertas, seguimiento de clientes, SuperClub ni cupones/descuentos. Ampliá a Plan 3 · Full para desbloquearlo todo.
                     </p>
                   </div>
                   <button
@@ -8677,7 +8677,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <div className="sm:col-span-2 p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
                     <div className="text-[11px] text-slate-600">
                       <strong className="text-slate-800">Ofertas Relámpago, Outlet, Precios Mayoristas y Puntos DNI</strong> requieren{' '}
-                      <strong>Sección 3 · Plan Full</strong>.
+                      <strong>Plan 3 · Full</strong>.
                     </div>
                     <button
                       type="button"

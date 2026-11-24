@@ -635,7 +635,7 @@ export default function App() {
 
   // Tenant state persistence is synced directly to Supabase via saveBoletas / saveTenantData.
 
-  // Helper to classify tenant into Plan Sección 1, 2 or 3 with accepted Terms & Conditions
+  // Helper to classify tenant into Plan 1, Plan 2 or Plan 3 with accepted Terms & Conditions
   const handleSelectTenantPlanTier = (
     targetTenantId: string,
     tier: SubscriptionPlanTier,
@@ -658,7 +658,7 @@ export default function App() {
               id: `pchange-${Date.now()}`,
               fromTier: prevTier,
               toTier: tier,
-              fromLabel: prevDef ? `${prevDef.sectionBadge} · ${prevDef.shortName}` : 'Prueba / Sin Sección',
+              fromLabel: prevDef ? `${prevDef.sectionBadge} · ${prevDef.shortName}` : 'Prueba / Sin Plan',
               toLabel: `${planDef.sectionBadge} · ${planDef.shortName}`,
               previousMonthlyFee: sub.monthlyFee,
               newMonthlyFee: planDef.monthlyPrice,
@@ -717,7 +717,7 @@ export default function App() {
     setChosenPlanTierForPayModal(tier);
   };
 
-  // Bidirectional self-service plan change (Sección 1 ↔ 2 ↔ 3) with accepted Terms & Conditions
+  // Bidirectional self-service plan change (Plan 1 ↔ 2 ↔ 3) with accepted Terms & Conditions
   const handleConfirmPlanChange = (details: {
     targetTier: SubscriptionPlanTier;
     triggerReason: string;
@@ -739,7 +739,7 @@ export default function App() {
       id: `pchange-${Date.now()}`,
       fromTier,
       toTier: details.targetTier,
-      fromLabel: fromDef ? `${fromDef.sectionBadge} · ${fromDef.shortName}` : 'Prueba / Sin Sección',
+      fromLabel: fromDef ? `${fromDef.sectionBadge} · ${fromDef.shortName}` : 'Prueba / Sin Plan',
       toLabel: `${targetDef.sectionBadge} · ${targetDef.shortName}`,
       previousMonthlyFee: sub.monthlyFee,
       newMonthlyFee: details.newMonthlyFee,
@@ -3738,14 +3738,14 @@ export default function App() {
     ? getTenantEffectiveFeatureAccess(selectedTenant)
     : {
         tier: 'full' as SubscriptionPlanTier,
-        sectionLabel: 'Sección 3 · Full',
+        sectionLabel: 'Plan 3 · Full',
         isTrialFullPreview: false,
         canAccessWebCatalog: true,
         canAccessFullFeatures: true,
       };
   const planDefinitions = getSubscriptionPlanDefinitions(platformBillingCfg);
 
-  // 3 & 3B. If Company is Paused (or suspended) OR 30-Day Trial Expired -> Show the 3 Plan Tiers (Sección 1, 2, 3) with amounts + feature comparison & direct pay redirect
+  // 3 & 3B. If Company is Paused (or suspended) OR 30-Day Trial Expired -> Show the 3 Plan Tiers (Plan 1, Plan 2, Plan 3) with amounts + feature comparison & direct pay redirect
   if (
     selectedTenant &&
     (selectedTenant.status === 'suspended' ||
@@ -5148,20 +5148,20 @@ export default function App() {
                 <CreditCard className="w-6 h-6" />
               </div>
               <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-200">
-                Exclusivo Sección 3 · Plan Full
+                Exclusivo Plan 3 · Full
               </span>
               <h3 className="text-lg font-bold text-[#0B1933] dark:text-white">
-                Automatización Diaria por WhatsApp incluida en Plan Full
+                Automatización Diaria por WhatsApp incluida en Plan 3 · Full
               </h3>
               <p className="text-xs text-slate-600 dark:text-[#94A3B8] leading-relaxed">
-                Tu cuenta está operando en <strong className="text-[#0B1933] dark:text-white">{tenantFeatureAccess.sectionLabel}</strong>. Actualizá a <strong>Sección 3 · Plan Full</strong> para habilitar despachos automáticos por WhatsApp, cierres diarios, promociones y fidelización completa.
+                Tu cuenta está operando en <strong className="text-[#0B1933] dark:text-white">{tenantFeatureAccess.sectionLabel}</strong>. Actualizá a <strong>Plan 3 · Full</strong> para habilitar despachos automáticos por WhatsApp, cierres diarios, promociones y fidelización completa.
               </p>
               <button
                 type="button"
                 onClick={() =>
                   setPlanUpgradePrompt({
                     reasonKey: 'full_feature',
-                    title: 'Pasar a Sección 3 · Plan Full (Todo Incluido)',
+                    title: 'Pasar a Plan 3 · Full (Todo Incluido)',
                     detail:
                       'Habilitá automatización diaria por WhatsApp, promociones, SuperClub por DNI y capacidad ilimitada de rubros y prendas.',
                   })
@@ -5169,7 +5169,7 @@ export default function App() {
                 className="px-5 py-2.5 rounded-xl bg-[#009EE3] hover:bg-[#008AD0] text-white text-xs font-bold cursor-pointer inline-flex items-center gap-2"
               >
                 <CreditCard className="w-4 h-4" />
-                <span>Pasar a Plan Full (Sección 3)</span>
+                <span>Pasar a Plan 3 · Full</span>
               </button>
             </div>
           ) : (
@@ -5420,20 +5420,20 @@ export default function App() {
                 <CreditCard className="w-6 h-6" />
               </div>
               <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-200">
-                Exclusivo Sección 3 · Plan Full
+                Exclusivo Plan 3 · Full
               </span>
               <h3 className="text-lg font-bold text-[#0B1933] dark:text-white">
-                Estudio de Flyers y Promociones incluido en Plan Full
+                Estudio de Flyers y Promociones incluido en Plan 3 · Full
               </h3>
               <p className="text-xs text-slate-600 dark:text-[#94A3B8] leading-relaxed">
-                Tu cuenta está operando en <strong className="text-[#0B1933] dark:text-white">{tenantFeatureAccess.sectionLabel}</strong>. Actualizá a <strong>Sección 3 · Plan Full</strong> para diseñar banners promocionales, campañas y automatizaciones completas.
+                Tu cuenta está operando en <strong className="text-[#0B1933] dark:text-white">{tenantFeatureAccess.sectionLabel}</strong>. Actualizá a <strong>Plan 3 · Full</strong> para diseñar banners promocionales, campañas y automatizaciones completas.
               </p>
               <button
                 type="button"
                 onClick={() =>
                   setPlanUpgradePrompt({
                     reasonKey: 'full_feature',
-                    title: 'Pasar a Sección 3 · Plan Full (Todo Incluido)',
+                    title: 'Pasar a Plan 3 · Full (Todo Incluido)',
                     detail:
                       'Habilitá el Estudio de Flyers y Promociones, burbujas de ofertas, SuperClub por DNI, seguimiento de clientes y capacidad ilimitada.',
                   })
@@ -5441,7 +5441,7 @@ export default function App() {
                 className="px-5 py-2.5 rounded-xl bg-[#009EE3] hover:bg-[#008AD0] text-white text-xs font-bold cursor-pointer inline-flex items-center gap-2"
               >
                 <CreditCard className="w-4 h-4" />
-                <span>Pasar a Plan Full (Sección 3)</span>
+                <span>Pasar a Plan 3 · Full</span>
               </button>
             </div>
           ) : (
@@ -5764,7 +5764,7 @@ export default function App() {
         onConfirmReturn={handleProcessWebOrderReturn}
       />
 
-      {/* Modal de Cambio de Plan Bidireccional (Sección 1 ↔ 2 ↔ 3) con Términos y Condiciones */}
+      {/* Modal de Cambio de Plan Bidireccional (Plan 1 ↔ 2 ↔ 3) con Términos y Condiciones */}
       {selectedTenant && (
         <PlanUpgradeModal
           isOpen={Boolean(planUpgradePrompt)}

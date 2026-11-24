@@ -875,7 +875,7 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
                   })}
                 </div>
 
-                {/* Confirmación obligatoria de Términos y Condiciones al cambiar a otra Sección */}
+                {/* Confirmación obligatoria de Términos y Condiciones al cambiar a otro Plan */}
                 {pendingSwitchTier && pendingSwitchTier !== selectedTier && (() => {
                   const targetDef = getPlanDefinitionByTier(pendingSwitchTier, billingConfig);
                   const impact = getPlanTransitionImpactSummary(selectedTier, pendingSwitchTier);
@@ -913,7 +913,7 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
                             setSwitchTermsAccepted(false);
                           }}
                           className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
-                          aria-label="Cancelar cambio de sección"
+                          aria-label="Cancelar cambio de plan"
                         >
                           <X className="w-4 h-4" />
                         </button>

@@ -918,7 +918,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  // Clasificar empresa en Sección 1 / Sección 2 / Sección 3 (actualiza cuota, tipología y habilitación web)
+  // Clasificar empresa en Plan 1 / Plan 2 / Plan 3 (actualiza cuota, tipología y habilitación web)
   const handleAssignTenantPlanSection = (
     tenant: Tenant,
     nextTier: SubscriptionPlanTier,
@@ -942,7 +942,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             id: `pchange-${Date.now()}`,
             fromTier: prevTier || 'basico',
             toTier: nextTier,
-            fromLabel: prevDef ? `${prevDef.sectionBadge} · ${prevDef.shortName}` : 'Sin Sección',
+            fromLabel: prevDef ? `${prevDef.sectionBadge} · ${prevDef.shortName}` : 'Sin Plan',
             toLabel: `${tierDef.sectionBadge} · ${tierDef.shortName}`,
             previousMonthlyFee: sub.monthlyFee,
             newMonthlyFee: nextMonthlyFee,
@@ -1008,11 +1008,11 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     setBillingPricesInput((prev) => ({ ...prev, [tier]: nextVal }));
     if (tier === 'web') setBillingDefaultFeeInput(nextVal);
     showToast(
-      `✓ Plan ${tier === 'basico' ? 'Sección 1' : tier === 'web' ? 'Sección 2' : 'Sección 3'} ajustado (${pct > 0 ? `+${pct}` : pct}% -> $ ${nextVal.toLocaleString('es-AR')}).`
+      `✓ ${tier === 'basico' ? 'Plan 1' : tier === 'web' ? 'Plan 2' : 'Plan 3'} ajustado (${pct > 0 ? `+${pct}` : pct}% -> $ ${nextVal.toLocaleString('es-AR')}).`
     );
   };
 
-  // Actualizar la cuota mensual de todas las empresas ya clasificadas en Sección 1 / 2 / 3 según la escala actual
+  // Actualizar la cuota mensual de todas las empresas ya clasificadas en Plan 1 / 2 / 3 según la escala actual
   const handleSyncSectionPricesToExistingTenants = () => {
     let updatedCount = 0;
     const updated = tenants.map((t) => {
@@ -1032,12 +1032,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       };
     });
     if (updatedCount === 0) {
-      showToast('Todas las empresas clasificadas ya tienen actualizado el valor de su sección.');
+      showToast('Todas las empresas clasificadas ya tienen actualizado el valor de su plan.');
       return;
     }
     setTenants(updated);
     saveTenants(updated);
-    showToast(`✓ Se actualizaron las cuotas mensuales de ${updatedCount} empresa(s) según su sección.`);
+    showToast(`✓ Se actualizaron las cuotas mensuales de ${updatedCount} empresa(s) según su plan.`);
   };
 
   // Abrir Generador de Pago desde el Supergestor (Mercado Pago + Link Compartible ?sub_pay + Alias/CVU)
@@ -2058,17 +2058,17 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
               </div>
             </div>
 
-            {/* Filtro rápido por Sección / Tipología (Sección 1, Sección 2, Sección 3) */}
+            {/* Filtro rápido por Plan / Tipología (Plan 1, Plan 2, Plan 3) */}
             <div className="flex items-center gap-1.5 flex-wrap text-xs">
               <span className="text-[11px] font-bold text-[#94A3B8] mr-1">
-                Filtrar por Sección:
+                Filtrar por Plan:
               </span>
               {(
                 [
-                  { id: 'all', label: 'Todas las secciones' },
-                  { id: 'basico', label: 'Sección 1 · Básica (Sin Web)' },
-                  { id: 'web', label: 'Sección 2 · Con Página Web' },
-                  { id: 'full', label: 'Sección 3 · Full Todo Incluido' },
+                  { id: 'all', label: 'Todos los planes' },
+                  { id: 'basico', label: 'Plan 1 · Básico (Sin Web)' },
+                  { id: 'web', label: 'Plan 2 · Con Página Web' },
+                  { id: 'full', label: 'Plan 3 · Full Todo Incluido' },
                   { id: 'unassigned', label: 'Sin clasificar' },
                   { id: 'self_upgraded', label: 'Cambios de plan (panel cliente)' },
                 ] as const
@@ -2104,7 +2104,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
               })}
             </div>
 
-            {/* ALERTA SUPERGESTOR: CAMBIOS DE PLAN AUTOGESTIONADOS POR EMPRESAS (SECCIÓN 1 ↔ 2 ↔ 3) */}
+            {/* ALERTA SUPERGESTOR: CAMBIOS DE PLAN AUTOGESTIONADOS POR EMPRESAS (PLAN 1 ↔ 2 ↔ 3) */}
             {(() => {
               const selfChangedTenants = tenants
                 .filter((t) => t.subscription?.lastPlanChange?.changedBy === 'tenant_self_upgrade')
@@ -2117,11 +2117,11 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
               const tierOrder: Record<SubscriptionPlanTier, number> = { basico: 1, web: 2, full: 3 };
               const tierShortName = (tier?: SubscriptionPlanTier) =>
                 tier === 'basico'
-                  ? 'Sección 1 · Básica'
+                  ? 'Plan 1 · Básico'
                   : tier === 'web'
-                  ? 'Sección 2 · Web Básica'
+                  ? 'Plan 2 · Web Básica'
                   : tier === 'full'
-                  ? 'Sección 3 · Plan Full'
+                  ? 'Plan 3 · Full'
                   : 'Prueba / Inicial';
               return (
                 <div className="bg-emerald-950/35 border border-emerald-500/55 rounded-2xl p-4 space-y-3">
@@ -2135,7 +2135,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           Cambios de Plan autogestionados por los clientes ({selfChangedTenants.length})
                         </h4>
                         <p className="text-[11px] text-emerald-200">
-                          Empresas que cambiaron de sección desde su panel (subas 1→3 / 2→3 o bajas 3→1 / 3→2) tras aceptar los Términos y Condiciones de Uso y Manejo.
+                          Empresas que cambiaron de plan desde su panel (subas 1→3 / 2→3 o bajas 3→1 / 3→2) tras aceptar los Términos y Condiciones de Uso y Manejo.
                         </p>
                       </div>
                     </div>
@@ -2511,7 +2511,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                   : 'text-slate-400'
                               }`}
                             >
-                              {sectionDef ? `${sectionDef.sectionBadge} · ${sectionDef.shortName}` : 'Sin Sección'}
+                              {sectionDef ? `${sectionDef.sectionBadge} · ${sectionDef.shortName}` : 'Sin Plan'}
                             </span>
                             <select
                               value={resolvedSection || ''}
@@ -2520,12 +2520,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                 if (val) handleAssignTenantPlanSection(tenant, val, true);
                               }}
                               className="bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[10px] font-bold text-white cursor-pointer"
-                              title="Clasificar empresa en Sección 1, 2 o 3"
+                              title="Clasificar empresa en Plan 1, 2 o 3"
                             >
                               {!resolvedSection && <option value="">Clasificar...</option>}
-                              <option value="basico">Sección 1 · Básica</option>
-                              <option value="web">Sección 2 · Con Web</option>
-                              <option value="full">Sección 3 · Full</option>
+                              <option value="basico">Plan 1 · Básico</option>
+                              <option value="web">Plan 2 · Con Web</option>
+                              <option value="full">Plan 3 · Full</option>
                             </select>
                           </div>
 
@@ -2957,13 +2957,13 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 </div>
               </div>
 
-              {/* ESCALA DE PRECIOS POR TIPOLOGÍA DE SERVICIO (3 SECCIONES) */}
+              {/* ESCALA DE PRECIOS POR TIPOLOGÍA DE SERVICIO (3 PLANES) */}
               <div className="bg-slate-950/80 border border-sky-500/35 rounded-2xl p-4 space-y-3 text-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h5 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
                       <SlidersHorizontal className="w-4 h-4 text-sky-400" />
-                      <span>Rango de Precios por Tipología (Sección 1, Sección 2 y Sección 3)</span>
+                      <span>Rango de Precios por Plan (Plan 1, Plan 2 y Plan 3)</span>
                     </h5>
                     <p className="text-[11px] text-slate-400 mt-0.5">
                       Editá el valor directo en pesos de cada plan o aplicá un aumento porcentual sobre los 3 planes a la vez.
@@ -3379,9 +3379,9 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                 className="mt-1 bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[10px] font-sans font-semibold text-slate-200 cursor-pointer"
                               >
                                 {!tSection && <option value="">Sin clasificar...</option>}
-                                <option value="basico">Sección 1 · Básica</option>
-                                <option value="web">Sección 2 · Con Web</option>
-                                <option value="full">Sección 3 · Full</option>
+                                <option value="basico">Plan 1 · Básico</option>
+                                <option value="web">Plan 2 · Con Web</option>
+                                <option value="full">Plan 3 · Full</option>
                               </select>
                             </td>
 
@@ -4498,10 +4498,10 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     </button>
                   </div>
 
-                  {/* Tipología / Sección asignada */}
+                  {/* Plan / Tipología asignada */}
                   <div className="pt-2 border-t border-slate-800 space-y-2">
                     <label className="block text-xs font-bold text-slate-200">
-                      Sección / Tipología de Servicio (para cuando finalice la prueba o abono mensual):
+                      Plan / Tipología de Servicio (para cuando finalice la prueba o abono mensual):
                     </label>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       {getSubscriptionPlanDefinitions(platformBilling).map((def) => (
@@ -4789,7 +4789,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
-                  Sección / Tipología de Suscripción:
+                  Plan / Tipología de Suscripción:
                 </label>
                 <select
                   value={editingTenant.subscription?.planTier || resolveTenantPlanTier(editingTenant) || 'web'}
@@ -5652,7 +5652,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
               {/* Selector de las 3 Tipologías */}
               <div className="space-y-1.5">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
-                  Tipología / Sección a cobrar:
+                  Plan / Tipología a cobrar:
                 </span>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                   {planDefs.map((def) => {
