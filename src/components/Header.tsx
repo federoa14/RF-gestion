@@ -44,7 +44,7 @@ const TAB_META: Record<string, { section: string; title: string; subtitle: strin
   boletas: {
     section: 'Cobranzas',
     title: 'Panel de Boletas',
-    subtitle: 'Control diario de facturas fiadas, vencimientos y cobros',
+    subtitle: 'Control diario de boletas fiadas, vencimientos y pagos',
   },
   impagas: {
     section: 'Cobranzas',
@@ -274,7 +274,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <PlusCircle className="w-3.5 h-3.5 text-[#0B1933]" />
             <span className="sm:hidden">Cargar</span>
-            <span className="hidden sm:inline">Cargar {labels.saleSingular}</span>
+            <span className="hidden sm:inline">Cargar {labels.saleSingular.toLowerCase()}</span>
           </button>
 
           {currentUser && (

@@ -364,7 +364,7 @@ export function analyzeClientPurchaseInsights(
   let recommendationText = '';
   if (records.length === 0) {
     recommendationText =
-      'Todavía no hay compras registradas para este cliente. Cuando cargues su primera factura o venta, verás aquí qué productos elige más y en qué fechas suele comprar.';
+      'Todavía no hay compras registradas para este cliente. Cuando cargues su primera boleta, verás aquí qué productos elige más y en qué fechas suele comprar.';
   } else {
     const parts: string[] = [];
     if (topWeekdays.length > 0 && topMonthPeriods.length > 0) {

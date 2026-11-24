@@ -355,7 +355,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Controla si esta empresa tiene permitido enviar recordatorios de facturas vencidas directamente al WhatsApp del cliente.
+                Controla si esta empresa tiene permitido enviar recordatorios de boletas vencidas directamente al WhatsApp del cliente.
               </p>
             </div>
           </div>
@@ -410,7 +410,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <span>Función Habilitada: Los clientes pueden recibir recordatorios de boletas vencidas</span>
               </p>
               <p className="text-[11px] text-emerald-700 dark:text-emerald-300/80">
-                Tanto en las tarjetas de boletas como en el despacho matutino se permitirá notificar al cliente sobre su factura vencida. Puedes personalizar la plantilla de texto a continuación.
+                Tanto en las tarjetas de boletas como en el despacho matutino se permitirá notificar al cliente sobre su boleta vencida. Puedes personalizar la plantilla de texto a continuación.
               </p>
             </div>
           ) : (
@@ -432,10 +432,10 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  Plantilla de Mensaje para el Cliente (Factura Vencida)
+                  Plantilla de Mensaje para el Cliente (boleta vencida)
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  Personalizá el mensaje formal que recibirá el cliente para informarle de su factura vencida.
+                  Personalizá el mensaje formal que recibirá el cliente para informarle de su boleta vencida.
                 </p>
               </div>
 
@@ -445,7 +445,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   setCurrentConfig((prev) => ({
                     ...prev,
                     customClientOverdueTemplate:
-                      'Hola {cliente}, le informamos desde {distribuidora} que la boleta/factura #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!',
+                      'Hola {cliente}, le informamos desde {distribuidora} que la boleta #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!',
                   }));
                 }}
                 className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 font-semibold"
@@ -458,7 +458,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             {/* Quick Tag Insert Buttons for Client */}
             <div>
               <span className="text-[11px] font-semibold text-slate-400 block mb-1">
-                Insertar datos dinámicos del cliente y factura:
+                Insertar datos dinámicos del cliente y la boleta:
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {[
@@ -489,7 +489,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
               <textarea
                 value={
                   currentConfig.customClientOverdueTemplate ||
-                  'Hola {cliente}, le informamos desde {distribuidora} que la boleta/factura #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!'
+                  'Hola {cliente}, le informamos desde {distribuidora} que la boleta #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!'
                 }
                 onChange={(e) =>
                   setCurrentConfig({
@@ -509,7 +509,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   Incluir a clientes en el despacho automático matutino (08:00 AM)
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Si se activa, el sistema enviará también el mensaje de recordatorio a los clientes con facturas vencidas que tengan teléfono cargado.
+                  Si se activa, el sistema enviará también el mensaje de recordatorio a los clientes con boletas vencidas que tengan teléfono cargado.
                 </p>
               </div>
               <input

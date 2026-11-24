@@ -4073,7 +4073,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 Pedidos Registrados desde el Catálogo Online
               </h3>
               <p className="text-xs text-slate-500">
-                Además de llegarte al WhatsApp, cada pedido queda guardado aquí para facturarlo, enviarlo o avisar retiro y cobrar por WhatsApp.
+                Además de llegarte al WhatsApp, cada pedido queda guardado aquí para pasarlo a boleta, enviarlo o avisar retiro y cobrar por WhatsApp.
               </p>
             </div>
             {onRefreshOrders && (
@@ -4169,7 +4169,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         {order.linkedBoletaNumber && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono">
                             <Receipt className="w-3 h-3" />
-                            <span>Facturado #{order.linkedBoletaNumber}</span>
+                            <span>Boleta #{order.linkedBoletaNumber}</span>
                           </span>
                         )}
                         {order.dispatchReceiptNumber && (
@@ -4549,8 +4549,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             onClick={() => onBillOrder(order)}
                             title={
                               order.linkedBoletaNumber
-                                ? `Ya facturado en Boleta #${order.linkedBoletaNumber}`
-                                : 'Generar cliente y boleta para facturar este pedido'
+                                ? `Ya tiene la boleta #${order.linkedBoletaNumber}`
+                                : 'Generar cliente y boleta para este pedido'
                             }
                             className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
                               order.linkedBoletaNumber
@@ -4562,7 +4562,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             <span>
                               {order.linkedBoletaNumber
                                 ? `Boleta #${order.linkedBoletaNumber}`
-                                : 'Facturar Pedido'}
+                                : 'Generar boleta'}
                             </span>
                           </button>
                         )}
@@ -6159,7 +6159,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               '',
               `Periodo,${statsRange}`,
               `Pedidos Activos,${activeOrders.length}`,
-              `Facturacion Neta,${netRevenue.toFixed(2)}`,
+              `Ingresos netos,${netRevenue.toFixed(2)}`,
               `Ticket Promedio,${avgTicket.toFixed(2)}`,
               `Unidades Vendidas,${totalUnitsSold}`,
               `Descuentos Otorgados,${totalDiscountsGranted.toFixed(2)}`,
@@ -6258,7 +6258,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-1">
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    Facturación Web Neta
+                    Ingresos web netos
                   </div>
                   <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
                     {formatCurrency(netRevenue, currency)}
@@ -6356,7 +6356,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Top 10 Productos Más Vendidos
                     </h4>
                     <p className="text-[11px] text-slate-500">
-                      Ordenados por volumen de unidades y facturación acumulada.
+                      Ordenados por volumen de unidades e ingresos acumulados.
                     </p>
                   </div>
 

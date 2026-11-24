@@ -112,10 +112,8 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
       id: 'standard',
       label:
         labels.id === 'distribuidora'
-          ? 'Factura / Remito Único'
-          : labels.id === 'comercio_fiado'
-          ? 'Fiado en Libreta'
-          : '1 Producto / Fiado',
+          ? 'Boleta única'
+          : 'Boleta simple',
     },
     ...(labels.allowBasketMode && !labels.enforceSingleBoleta
       ? [{ id: 'canasto_mixto' as SaleMode, label: 'Canasto por Productos' }]
@@ -665,7 +663,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
     if (!activeClient && isCreatingClient) {
       const created = buildNewClientFromForm();
       if (!created) {
-        setFormError('Completá al menos el Nombre del Cliente / Comercio antes de guardar la factura.');
+        setFormError('Completá al menos el Nombre del Cliente / Comercio antes de guardar la boleta.');
         return;
       }
       activeClient = created;
@@ -962,7 +960,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
               </div>
               <p className="text-xs text-slate-500">
                 {labels.enforceSingleBoleta
-                  ? 'Perfil Mayorista: Máximo 1 factura fiada pendiente por cliente + Tope de crédito ($).'
+                  ? 'Perfil Mayorista: Máximo 1 boleta pendiente por cliente + Tope de crédito ($).'
                   : labels.featureBullets[0]}
               </p>
             </div>
@@ -1002,7 +1000,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
             {isCreatingClient ? (
               <div className="space-y-2.5 pt-2 border-t border-slate-200 dark:border-slate-700">
                 <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 text-[11px] text-blue-900 dark:text-blue-200">
-                  Completá los datos del nuevo cliente acá mismo mientras cargás la factura: podés tocar <strong>Guardar Cliente y Seguir</strong> o ir directo abajo y guardar <strong>factura + cliente juntos</strong>.
+                  Completá los datos del nuevo cliente acá mismo mientras cargás la boleta: podés tocar <strong>Guardar Cliente y Seguir</strong> o ir directo abajo y guardar <strong>boleta + cliente juntos</strong>.
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -2295,7 +2293,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
             <div className="p-3 rounded-xl bg-[#F4F6F9] dark:bg-[#091428] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 flex flex-wrap items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2 text-[#0B1933] dark:text-[#E2E8F0] font-semibold">
                 <Layers className="w-3.5 h-3.5 text-[#162E59] dark:text-[#CBD5E1]" />
-                <span>Perfil {labels.shortLabel}: 1 sola factura fiada activa por cliente · Tope de crédito ($)</span>
+                <span>Perfil {labels.shortLabel}: 1 sola boleta pendiente por cliente · Tope de crédito ($)</span>
               </div>
               <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-[#94A3B8]">
                 {labels.badgeTag}

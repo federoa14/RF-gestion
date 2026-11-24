@@ -176,7 +176,7 @@ export const ColdClientsRadarPanel: React.FC<ColdClientsRadarPanelProps> = ({
 
           <div className="p-3.5 rounded-xl bg-[#F4F6F9] dark:bg-[#091428] border border-[#CBD5E1] dark:border-[#B6C2D2]/15">
             <span className="text-[11px] font-semibold text-slate-500 dark:text-[#94A3B8] block">
-              Facturación histórica de este grupo
+              Ventas históricas de este grupo
             </span>
             <span className="text-xl font-black font-mono text-[#0B1933] dark:text-white">
               {formatCurrency(historicalVolumeAtRisk, config.currencySymbol)}

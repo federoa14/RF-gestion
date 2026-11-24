@@ -333,7 +333,7 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
               <div className="flex items-center gap-2">
                 <CheckCircle2 className={`w-4 h-4 shrink-0 ${config.enableClientWhatsAppReminders && config.includeClientsInAutoDispatch ? 'text-emerald-400' : 'text-slate-500'}`} />
                 <span>
-                  <strong>A los Clientes (Facturas Vencidas):</strong>{' '}
+                  <strong>A los clientes (boletas vencidas):</strong>{' '}
                   {config.enableClientWhatsAppReminders && config.includeClientsInAutoDispatch ? (
                     <span className="text-emerald-300 font-semibold">ACTIVADO — Se enviará recordatorio de vencimiento por WhatsApp al cliente.</span>
                   ) : (

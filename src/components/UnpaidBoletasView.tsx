@@ -299,7 +299,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Buscar por cliente que debe la factura, número de boleta o vendedor..."
+            placeholder="Buscar por cliente, número de boleta o vendedor..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white"
@@ -364,7 +364,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
             <thead className="bg-[#0B1933] text-[#E2E8F0] font-semibold border-b border-[#B6C2D2]/25">
               <tr>
                 <th className="px-4 py-3.5">N° Boleta</th>
-                <th className="px-4 py-3.5">Cliente que Debe la Factura</th>
+                <th className="px-4 py-3.5">Cliente</th>
                 <th className="px-4 py-3.5 text-right">Monto y Saldo</th>
                 <th className="px-4 py-3.5">Fecha de Venta</th>
                 <th className="px-4 py-3.5">Vencimiento</th>

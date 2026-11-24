@@ -86,7 +86,7 @@ export const CriticalOverdueBubbleModal: React.FC<CriticalOverdueBubbleModalProp
                 Plata en la Calle que ya Debería Haber Sido Cobrada
               </h2>
               <p className="text-xs text-slate-500 max-w-2xl mt-0.5">
-                Facturas fiadas cuyo plazo fijado ya venció hace {graceThreshold} días o más. Aquí puedes revisarlas, gestionar el cobro inmediato o <strong>prorrogarles los días</strong> si el comercio solicitó una extensión.
+                Boletas fiadas cuyo plazo fijado ya venció hace {graceThreshold} días o más. Aquí puedes revisarlas, gestionar el cobro inmediato o <strong>prorrogarles los días</strong> si el comercio solicitó una extensión.
               </p>
             </div>
           </div>
@@ -266,7 +266,7 @@ export const CriticalOverdueBubbleModal: React.FC<CriticalOverdueBubbleModalProp
                             target="_blank"
                             rel="noopener noreferrer"
                             className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1 transition-colors"
-                            title="Enviar recordatorio de factura vencida directamente al cliente por WhatsApp"
+                            title="Enviar recordatorio de boleta vencida directamente al cliente por WhatsApp"
                           >
                             <MessageCircle className="w-3.5 h-3.5" />
                             <span>WhatsApp Cliente</span>

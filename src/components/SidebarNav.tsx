@@ -112,7 +112,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
 
   const navGroups: NavGroup[] = [
     {
-      title: `Cobranzas y ${labels.salePlural}`,
+      title: `Cobranza y ${labels.salePlural.toLowerCase()}`,
       items: [
         {
           id: 'boletas',
@@ -132,7 +132,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         },
         {
           id: 'impagas',
-          label: `${labels.salePlural} Impagas`,
+          label: `${labels.salePlural} impagas`,
           hint: 'Detalle completo y prórrogas',
           icon: AlertCircle,
           badge: criticalCount > 0 ? criticalCount : undefined,

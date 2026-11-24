@@ -535,7 +535,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
     if (onBillOrder && !order.linkedBoletaNumber && !isClosed) {
       actions.push({
         key: 'facturar',
-        label: 'Facturar',
+        label: 'Generar boleta',
         icon: FileText,
         tone: 'neutral',
         onClick: () => onBillOrder(order),

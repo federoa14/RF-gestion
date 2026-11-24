@@ -261,7 +261,7 @@ export async function downloadRendicionComprobantePdf(
   ctx.fillStyle = '#94A3B8';
   ctx.font = '13px system-ui, -apple-system, sans-serif';
   ctx.fillText(
-    rendicion.appliedToBoletas ? 'Movimientos aplicados a facturas' : 'Solo arqueo informativo',
+    rendicion.appliedToBoletas ? 'Pagos aplicados a boletas' : 'Solo arqueo informativo',
     width - 40,
     80
   );

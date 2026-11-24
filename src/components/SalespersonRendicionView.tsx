@@ -718,7 +718,7 @@ export const SalespersonRendicionView: React.FC<SalespersonRendicionViewProps> =
                   </p>
                   <p className="text-xs text-slate-500 dark:text-[#94A3B8] max-w-sm mx-auto">
                     {scope === 'due_or_overdue'
-                      ? 'Este preventista no tiene boletas vencidas ni que venzan hoy. Podés cambiar el alcance a "Todas las boletas pendientes" si querés incluir facturas futuras.'
+                      ? 'Este preventista no tiene boletas vencidas ni que venzan hoy. Podés cambiar el alcance a "Todas las boletas pendientes" si querés incluir boletas futuras.'
                       : 'Este preventista no tiene boletas pendientes registradas.'}
                   </p>
                 </div>

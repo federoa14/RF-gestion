@@ -221,7 +221,7 @@ export async function executeDailyAlertsDirect(params: {
                   .replace(/{fechaVenta}/gi, item.boleta.saleDate)
                   .replace(/{vendedor}/gi, item.boleta.salespersonName)
                   .replace(/{dias}/gi, String(item.daysElapsed))
-              : `⚠️ *RECORDATORIO DE FACTURA VENCIDA* ⚠️\n🏢 *${distributorName}*\n\nEstimado/a ${clientDisplayName}:\nLe informamos que la boleta/factura firmada *#${item.boleta.boletaNumber}* ha superado su fecha límite (${item.boleta.dueDate}) y se encuentra *VENCIDA*.\n\n💰 *Saldo pendiente:* *${amountFormatted}*\n🧑‍💼 *Vendedor asignado:* ${item.boleta.salespersonName}\n\nPor favor le solicitamos coordinar el pago con nuestro vendedor o administración para mantener su cuenta al día. ¡Muchas gracias!`;
+              : `⚠️ *RECORDATORIO DE BOLETA VENCIDA* ⚠️\n🏢 *${distributorName}*\n\nEstimado/a ${clientDisplayName}:\nLe informamos que la boleta firmada *#${item.boleta.boletaNumber}* ha superado su fecha límite (${item.boleta.dueDate}) y se encuentra *VENCIDA*.\n\n💰 *Saldo pendiente:* *${amountFormatted}*\n🧑‍💼 *Vendedor asignado:* ${item.boleta.salespersonName}\n\nPor favor le solicitamos coordinar el pago con nuestro vendedor o administración para mantener su cuenta al día. ¡Muchas gracias!`;
 
           const clientRes = await sendDirectWhatsAppFromClient(clientPhone, clientMsg, config);
 

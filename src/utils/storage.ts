@@ -77,7 +77,7 @@ export const DEFAULT_CONFIG: DistributorConfig = {
   saleCriticalDays: 15,
   enableClientWhatsAppReminders: false,
   includeClientsInAutoDispatch: false,
-  customClientOverdueTemplate: 'Hola {cliente}, le informamos desde {distribuidora} que la boleta/factura #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!',
+  customClientOverdueTemplate: 'Hola {cliente}, le informamos desde {distribuidora} que la boleta #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!',
   businessRubro: 'distribuidora',
   enforceSinglePendingBoleta: true,
   merchantPaymentAlias: '',

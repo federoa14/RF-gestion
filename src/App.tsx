@@ -1919,7 +1919,7 @@ export default function App() {
 
   const handleBillCatalogOrder = (order: CatalogPickupOrder) => {
     if (order.linkedBoletaNumber) {
-      showToast(`Este pedido ya fue facturado en la boleta #${order.linkedBoletaNumber}.`);
+      showToast(`Este pedido ya tiene la boleta #${order.linkedBoletaNumber}.`);
       return;
     }
 
@@ -2055,7 +2055,7 @@ export default function App() {
     handleSaveCatalogOrders(updatedOrders);
 
     showToast(
-      `Boleta #${newBoleta.boletaNumber} facturada desde pedido #${order.orderNumber}. Ya podés cobrarla o enviarla por WhatsApp.`
+      `Boleta #${newBoleta.boletaNumber} generada desde el pedido #${order.orderNumber}. Ya podés cobrarla o enviarla por WhatsApp.`
     );
   };
 

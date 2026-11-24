@@ -587,7 +587,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                 Auditoría de Rendimiento de Cobranza por Vendedor
               </strong>
               <p className="leading-relaxed">
-                Este ranking ordena a los vendedores según el <strong>tiempo promedio real que tardan en cobrar sus boletas</strong> y el índice de facturas vencidas en la calle. Un vendedor con alto retraso sistemático indica clientes problemáticos asignados o baja frecuencia de cobranza presencial.
+                Este ranking ordena a los vendedores según el <strong>tiempo promedio real que tardan en cobrar sus boletas</strong> y el índice de boletas vencidas en la calle. Un vendedor con alto retraso sistemático indica clientes problemáticos asignados o baja frecuencia de cobranza presencial.
               </p>
             </div>
           </div>

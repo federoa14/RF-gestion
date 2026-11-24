@@ -25,7 +25,7 @@ interface EditBrandModalProps {
 
 const ICON_PRESETS = [
   { id: 'shield-navy', label: 'Azul Marino y Plata', icon: ShieldCheck, color: 'from-[#162E59] via-[#0F2142] to-[#091428]' },
-  { id: 'file', label: 'Boleta / Remito', icon: FileText, color: 'from-[#1B3566] to-[#0B1933]' },
+  { id: 'file', label: 'Boleta', icon: FileText, color: 'from-[#1B3566] to-[#0B1933]' },
   { id: 'truck', label: 'Camión / Reparto', icon: Truck, color: 'from-emerald-700 to-teal-800' },
   { id: 'package', label: 'Bultos / Logística', icon: Package, color: 'from-slate-600 to-slate-800' },
   { id: 'store', label: 'Comercio / Mayorista', icon: Store, color: 'from-[#162E59] to-slate-800' },

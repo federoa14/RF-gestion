@@ -857,7 +857,7 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#CBD5E1] dark:border-[#B6C2D2]/25 bg-white dark:bg-[#0B1933] text-[#0B1933] dark:text-white hover:bg-slate-100 dark:hover:bg-[#13264A] cursor-pointer whitespace-nowrap"
                 >
                   <Receipt className="w-3.5 h-3.5" />
-                  <span>Facturar</span>
+                  <span>Generar boleta</span>
                 </button>
               )}
 
