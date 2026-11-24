@@ -27,6 +27,7 @@ import { DistributorConfig, Boleta } from '../types';
 import { calculateAlertStatus, formatCurrency } from '../utils/alerts';
 import { getBusinessLabels } from '../utils/businessMode';
 import { BrandMark } from './BrandMark';
+import { getAlertThresholds } from '../utils/alertThresholds';
 
 interface SidebarNavProps {
   activeTab: string;
@@ -89,7 +90,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   const canShowWebCatalog = featureAccess ? featureAccess.canAccessWebCatalog : catalogEnabled !== false;
   const canShowFullSuite = featureAccess ? featureAccess.canAccessFullFeatures : true;
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
-  const graceDays = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  const graceDays = getAlertThresholds(config).overdueGraceDays;
   const refDate = currentDateRef || new Date().toISOString().split('T')[0];
 
   let criticalCount = 0;
@@ -370,7 +371,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             <div className="flex items-center justify-between text-xs font-bold">
               <span className="flex items-center gap-1.5">
                 <Flame className="w-3.5 h-3.5 text-amber-300" />
-                <span>Fiado Vencido (+{graceDays}d)</span>
+                <span>Fiado vencido ({graceDays}+ días de mora)</span>
               </span>
               <ChevronRight className="w-3.5 h-3.5 opacity-80" />
             </div>

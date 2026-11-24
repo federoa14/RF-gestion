@@ -1,3 +1,4 @@
+import { getAlertThresholds } from './alertThresholds';
 import { Administrator, AutoDispatchLog, Boleta, Client, DistributorConfig, Salesperson } from '../types';
 import { createWhatsAppUrl } from './whatsapp';
 
@@ -248,17 +249,20 @@ export async function executeDailyAlertsDirect(params: {
     }
   }
 
-  // 2. HITO: 2 DÍAS -> SOLO VENDEDOR
-  const reminderDays = config.vendedorReminderDays || 2;
-  const itemsAt2Days = evaluated.filter((e) => e.daysElapsed === reminderDays && !e.isOverdue);
-  for (const item of itemsAt2Days) {
+  // Umbrales centralizados (Ajustes): días desde la venta
+  const thresholds = getAlertThresholds(config);
+
+  // 2. HITO: RECORDATORIO AL VENDEDOR -> SOLO VENDEDOR
+  const reminderDays = thresholds.vendedorReminderDays;
+  const itemsAtReminder = evaluated.filter((e) => e.daysElapsed === reminderDays && !e.isOverdue);
+  for (const item of itemsAtReminder) {
     if (item.seller && item.seller.phone) {
-      const fullMessage = `📋 *RECORDATORIO A LOS 2 DÍAS DE VENTA*\n🏢 *${distributorName}*\n\nHola ${item.seller.name}, soy *${generalAdmin.name}*.\nRecordatorio preventivo: hace 2 días se entregó fiada la boleta #${item.boleta.boletaNumber} a *${item.boleta.clientName}*:\n\n📍 *Dirección:* ${item.boleta.clientAddress || 'Ver ficha'}\n📅 *Venta:* ${item.boleta.saleDate} (2 días transcurridos)\n⏰ *Vence:* ${item.boleta.dueDate} (Plazo ${item.boleta.termDays} días)\n💰 *Monto a cobrar:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\nTenela en cuenta en tu hoja de ruta semanal para cobrarla en término.`;
+      const fullMessage = `📋 *RECORDATORIO A LOS ${reminderDays} DÍAS DE LA VENTA*\n🏢 *${distributorName}*\n\nHola ${item.seller.name}, soy *${generalAdmin.name}*.\nRecordatorio preventivo: hace ${reminderDays} días se entregó fiada la boleta #${item.boleta.boletaNumber} a *${item.boleta.clientName}*:\n\n📍 *Dirección:* ${item.boleta.clientAddress || 'Ver ficha'}\n📅 *Venta:* ${item.boleta.saleDate} (${reminderDays} días transcurridos)\n⏰ *Vence:* ${item.boleta.dueDate} (Plazo ${item.boleta.termDays} días)\n💰 *Monto a cobrar:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\nTenela en cuenta en tu hoja de ruta semanal para cobrarla en término.`;
 
       const result = await sendDirectWhatsAppFromClient(item.seller.phone, fullMessage, config);
 
       logs.push({
-        id: `auto-${Date.now()}-2d-ven-${item.boleta.id}`,
+        id: `auto-${Date.now()}-reminder-ven-${item.boleta.id}`,
         timestamp: nowIso,
         channel: channels,
         recipientName: item.seller.name,
@@ -268,10 +272,10 @@ export async function executeDailyAlertsDirect(params: {
         recipientEmail: item.seller.email,
         boletasCount: 1,
         totalAmount: item.balanceDue,
-        messageSnippet: `📋 RECORDATORIO (2 DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} ($ ${item.balanceDue.toLocaleString('es-AR')}) enviada a ${item.seller.name}.`,
+        messageSnippet: `📋 RECORDATORIO (${reminderDays} DÍAS DESDE LA VENTA): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} ($ ${item.balanceDue.toLocaleString('es-AR')}) enviada a ${item.seller.name}.`,
         fullMessage,
         whatsappUrl: createWhatsAppUrl(item.seller.phone, fullMessage),
-        ruleMilestone: '2d',
+        ruleMilestone: 'vendor_reminder',
         status: 'sent',
         deliveryStatus: result.deliveryStatus,
         gatewayResponse: result.info,
@@ -279,17 +283,19 @@ export async function executeDailyAlertsDirect(params: {
     }
   }
 
-  // 3. HITO: 6 DÍAS -> VENDEDOR + DUEÑOS
-  const adminAlertDays = config.adminAlertDays || 6;
-  const itemsAt6Days = evaluated.filter((e) => e.daysElapsed === adminAlertDays);
-  for (const item of itemsAt6Days) {
+  // 3. HITO: AVISO A DUEÑOS -> VENDEDOR + DUEÑOS
+  const adminAlertDays = thresholds.adminAlertDays;
+  const alertModeDays = thresholds.alertModeDays;
+  const criticalSaleDays = thresholds.criticalSaleDays;
+  const itemsAtOwnerAlert = evaluated.filter((e) => e.daysElapsed === adminAlertDays);
+  for (const item of itemsAtOwnerAlert) {
     if (item.seller && item.seller.phone) {
-      const sellerMsg = `⚠️ *AVISO A LOS 6 DÍAS DE EMISIÓN*\n🏢 *${distributorName}*\n\nHola ${item.seller.name}, soy *${generalAdmin.name}*.\nTe notificamos que la boleta #${item.boleta.boletaNumber} de *${item.boleta.clientName}* cumple *6 días* desde su emisión:\n\n📍 *Dirección:* ${item.boleta.clientAddress || 'Ver ficha'}\n📅 *Venta:* ${item.boleta.saleDate}\n⏰ *Vence:* ${item.boleta.dueDate}\n💰 *Monto pendiente:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\nAviso enviado en simultáneo a los dueños. Por favor coordiná el cobro para evitar mora.`;
+      const sellerMsg = `⚠️ *AVISO A LOS ${adminAlertDays} DÍAS DE LA VENTA*\n🏢 *${distributorName}*\n\nHola ${item.seller.name}, soy *${generalAdmin.name}*.\nTe notificamos que la boleta #${item.boleta.boletaNumber} de *${item.boleta.clientName}* cumple *${adminAlertDays} días* desde la venta:\n\n📍 *Dirección:* ${item.boleta.clientAddress || 'Ver ficha'}\n📅 *Venta:* ${item.boleta.saleDate}\n⏰ *Vence:* ${item.boleta.dueDate}\n💰 *Monto pendiente:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\nAviso enviado en simultáneo a los dueños. Por favor coordiná el cobro para evitar mora.`;
 
       const result = await sendDirectWhatsAppFromClient(item.seller.phone, sellerMsg, config);
 
       logs.push({
-        id: `auto-${Date.now()}-6d-ven-${item.boleta.id}`,
+        id: `auto-${Date.now()}-owneralert-ven-${item.boleta.id}`,
         timestamp: nowIso,
         channel: channels,
         recipientName: item.seller.name,
@@ -299,10 +305,10 @@ export async function executeDailyAlertsDirect(params: {
         recipientEmail: item.seller.email,
         boletasCount: 1,
         totalAmount: item.balanceDue,
-        messageSnippet: `⚠️ ALERTA (6 DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} enviada a ${item.seller.name}.`,
+        messageSnippet: `⚠️ AVISO (${adminAlertDays} DÍAS DESDE LA VENTA): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} enviada a ${item.seller.name}.`,
         fullMessage: sellerMsg,
         whatsappUrl: createWhatsAppUrl(item.seller.phone, sellerMsg),
-        ruleMilestone: '6d',
+        ruleMilestone: 'owner_alert',
         status: 'sent',
         deliveryStatus: result.deliveryStatus,
         gatewayResponse: result.info,
@@ -311,12 +317,12 @@ export async function executeDailyAlertsDirect(params: {
 
     for (const owner of targetOwners) {
       if (owner.phone) {
-        const ownerMsg = `⚠️ *ALERTA 6 DÍAS PARA DUEÑOS: SEGUIMIENTO DE COBRANZA*\n🏢 *${distributorName}*\n\nHola ${owner.name}, aviso preventivo de control:\nEl vendedor *${item.boleta.salespersonName}* tiene la boleta #${item.boleta.boletaNumber} de *${item.boleta.clientName}* que hoy cumple *6 días* sin cobrarse:\n\n🧑‍💼 *Vendedor:* ${item.boleta.salespersonName}\n👤 *Cliente:* ${item.boleta.clientName}\n💰 *Importe:* $ ${item.balanceDue.toLocaleString('es-AR')}\n⏰ *Vence:* ${item.boleta.dueDate}\n\nSe emitió aviso al vendedor para que realice el cobro antes de ingresar en zona de mora de 10 días.`;
+        const ownerMsg = `⚠️ *AVISO A DUEÑOS (${adminAlertDays} DÍAS DESDE LA VENTA): SEGUIMIENTO DE COBRANZA*\n🏢 *${distributorName}*\n\nHola ${owner.name}, aviso preventivo de control:\nEl vendedor *${item.boleta.salespersonName}* tiene la boleta #${item.boleta.boletaNumber} de *${item.boleta.clientName}* que hoy cumple *${adminAlertDays} días* desde la venta sin cobrarse:\n\n🧑‍💼 *Vendedor:* ${item.boleta.salespersonName}\n👤 *Cliente:* ${item.boleta.clientName}\n💰 *Importe:* $ ${item.balanceDue.toLocaleString('es-AR')}\n⏰ *Vence:* ${item.boleta.dueDate}\n\nSe emitió aviso al vendedor para que realice el cobro antes de entrar en modo alerta (${alertModeDays} días desde la venta).`;
 
         const ownerRes = await sendDirectWhatsAppFromClient(owner.phone, ownerMsg, config);
 
         logs.push({
-          id: `auto-${Date.now()}-6d-own-${owner.id}-${item.boleta.id}`,
+          id: `auto-${Date.now()}-owneralert-own-${owner.id}-${item.boleta.id}`,
           timestamp: nowIso,
           channel: channels,
           recipientName: owner.name,
@@ -326,10 +332,10 @@ export async function executeDailyAlertsDirect(params: {
           recipientEmail: owner.email,
           boletasCount: 1,
           totalAmount: item.balanceDue,
-          messageSnippet: `⚠️ ALERTA 6 DÍAS DUEÑO: Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} ($ ${item.balanceDue.toLocaleString('es-AR')}).`,
+          messageSnippet: `⚠️ AVISO A DUEÑOS (${adminAlertDays} DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} ($ ${item.balanceDue.toLocaleString('es-AR')}).`,
           fullMessage: ownerMsg,
           whatsappUrl: createWhatsAppUrl(owner.phone, ownerMsg),
-          ruleMilestone: '6d',
+          ruleMilestone: 'owner_alert',
           status: 'sent',
           deliveryStatus: ownerRes.deliveryStatus,
           gatewayResponse: ownerRes.info,
@@ -338,16 +344,18 @@ export async function executeDailyAlertsDirect(params: {
     }
   }
 
-  // 4. HITO: 10-14 DÍAS
-  const itemsAt10Days = evaluated.filter((e) => e.daysElapsed >= 10 && e.daysElapsed < 15);
-  for (const item of itemsAt10Days) {
+  // 4. HITO: MODO ALERTA (desde alertModeDays hasta antes de criticalSaleDays)
+  const itemsInAlertMode = evaluated.filter(
+    (e) => e.daysElapsed >= alertModeDays && e.daysElapsed < criticalSaleDays
+  );
+  for (const item of itemsInAlertMode) {
     if (item.seller && item.seller.phone) {
-      const sellerMsg = `🚨 *MODO ALERTA (10+ DÍAS): BOLETA SIGUE SIN ESTAR PAGA* 🚨\n🏢 *${distributorName}*\n\nHola ${item.seller.name}, soy *${generalAdmin.name}*.\n*AVISO URGENTE: La boleta #${item.boleta.boletaNumber} ya superó los 10 días (${item.daysElapsed} días) y SIGUE SIN ESTAR PAGA*.\n*Necesito que vayas a cobrarle hoy con prioridad máxima a ${item.boleta.clientName}*:\n\n📍 *Dirección:* ${item.boleta.clientAddress || 'Ver ficha'}\n📅 *Venta:* ${item.boleta.saleDate} (${item.daysElapsed} días transcurridos)\n⏰ *Vencimiento original:* ${item.boleta.dueDate}\n💰 *Saldo a cobrar:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\n📌 Se encuentra en rojo prioritario en el sistema central de cobranzas y los dueños ya tienen el reporte. Confirmame el cobro apenas lo efectúes.`;
+      const sellerMsg = `🚨 *MODO ALERTA (${alertModeDays}+ DÍAS DESDE LA VENTA): BOLETA SIGUE SIN ESTAR PAGA* 🚨\n🏢 *${distributorName}*\n\nHola ${item.seller.name}, soy *${generalAdmin.name}*.\n*AVISO URGENTE: La boleta #${item.boleta.boletaNumber} ya superó los ${alertModeDays} días desde la venta (${item.daysElapsed} días) y SIGUE SIN ESTAR PAGA*.\n*Necesito que vayas a cobrarle hoy con prioridad máxima a ${item.boleta.clientName}*:\n\n📍 *Dirección:* ${item.boleta.clientAddress || 'Ver ficha'}\n📅 *Venta:* ${item.boleta.saleDate} (${item.daysElapsed} días transcurridos)\n⏰ *Vencimiento original:* ${item.boleta.dueDate}\n💰 *Saldo a cobrar:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\n📌 Se encuentra en rojo prioritario en el sistema central de cobranzas y los dueños ya tienen el reporte. Confirmame el cobro apenas lo efectúes.`;
 
       const result = await sendDirectWhatsAppFromClient(item.seller.phone, sellerMsg, config);
 
       logs.push({
-        id: `auto-${Date.now()}-10d-ven-${item.boleta.id}`,
+        id: `auto-${Date.now()}-alertmode-ven-${item.boleta.id}`,
         timestamp: nowIso,
         channel: channels,
         recipientName: item.seller.name,
@@ -357,10 +365,10 @@ export async function executeDailyAlertsDirect(params: {
         recipientEmail: item.seller.email,
         boletasCount: 1,
         totalAmount: item.balanceDue,
-        messageSnippet: `🚨 MODO ALERTA (10 DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} SIGUE SIN ESTAR PAGA.`,
+        messageSnippet: `🚨 MODO ALERTA (${alertModeDays}+ DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} SIGUE SIN ESTAR PAGA.`,
         fullMessage: sellerMsg,
         whatsappUrl: createWhatsAppUrl(item.seller.phone, sellerMsg),
-        ruleMilestone: '10d',
+        ruleMilestone: 'alert_mode',
         status: 'sent',
         deliveryStatus: result.deliveryStatus,
         gatewayResponse: result.info,
@@ -369,12 +377,12 @@ export async function executeDailyAlertsDirect(params: {
 
     for (const owner of targetOwners) {
       if (owner.phone) {
-        const ownerMsg = `🚨 *ALERTA DUEÑOS (10+ DÍAS): BOLETA SIGUE SIN ESTAR PAGA* 🚨\n🏢 *${distributorName}*\n\nHola ${owner.name}, atención con boleta demorada:\nLa boleta #${item.boleta.boletaNumber} del vendedor *${item.boleta.salespersonName}* para el cliente *${item.boleta.clientName}* ya cumplió *${item.daysElapsed} días y SIGUE SIN ESTAR PAGA*.\n\n🧑‍💼 *Vendedor responsable:* ${item.boleta.salespersonName}\n👤 *Cliente:* ${item.boleta.clientName}\n📅 *Fecha de venta:* ${item.boleta.saleDate} (${item.daysElapsed} días transcurridos)\n💰 *Monto a cobrar:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\n📌 Figura en primer lugar en color rojo prioritario en el inicio para su cobro urgente.`;
+        const ownerMsg = `🚨 *ALERTA DUEÑOS (${alertModeDays}+ DÍAS DESDE LA VENTA): BOLETA SIGUE SIN ESTAR PAGA* 🚨\n🏢 *${distributorName}*\n\nHola ${owner.name}, atención con boleta demorada:\nLa boleta #${item.boleta.boletaNumber} del vendedor *${item.boleta.salespersonName}* para el cliente *${item.boleta.clientName}* ya cumplió *${item.daysElapsed} días desde la venta y SIGUE SIN ESTAR PAGA*.\n\n🧑‍💼 *Vendedor responsable:* ${item.boleta.salespersonName}\n👤 *Cliente:* ${item.boleta.clientName}\n📅 *Fecha de venta:* ${item.boleta.saleDate} (${item.daysElapsed} días transcurridos)\n💰 *Monto a cobrar:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\n📌 Figura en primer lugar en color rojo prioritario en el inicio para su cobro urgente.`;
 
         const ownerRes = await sendDirectWhatsAppFromClient(owner.phone, ownerMsg, config);
 
         logs.push({
-          id: `auto-${Date.now()}-10d-own-${owner.id}-${item.boleta.id}`,
+          id: `auto-${Date.now()}-alertmode-own-${owner.id}-${item.boleta.id}`,
           timestamp: nowIso,
           channel: channels,
           recipientName: owner.name,
@@ -384,10 +392,10 @@ export async function executeDailyAlertsDirect(params: {
           recipientEmail: owner.email,
           boletasCount: 1,
           totalAmount: item.balanceDue,
-          messageSnippet: `🚨 ALERTA DUEÑOS (10 DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} lleva ${item.daysElapsed} días sin pagarse.`,
+          messageSnippet: `🚨 ALERTA DUEÑOS (${alertModeDays}+ DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} lleva ${item.daysElapsed} días sin pagarse.`,
           fullMessage: ownerMsg,
           whatsappUrl: createWhatsAppUrl(owner.phone, ownerMsg),
-          ruleMilestone: '10d',
+          ruleMilestone: 'alert_mode',
           status: 'sent',
           deliveryStatus: ownerRes.deliveryStatus,
           gatewayResponse: ownerRes.info,
@@ -396,16 +404,16 @@ export async function executeDailyAlertsDirect(params: {
     }
   }
 
-  // 5. HITO: 15+ DÍAS -> MORA CRÍTICA MÁXIMA
-  const itemsAt15Days = evaluated.filter((e) => e.daysElapsed >= 15);
-  for (const item of itemsAt15Days) {
+  // 5. HITO: ALERTA CRÍTICA (días desde la venta ≥ criticalSaleDays)
+  const itemsCritical = evaluated.filter((e) => e.daysElapsed >= criticalSaleDays);
+  for (const item of itemsCritical) {
     if (item.seller && item.seller.phone) {
-      const sellerMsg = `🚨 *MORA CRÍTICA (15+ DÍAS): BOLETA SIGUE SIN ESTAR PAGA* 🚨\n🏢 *${distributorName}*\n\nHola ${item.seller.name}, soy *${generalAdmin.name}*.\n*ATENCIÓN URGENTE: La boleta #${item.boleta.boletaNumber} lleva ${item.daysElapsed} días emitida y SIGUE SIN ESTAR PAGA*.\n*Necesito que hoy vayas a cobrarle de forma obligatoria e inmediata a ${item.boleta.clientName}*:\n\n📍 *Dirección:* ${item.boleta.clientAddress || 'Ver ficha'}\n📅 *Venta:* ${item.boleta.saleDate} (${item.daysElapsed} días transcurridos)\n⏰ *Vencimiento original:* ${item.boleta.dueDate}\n💰 *Saldo a cobrar:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\n⚠️ Esta cuenta está en estado de máxima mora y fue elevada a la gerencia / dueños. Por favor concurrí hoy al comercio y rendí el cobro en administración.`;
+      const sellerMsg = `🚨 *ALERTA CRÍTICA (${criticalSaleDays}+ DÍAS DESDE LA VENTA): BOLETA SIGUE SIN ESTAR PAGA* 🚨\n🏢 *${distributorName}*\n\nHola ${item.seller.name}, soy *${generalAdmin.name}*.\n*ATENCIÓN URGENTE: La boleta #${item.boleta.boletaNumber} lleva ${item.daysElapsed} días desde la venta y SIGUE SIN ESTAR PAGA*.\n*Necesito que hoy vayas a cobrarle de forma obligatoria e inmediata a ${item.boleta.clientName}*:\n\n📍 *Dirección:* ${item.boleta.clientAddress || 'Ver ficha'}\n📅 *Venta:* ${item.boleta.saleDate} (${item.daysElapsed} días transcurridos)\n⏰ *Vencimiento original:* ${item.boleta.dueDate}\n💰 *Saldo a cobrar:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\n⚠️ Esta cuenta está en estado de máxima mora y fue elevada a la gerencia / dueños. Por favor concurrí hoy al comercio y rendí el cobro en administración.`;
 
       const result = await sendDirectWhatsAppFromClient(item.seller.phone, sellerMsg, config);
 
       logs.push({
-        id: `auto-${Date.now()}-15d-ven-${item.boleta.id}`,
+        id: `auto-${Date.now()}-critical-ven-${item.boleta.id}`,
         timestamp: nowIso,
         channel: channels,
         recipientName: item.seller.name,
@@ -415,10 +423,10 @@ export async function executeDailyAlertsDirect(params: {
         recipientEmail: item.seller.email,
         boletasCount: 1,
         totalAmount: item.balanceDue,
-        messageSnippet: `🚨 ALERTA CRÍTICA (15+ DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} SIGUE SIN ESTAR PAGA (${item.daysElapsed} días).`,
+        messageSnippet: `🚨 ALERTA CRÍTICA (${criticalSaleDays}+ DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} SIGUE SIN ESTAR PAGA (${item.daysElapsed} días).`,
         fullMessage: sellerMsg,
         whatsappUrl: createWhatsAppUrl(item.seller.phone, sellerMsg),
-        ruleMilestone: '15d',
+        ruleMilestone: 'critical_sale',
         status: 'sent',
         deliveryStatus: result.deliveryStatus,
         gatewayResponse: result.info,
@@ -427,12 +435,12 @@ export async function executeDailyAlertsDirect(params: {
 
     for (const owner of targetOwners) {
       if (owner.phone) {
-        const ownerMsg = `🚨 *ALERTA CRÍTICA DUEÑOS (15+ DÍAS): BOLETA SIGUE SIN ESTAR PAGA* 🚨\n🏢 *${distributorName}*\n\nHola ${owner.name}, alerta de mora máxima:\nLa boleta #${item.boleta.boletaNumber} del vendedor *${item.boleta.salespersonName}* para el cliente *${item.boleta.clientName}* lleva *${item.daysElapsed} días emitida y SIGUE SIN ESTAR PAGA*.\n\n🧑‍💼 *Vendedor a cargo:* ${item.boleta.salespersonName}\n👤 *Cliente:* ${item.boleta.clientName}\n📅 *Emisión:* ${item.boleta.saleDate} (${item.daysElapsed} días sin cancelar)\n💰 *Saldo adeudado:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\n⚠️ Esta boleta superó los 15 días y está en rojo prioritario en el sistema central. Se notificó al vendedor para exigir el cobro urgente hoy.`;
+        const ownerMsg = `🚨 *ALERTA CRÍTICA DUEÑOS (${criticalSaleDays}+ DÍAS DESDE LA VENTA): BOLETA SIGUE SIN ESTAR PAGA* 🚨\n🏢 *${distributorName}*\n\nHola ${owner.name}, alerta de mora máxima:\nLa boleta #${item.boleta.boletaNumber} del vendedor *${item.boleta.salespersonName}* para el cliente *${item.boleta.clientName}* lleva *${item.daysElapsed} días desde la venta y SIGUE SIN ESTAR PAGA*.\n\n🧑‍💼 *Vendedor a cargo:* ${item.boleta.salespersonName}\n👤 *Cliente:* ${item.boleta.clientName}\n📅 *Emisión:* ${item.boleta.saleDate} (${item.daysElapsed} días sin cancelar)\n💰 *Saldo adeudado:* $ ${item.balanceDue.toLocaleString('es-AR')}\n\n⚠️ Esta boleta superó los ${criticalSaleDays} días desde la venta y está en rojo prioritario en el sistema central. Se notificó al vendedor para exigir el cobro urgente hoy.`;
 
         const ownerRes = await sendDirectWhatsAppFromClient(owner.phone, ownerMsg, config);
 
         logs.push({
-          id: `auto-${Date.now()}-15d-own-${owner.id}-${item.boleta.id}`,
+          id: `auto-${Date.now()}-critical-own-${owner.id}-${item.boleta.id}`,
           timestamp: nowIso,
           channel: channels,
           recipientName: owner.name,
@@ -442,10 +450,10 @@ export async function executeDailyAlertsDirect(params: {
           recipientEmail: owner.email,
           boletasCount: 1,
           totalAmount: item.balanceDue,
-          messageSnippet: `🚨 MORA CRÍTICA DUEÑO (15+ DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} tiene ${item.daysElapsed} días impaga.`,
+          messageSnippet: `🚨 ALERTA CRÍTICA DUEÑOS (${criticalSaleDays}+ DÍAS): Boleta #${item.boleta.boletaNumber} de ${item.boleta.clientName} tiene ${item.daysElapsed} días impaga.`,
           fullMessage: ownerMsg,
           whatsappUrl: createWhatsAppUrl(owner.phone, ownerMsg),
-          ruleMilestone: '15d',
+          ruleMilestone: 'critical_sale',
           status: 'sent',
           deliveryStatus: ownerRes.deliveryStatus,
           gatewayResponse: ownerRes.info,

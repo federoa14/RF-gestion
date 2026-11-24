@@ -23,6 +23,7 @@ import {
 import { Boleta, DistributorConfig, Client, Salesperson, Administrator } from '../types';
 import { calculateAlertStatus, formatCurrency, formatDateEs, getBoletaBalance } from '../utils/alerts';
 import { createWhatsAppUrl, generateClientWhatsAppMessage, generateUserSignedReminder } from '../utils/whatsapp';
+import { getAlertThresholds } from '../utils/alertThresholds';
 
 interface UnpaidBoletasViewProps {
   boletas: Boleta[];
@@ -65,7 +66,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
-  const graceThreshold = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  const graceThreshold = getAlertThresholds(config).overdueGraceDays;
 
   // Enriched items with balance and alert status
   const enrichedItems = pendingBoletas.map((b) => {
@@ -226,7 +227,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
           </span>
         </div>
 
-        {/* Vencido Crítico (+5d) */}
+        {/* Vencido crítico (días de mora ≥ overdueGraceDays) */}
         <div
           onClick={() => setStatusFilter('critical_overdue')}
           className={`p-4 rounded-2xl border transition-all cursor-pointer ${
@@ -238,7 +239,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-1">
               <Flame className="w-3.5 h-3.5 text-rose-600" />
-              <span>Vencido Crítico (+{graceThreshold}d)</span>
+              <span>Vencido crítico ({graceThreshold}+ días de mora)</span>
             </span>
           </div>
           <span className="text-xl sm:text-2xl font-black font-mono text-rose-600 dark:text-rose-400 block mt-1">
@@ -326,7 +327,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                   : 'text-rose-600 dark:text-rose-400'
               }`}
             >
-              🔴 Vencidas +{graceThreshold}d ({criticalOverdueItems.length})
+              🔴 Vencidas con {graceThreshold}+ días de mora ({criticalOverdueItems.length})
             </button>
             <button
               onClick={() => setStatusFilter('extended')}

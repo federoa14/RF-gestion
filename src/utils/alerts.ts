@@ -1,4 +1,5 @@
 import { Boleta, DistributorConfig, BoletaAlertStatus } from '../types';
+import { getAlertThresholds } from './alertThresholds';
 
 export function calculateAlertStatus(
   boleta: Boleta,
@@ -17,14 +18,15 @@ export function calculateAlertStatus(
   const daysRemaining = Math.ceil(diffTimeDue / (1000 * 60 * 60 * 24));
   const daysPastDueDate = Math.max(0, Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24)));
 
-  const graceThreshold = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  const thresholds = getAlertThresholds(config);
+  const graceThreshold = thresholds.overdueGraceDays;
   const isPastGracePeriod = daysPastDueDate >= graceThreshold;
   const isExtended = Boolean(boleta.extensionDays && boleta.extensionDays > 0);
   const isOverdueOrToday = daysRemaining <= 0;
 
   // 1. REGLA ESTRICTA SOLICITADA POR EL USUARIO:
-  // 5 días posteriores a la fecha de vencimiento -> ENTRA EN ROJO (FIADO VENCIDO CRÍTICO)
-  // Ej: Si vence a los 7 días, el día 12 (7 + 5) ya empieza a aparecer en rojo como plata que ya debió cobrarse
+  // Al llegar a "overdueGraceDays" días de mora (contados desde el vencimiento) -> ENTRA EN ROJO (FIADO VENCIDO CRÍTICO)
+  // Ej: plazo de 7 días y 5 días de mora configurados -> el día 12 desde la venta ya aparece en rojo
   if (isPastGracePeriod) {
     return {
       daysElapsed,
@@ -33,9 +35,9 @@ export function calculateAlertStatus(
       isPastGracePeriod: true,
       isExtended,
       category: 'critical_overdue_grace',
-      categoryLabel: `Fiado Vencido (+${daysPastDueDate}d)`,
+      categoryLabel: `Fiado vencido (${daysPastDueDate}d de mora)`,
       badgeColor: 'bg-[#B91C1C] text-white border-[#991B1B] font-bold',
-      actionMessage: `Fiado vencido hace ${daysPastDueDate} días (superó los ${graceThreshold} días posteriores al vencimiento). Plata pendiente de cobro prioritario.`,
+      actionMessage: `Fiado vencido hace ${daysPastDueDate} días (superó los ${graceThreshold} días de mora configurados). Plata pendiente de cobro prioritario.`,
       shouldNotifyVendedor: true,
       shouldNotifyAdmin: true,
       isOverdueOrToday: true,
@@ -62,8 +64,8 @@ export function calculateAlertStatus(
     };
   }
 
-  // 3. MORA CRÍTICA MÁXIMA (15+ días desde la venta)
-  if (daysElapsed >= 15) {
+  // 3. ALERTA CRÍTICA (días desde la venta ≥ criticalSaleDays)
+  if (daysElapsed >= thresholds.criticalSaleDays) {
     return {
       daysElapsed,
       daysRemaining,
@@ -71,7 +73,7 @@ export function calculateAlertStatus(
       isPastGracePeriod,
       isExtended,
       category: 'critical_15d',
-      categoryLabel: `Mora Crítica (${daysElapsed}d sin pago)`,
+      categoryLabel: `Alerta crítica (${daysElapsed}d desde la venta)`,
       badgeColor: 'bg-[#991B1B] text-white border-[#7F1D1D] font-bold',
       actionMessage: `Alerta crítica: la boleta #${boleta.boletaNumber} lleva ${daysElapsed} días sin estar paga. Prioridad máxima de cobro.`,
       shouldNotifyVendedor: true,
@@ -81,8 +83,8 @@ export function calculateAlertStatus(
     };
   }
 
-  // 4. MODO ALERTA (10+ días desde la venta)
-  if (daysElapsed >= 10) {
+  // 4. MODO ALERTA (días desde la venta ≥ alertModeDays)
+  if (daysElapsed >= thresholds.alertModeDays) {
     return {
       daysElapsed,
       daysRemaining,
@@ -90,9 +92,9 @@ export function calculateAlertStatus(
       isPastGracePeriod,
       isExtended,
       category: 'critical_10d',
-      categoryLabel: `Modo Alerta (${daysElapsed}d sin pago)`,
+      categoryLabel: `Modo alerta (${daysElapsed}d desde la venta)`,
       badgeColor: 'bg-[#DC2626] text-white border-[#B91C1C] font-semibold',
-      actionMessage: `Boleta #${boleta.boletaNumber} con ${daysElapsed} días emitida sin pago. Notificación enviada a dueños y vendedor.`,
+      actionMessage: `Boleta #${boleta.boletaNumber} con ${daysElapsed} días desde la venta sin pago. Notificación enviada a dueños y vendedor.`,
       shouldNotifyVendedor: true,
       shouldNotifyAdmin: true,
       isOverdueOrToday: true,
@@ -100,7 +102,7 @@ export function calculateAlertStatus(
     };
   }
 
-  // 5. Vencida o vence hoy (1 a 4 días tras vencimiento, antes del límite de gracia de 5 días)
+  // 5. Vencida o vence hoy (antes de llegar a los días de mora que la pasan a rojo)
   if (isOverdueOrToday) {
     return {
       daysElapsed,
@@ -119,8 +121,8 @@ export function calculateAlertStatus(
     };
   }
 
-  // 6. Alerta 6 días a Dueños
-  const adminAlertThreshold = config.adminAlertDays || 6;
+  // 6. Aviso a dueños (días desde la venta ≥ adminAlertDays)
+  const adminAlertThreshold = thresholds.adminAlertDays;
   if (daysElapsed >= adminAlertThreshold) {
     return {
       daysElapsed,
@@ -129,9 +131,9 @@ export function calculateAlertStatus(
       isPastGracePeriod: false,
       isExtended,
       category: 'admin_6d',
-      categoryLabel: 'Alerta 6 Días (Dueños)',
+      categoryLabel: `Aviso a dueños (${daysElapsed}d desde la venta)`,
       badgeColor: 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/70 dark:text-amber-200 dark:border-amber-800',
-      actionMessage: `Lleva ${daysElapsed} días sin cobro. Aviso enviado a dueños y vendedor a cargo.`,
+      actionMessage: `Lleva ${daysElapsed} días desde la venta sin cobro. Aviso enviado a dueños y vendedor a cargo.`,
       shouldNotifyVendedor: true,
       shouldNotifyAdmin: true,
       isOverdueOrToday: false,
@@ -139,8 +141,8 @@ export function calculateAlertStatus(
     };
   }
 
-  // 7. Recordatorio 2 días a Vendedor
-  const vendedorReminderThreshold = config.vendedorReminderDays || 2;
+  // 7. Recordatorio al vendedor (días desde la venta ≥ vendedorReminderDays)
+  const vendedorReminderThreshold = thresholds.vendedorReminderDays;
   if (daysElapsed >= vendedorReminderThreshold) {
     return {
       daysElapsed,
@@ -149,9 +151,9 @@ export function calculateAlertStatus(
       isPastGracePeriod: false,
       isExtended,
       category: 'vendedor_2d',
-      categoryLabel: 'Recordatorio 2 Días',
+      categoryLabel: `Recordatorio vendedor (${daysElapsed}d desde la venta)`,
       badgeColor: 'bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700',
-      actionMessage: `Lleva ${daysElapsed} días emitida. Recordatorio preventivo al vendedor.`,
+      actionMessage: `Lleva ${daysElapsed} días desde la venta. Recordatorio preventivo al vendedor.`,
       shouldNotifyVendedor: true,
       shouldNotifyAdmin: false,
       isOverdueOrToday: false,

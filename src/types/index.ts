@@ -232,7 +232,8 @@ export interface AutoDispatchLog {
   messageSnippet: string;
   fullMessage?: string;
   whatsappUrl?: string;
-  ruleMilestone?: '2d' | '6d' | '10d' | '15d' | 'overdue' | 'overdue_client' | 'blocked_charge' | 'daily_closing' | 'custom';
+  // '2d' | '6d' | '10d' | '15d' se conservan solo para registros históricos
+  ruleMilestone?: 'vendor_reminder' | 'owner_alert' | 'alert_mode' | 'critical_sale' | '2d' | '6d' | '10d' | '15d' | 'overdue' | 'overdue_client' | 'blocked_charge' | 'daily_closing' | 'custom';
   status: 'sent' | 'simulated';
   deliveryStatus?: 'delivered' | 'sent' | 'queued' | 'gateway_api' | 'simulated';
   gatewayResponse?: string;
@@ -281,7 +282,9 @@ export interface DistributorConfig {
   totalPurgedBoletasCount?: number; // Total histórico de boletas depuradas
   // Prórrogas y Margen de Vencido Crítico (Plata en la calle vencida):
   defaultExtensionDays?: number; // Días de prórroga rápida por defecto (ej. 3 o 5 días)
-  overdueGraceDays?: number; // Días posteriores al vencimiento para figurar en rojo crítico (ej. 5 días)
+  overdueGraceDays?: number; // Días posteriores al vencimiento para figurar en rojo crítico (días de mora)
+  saleAlertModeDays?: number; // Días desde la venta para entrar en "modo alerta" (prioridad de cobro)
+  saleCriticalDays?: number; // Días desde la venta para "alerta crítica" (prioridad máxima)
   // Control de Envíos de WhatsApp a Clientes (Activación / Desactivación por Empresa):
   enableClientWhatsAppReminders?: boolean; // Activar o desactivar el envío de recordatorios por WhatsApp a clientes
   customClientOverdueTemplate?: string; // Plantilla personalizada para el recordatorio de factura vencida al cliente

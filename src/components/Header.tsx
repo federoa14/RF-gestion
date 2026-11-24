@@ -17,6 +17,7 @@ import { calculateAlertStatus, formatCurrency } from '../utils/alerts';
 import { getTenantSubscriptionStatus } from '../utils/tenantSubscription';
 import { getBusinessLabels } from '../utils/businessMode';
 import { BrandMark } from './BrandMark';
+import { getAlertThresholds } from '../utils/alertThresholds';
 
 interface HeaderProps {
   config: DistributorConfig;
@@ -126,7 +127,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSubscriptionPayModal,
 }) => {
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
-  const graceDays = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  const alertThresholds = getAlertThresholds(config);
+  const graceDays = alertThresholds.overdueGraceDays;
 
   const alertStats = pendingBoletas.reduce(
     (acc, b) => {
@@ -338,12 +340,12 @@ export const Header: React.FC<HeaderProps> = ({
 
             <div className="flex items-center gap-1.5 text-amber-300 tabular-nums">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span className="font-medium">{alertStats.adminAlert} alerta dueños ({config.adminAlertDays}+d)</span>
+              <span className="font-medium">{alertStats.adminAlert} aviso a dueños ({alertThresholds.adminAlertDays}+ días de la venta)</span>
             </div>
 
             <div className="hidden md:flex items-center gap-1.5 text-[#94A3B8] tabular-nums">
               <Clock className="w-3.5 h-3.5 text-[#CBD5E1]" />
-              <span>{alertStats.vendedorReminder} recordatorio ({config.vendedorReminderDays}d)</span>
+              <span>{alertStats.vendedorReminder} recordatorio ({alertThresholds.vendedorReminderDays}+ días de la venta)</span>
             </div>
 
             {alertStats.criticalOverdue > 0 && onOpenCriticalBubble && (
@@ -355,7 +357,7 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Flame className="w-3 h-3 text-amber-300" />
                 <span>
-                  Vencido (+{graceDays}d): {formatCurrency(alertStats.criticalOverdueAmount, config.currencySymbol)}
+                  Vencido ({graceDays}+ días de mora): {formatCurrency(alertStats.criticalOverdueAmount, config.currencySymbol)}
                 </span>
               </button>
             )}

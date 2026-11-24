@@ -34,6 +34,7 @@ import {
   AutoDispatchLog,
 } from '../types';
 import { calculateAlertStatus, formatCurrency, formatDateEs, getBoletaBalance } from '../utils/alerts';
+import { getAlertThresholds } from '../utils/alertThresholds';
 import {
   createWhatsAppUrl,
   createMailtoUrl,
@@ -57,6 +58,18 @@ interface AutomatedDispatchManagerProps {
   onClearLogs: () => void;
 }
 
+
+// Los registros viejos usan '2d' / '6d' / '10d' / '15d'; se traducen a los hitos actuales.
+const LEGACY_MILESTONES: Record<string, string> = {
+  '2d': 'vendor_reminder',
+  '6d': 'owner_alert',
+  '10d': 'alert_mode',
+  '15d': 'critical_sale',
+};
+function normalizeMilestone(milestone?: string): string | undefined {
+  return milestone ? LEGACY_MILESTONES[milestone] || milestone : milestone;
+}
+
 export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> = ({
   boletas,
   paidBoletas = [],
@@ -77,6 +90,7 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [filterRole, setFilterRole] = useState<'all' | 'dueño' | 'vendedor' | 'cliente'>('all');
   const [filterMilestone, setFilterMilestone] = useState<string>('all');
+  const thresholds = getAlertThresholds(config);
   const [isGatewaySettingsOpen, setIsGatewaySettingsOpen] = useState(false);
 
   // Form local state
@@ -264,20 +278,20 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
   // Filter logs
   const filteredLogs = logs.filter((log) => {
     if (filterRole !== 'all' && log.recipientRole !== filterRole) return false;
-    if (filterMilestone !== 'all' && log.ruleMilestone !== filterMilestone) return false;
+    if (filterMilestone !== 'all' && normalizeMilestone(log.ruleMilestone) !== filterMilestone) return false;
     return true;
   });
 
   const getMilestoneBadge = (milestone?: string) => {
-    switch (milestone) {
-      case '2d':
-        return { label: '2 Días • Vendedor', bg: 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200' };
-      case '6d':
-        return { label: '6 Días • Dueño y Vendedor', bg: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200' };
-      case '10d':
-        return { label: '🚨 10 Días • Sigue Sin Pagar', bg: 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border-rose-300' };
-      case '15d':
-        return { label: '🚨 15+ Días • Mora Crítica', bg: 'bg-red-200 text-red-900 dark:bg-red-950/80 dark:text-red-200 border-red-400' };
+    switch (normalizeMilestone(milestone)) {
+      case 'vendor_reminder':
+        return { label: `Recordatorio (${thresholds.vendedorReminderDays} días desde la venta) • Vendedor`, bg: 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200' };
+      case 'owner_alert':
+        return { label: `Aviso (${thresholds.adminAlertDays} días desde la venta) • Dueño y vendedor`, bg: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200' };
+      case 'alert_mode':
+        return { label: `🚨 Modo alerta (${thresholds.alertModeDays}+ días) • Sigue sin pagar`, bg: 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border-rose-300' };
+      case 'critical_sale':
+        return { label: `🚨 Alerta crítica (${thresholds.criticalSaleDays}+ días)`, bg: 'bg-red-200 text-red-900 dark:bg-red-950/80 dark:text-red-200 border-red-400' };
       case 'overdue':
         return { label: '⏰ Salida a Cobrar Hoy', bg: 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200' };
       case 'overdue_client':
@@ -314,7 +328,7 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span><strong>Al Dueño:</strong> Le sale el mensaje <strong>ÚNICAMENTE SI ES PERTINENTE</strong> (solo si hay boletas vencidas que cobrar hoy, o alertas de 6d, 10d o 15d de mora). Si todo está al día, no se satura al dueño.</span>
+                <span><strong>Al Dueño:</strong> Le sale el mensaje <strong>ÚNICAMENTE SI ES PERTINENTE</strong> (solo si hay boletas vencidas que cobrar hoy, o avisos a los {thresholds.adminAlertDays}, {thresholds.alertModeDays} o {thresholds.criticalSaleDays}+ días desde la venta). Si todo está al día, no se satura al dueño.</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className={`w-4 h-4 shrink-0 ${config.enableClientWhatsAppReminders && config.includeClientsInAutoDispatch ? 'text-emerald-400' : 'text-slate-500'}`} />
@@ -511,10 +525,12 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-blue-200 dark:border-blue-950/60 shadow-xs flex items-start gap-3">
           <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 font-black text-sm">
-            2d
+            {thresholds.vendedorReminderDays}d
           </div>
           <div>
-            <h4 className="font-bold text-xs text-slate-900 dark:text-white">A los 2 Días</h4>
+            <h4 className="font-bold text-xs text-slate-900 dark:text-white">
+              A los {thresholds.vendedorReminderDays} días de la venta
+            </h4>
             <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
               Directo al vendedor para que tenga la boleta en su hoja de ruta. <strong>No molesta al dueño.</strong>
             </p>
@@ -523,10 +539,12 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
 
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-amber-200 dark:border-amber-950/60 shadow-xs flex items-start gap-3">
           <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0 font-black text-sm">
-            6d
+            {thresholds.adminAlertDays}d
           </div>
           <div>
-            <h4 className="font-bold text-xs text-slate-900 dark:text-white">A los 6 Días</h4>
+            <h4 className="font-bold text-xs text-slate-900 dark:text-white">
+              A los {thresholds.adminAlertDays} días de la venta
+            </h4>
             <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
               Al vendedor y <strong>al dueño (pertinente)</strong> para seguimiento antes del vencimiento.
             </p>
@@ -535,10 +553,12 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
 
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-rose-200 dark:border-rose-950/60 shadow-xs flex items-start gap-3">
           <div className="w-9 h-9 rounded-xl bg-rose-50 dark:bg-rose-900/40 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 font-black text-sm">
-            10d
+            {thresholds.alertModeDays}d
           </div>
           <div>
-            <h4 className="font-bold text-xs text-rose-700 dark:text-rose-400">🚨 10 Días (Alerta Roja)</h4>
+            <h4 className="font-bold text-xs text-rose-700 dark:text-rose-400">
+              🚨 Desde los {thresholds.alertModeDays} días (modo alerta)
+            </h4>
             <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
               Al vendedor y al dueño avisando que <strong>sigue sin estar paga</strong>. Boleta prioritaria urgente.
             </p>
@@ -547,10 +567,12 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
 
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-red-300 dark:border-red-950/60 shadow-xs flex items-start gap-3">
           <div className="w-9 h-9 rounded-xl bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 flex items-center justify-center shrink-0 font-black text-sm">
-            15d
+            {thresholds.criticalSaleDays}d
           </div>
           <div>
-            <h4 className="font-bold text-xs text-red-700 dark:text-red-400">🚨 15+ Días (Mora Máxima)</h4>
+            <h4 className="font-bold text-xs text-red-700 dark:text-red-400">
+              🚨 Desde los {thresholds.criticalSaleDays} días (alerta crítica)
+            </h4>
             <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
               Mora extrema obligatoria a dueños y vendedor: cuenta bloqueada con cobro exigido hoy.
             </p>
@@ -800,7 +822,7 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
                 Alertas Matutinas al Dueño solo si es Pertinente
               </span>
               <span className="text-[11px] text-slate-400">
-                Por la mañana avisa al dueño únicamente si hay mora urgente (6d, 10d, 15d). El Resumen de Cierre del Día sí se envía cada tarde.
+                Por la mañana avisa al dueño únicamente si hay avisos a los {thresholds.adminAlertDays}, {thresholds.alertModeDays} o {thresholds.criticalSaleDays}+ días desde la venta. El Resumen de Cierre del Día sí se envía cada tarde.
               </span>
             </div>
             <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-3">

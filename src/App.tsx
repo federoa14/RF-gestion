@@ -82,6 +82,7 @@ import {
 } from './utils/storage';
 import { purgeExpiredBoletas, ensureClientCreditHistory, getDaysElapsed } from './utils/retentionPurge';
 import { calculateAlertStatus, formatCurrency, addDaysToDate, formatDateEs, getBoletaBalance } from './utils/alerts';
+import { getAlertThresholds } from './utils/alertThresholds';
 import { createWhatsAppUrl, generateUserSignedReminder } from './utils/whatsapp';
 import {
   ExcessPaymentAllocationPlan,
@@ -3295,6 +3296,7 @@ export default function App() {
   // Filter pending boletas
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
 
+  const alertThresholds = getAlertThresholds(config);
   const filteredBoletas = pendingBoletas.filter((b) => {
     const status = calculateAlertStatus(b, config, currentDateRef);
 
@@ -3308,8 +3310,8 @@ export default function App() {
       selectedSalespersonFilter === 'all' || b.salespersonId === selectedSalespersonFilter;
 
     let matchesStatus = true;
-    if (statusFilter === 'urgent_10d') matchesStatus = status.daysElapsed >= 10;
-    else if (statusFilter === 'overdue') matchesStatus = status.isOverdueOrToday || status.daysElapsed >= 10;
+    if (statusFilter === 'urgent_10d') matchesStatus = status.daysElapsed >= alertThresholds.alertModeDays;
+    else if (statusFilter === 'overdue') matchesStatus = status.isOverdueOrToday || status.daysElapsed >= alertThresholds.alertModeDays;
     else if (statusFilter === 'admin_alert') matchesStatus = status.category === 'admin_6d' || status.category === 'admin_alert';
     else if (statusFilter === 'vendedor_3dias') matchesStatus = status.category === 'vendedor_2d' || status.category === 'vendedor_reminder';
     else if (statusFilter === 'normal') matchesStatus = status.category === 'normal';
@@ -3317,25 +3319,25 @@ export default function App() {
     return matchesSearch && matchesSeller && matchesStatus;
   });
 
-  // Sort boletas: Prioriza automáticamente las boletas con 10 o más días en PRIMER LUGAR (Modo Alerta Roja)
+  // Sort boletas: Prioriza automáticamente las boletas en "modo alerta" (días desde la venta ≥ alertModeDays)
   // ordenadas por las más antiguas primero, sin importar la fecha ni el ordenamiento seleccionado abajo.
   const sortedBoletas = [...filteredBoletas].sort((a, b) => {
     const statusA = calculateAlertStatus(a, config, currentDateRef);
     const statusB = calculateAlertStatus(b, config, currentDateRef);
 
-    const isUrgent10A = statusA.daysElapsed >= 10;
-    const isUrgent10B = statusB.daysElapsed >= 10;
+    const isUrgent10A = statusA.daysElapsed >= alertThresholds.alertModeDays;
+    const isUrgent10B = statusB.daysElapsed >= alertThresholds.alertModeDays;
 
-    // 1. Si pasaron 10 días, van PRIMERAS COMO PRIORITARIAS (urgente)
+    // 1. Si están en modo alerta, van PRIMERAS COMO PRIORITARIAS (urgente)
     if (isUrgent10A && !isUrgent10B) return -1;
     if (!isUrgent10A && isUrgent10B) return 1;
 
-    // 2. Entre las de 10+ días, suben las más viejas primero (15d, 14d, 13d...)
+    // 2. Entre las que están en modo alerta, suben las más viejas primero
     if (isUrgent10A && isUrgent10B) {
       return statusB.daysElapsed - statusA.daysElapsed;
     }
 
-    // 3. Para las demás (< 10 días), se respeta el ordenamiento seleccionado:
+    // 3. Para las demás, se respeta el ordenamiento seleccionado:
     if (sortBy === 'days_desc') {
       return statusB.daysElapsed - statusA.daysElapsed;
     }
@@ -3352,8 +3354,8 @@ export default function App() {
   const counts = pendingBoletas.reduce(
     (acc, b) => {
       const status = calculateAlertStatus(b, config, currentDateRef);
-      if (status.daysElapsed >= 10) acc.urgent10d++;
-      if (status.isOverdueOrToday || status.daysElapsed >= 10) acc.overdue++;
+      if (status.daysElapsed >= alertThresholds.alertModeDays) acc.urgent10d++;
+      if (status.isOverdueOrToday || status.daysElapsed >= alertThresholds.alertModeDays) acc.overdue++;
       if (status.category === 'admin_6d' || status.category === 'admin_alert') acc.adminAlert++;
       if (status.category === 'vendedor_2d' || status.category === 'vendedor_reminder') acc.vendedorReminder++;
       if (status.category === 'normal') acc.normal++;
@@ -3391,14 +3393,14 @@ export default function App() {
 
   const urgent10dDebt = pendingBoletas.reduce((acc, b) => {
     const st = calculateAlertStatus(b, config, currentDateRef);
-    if (st.daysElapsed >= 10) {
+    if (st.daysElapsed >= alertThresholds.alertModeDays) {
       return acc + getBoletaBalance(b).balanceDue;
     }
     return acc;
   }, 0);
 
-  // Fiado Vencido Crítico (+5 días posteriores al vencimiento pactado)
-  const graceThreshold = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  // Fiado Vencido Crítico (días de mora ≥ overdueGraceDays)
+  const graceThreshold = alertThresholds.overdueGraceDays;
   const criticalOverdueBoletas = pendingBoletas.filter((b) => {
     const st = calculateAlertStatus(b, config, currentDateRef);
     return st.daysPastDueDate >= graceThreshold;
@@ -4422,11 +4424,11 @@ export default function App() {
                       ? 'bg-rose-50/90 dark:bg-rose-950/35 border-[#B91C1C] hover:bg-rose-100/80 dark:hover:bg-rose-950/50'
                       : 'bg-white dark:bg-[#0B1933] border-[#CBD5E1] dark:border-[#B6C2D2]/20 hover:border-[#94A3B8]'
                   }`}
-                  title="Abrir la burbuja de fiado vencido crítico (+5 días posteriores al vencimiento)"
+                  title={`Abrir la burbuja de fiado vencido crítico (${graceThreshold} o más días de mora)`}
                 >
                   <div className="flex items-center justify-between text-xs font-semibold w-full">
                     <span className={criticalGraceOverdueDebt > 0 ? 'text-[#991B1B] dark:text-rose-300 font-bold' : 'text-slate-500 dark:text-[#94A3B8]'}>
-                      Fiado Vencido (+{graceThreshold}d)
+                      Fiado vencido ({graceThreshold}+ días de mora)
                     </span>
                     <div
                       className={`p-1.5 rounded-lg ${
@@ -4757,7 +4759,7 @@ export default function App() {
                     }`}
                   >
                     <Flame className="w-3.5 h-3.5" />
-                    <span>Prioridad +10d ({counts.urgent10d})</span>
+                    <span>Prioridad: {alertThresholds.alertModeDays}+ días desde la venta ({counts.urgent10d})</span>
                   </button>
 
                   <button
@@ -4782,7 +4784,7 @@ export default function App() {
                     }`}
                   >
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    <span>Alerta Dueños ({config.adminAlertDays}+d) ({counts.adminAlert})</span>
+                    <span>Aviso a dueños ({alertThresholds.adminAlertDays}+ días desde la venta) ({counts.adminAlert})</span>
                   </button>
 
                   <button
@@ -4795,7 +4797,7 @@ export default function App() {
                     }`}
                   >
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Aviso Vendedor ({config.vendedorReminderDays}d) ({counts.vendedorReminder})</span>
+                    <span>Recordatorio vendedor ({alertThresholds.vendedorReminderDays}+ días desde la venta) ({counts.vendedorReminder})</span>
                   </button>
 
                   <button
@@ -4821,7 +4823,7 @@ export default function App() {
                     </div>
                     <div>
                       <h4 className="text-xs sm:text-sm font-bold tracking-wide tabular-nums">
-                        Prioridad de Cobro: {counts.urgent10d} boleta(s) superaron los 10 días sin cancelarse
+                        Prioridad de cobro: {counts.urgent10d} boleta(s) superaron los {alertThresholds.alertModeDays} días desde la venta sin cancelarse
                       </h4>
                       <p className="text-[11px] sm:text-xs text-rose-100 mt-0.5">
                         Se ordenan automáticamente arriba para facilitar el seguimiento de cobro o registrar una prórroga.
@@ -4833,7 +4835,7 @@ export default function App() {
                     onClick={() => setStatusFilter('urgent_10d')}
                     className="px-3.5 py-1.5 bg-white text-[#991B1B] hover:bg-rose-50 text-xs font-bold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
-                    Ver solo las +10 días
+                    Ver solo las de {alertThresholds.alertModeDays}+ días
                   </button>
                 </div>
               )}

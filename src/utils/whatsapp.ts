@@ -1,5 +1,6 @@
 import { Boleta, Client, Salesperson, Administrator, DistributorConfig, SaleLineItem, CatalogPickupOrder } from '../types';
 import { calculateAlertStatus, formatCurrency, formatDateEs, getBoletaBalance } from './alerts';
+import { getAlertThresholds } from './alertThresholds';
 
 // Clean phone for wa.me link (e.g. +54 9 11 1234-5678 -> 5491112345678)
 export function sanitizePhone(phone: string): string {
@@ -26,6 +27,7 @@ export function generateUserSignedReminder(
   const sellerName = salesperson?.name || boleta.salespersonName;
   const status = calculateAlertStatus(boleta, config);
   const days = status.daysElapsed;
+  const thresholds = getAlertThresholds(config);
   const balance = getBoletaBalance(boleta);
   const formattedBalanceDue = formatCurrency(balance.balanceDue, config.currencySymbol);
   const formattedOriginalAmount = formatCurrency(balance.originalAmount, config.currencySymbol);
@@ -51,11 +53,11 @@ export function generateUserSignedReminder(
 
   // Specific templates per user rules
   if (status.category === 'critical_15d') {
-    return `🚨 *MORA CRÍTICA (15+ DÍAS): BOLETA SIGUE SIN ESTAR PAGA* 🚨
+    return `🚨 *ALERTA CRÍTICA (${thresholds.criticalSaleDays}+ DÍAS DESDE LA VENTA): BOLETA SIGUE SIN ESTAR PAGA* 🚨
 🏢 *${config.distributorName}*
 
 Hola ${sellerName}, soy *${activeAdminName}*.
-*ATENCIÓN URGENTE: La boleta #${boleta.boletaNumber} lleva ${days} días emitida y SIGUE SIN ESTAR PAGA*.
+*ATENCIÓN URGENTE: La boleta #${boleta.boletaNumber} lleva ${days} días desde la venta y SIGUE SIN ESTAR PAGA*.
 *Necesito que hoy vayas a cobrarle de forma obligatoria e inmediata a ${boleta.clientName}*:
 
 📄 *Boleta:* #${boleta.boletaNumber} (Firmada / Fiada)
@@ -68,11 +70,11 @@ ${amountSection}
   }
 
   if (status.category === 'critical_10d') {
-    return `🚨 *MODO ALERTA (10+ DÍAS): BOLETA SIGUE SIN ESTAR PAGA* 🚨
+    return `🚨 *MODO ALERTA (${thresholds.alertModeDays}+ DÍAS DESDE LA VENTA): BOLETA SIGUE SIN ESTAR PAGA* 🚨
 🏢 *${config.distributorName}*
 
 Hola ${sellerName}, soy *${activeAdminName}*.
-*AVISO URGENTE: La boleta #${boleta.boletaNumber} ya superó los 10 días (${days} días) y SIGUE SIN ESTAR PAGA*.
+*AVISO URGENTE: La boleta #${boleta.boletaNumber} ya superó los ${thresholds.alertModeDays} días desde la venta (${days} días) y SIGUE SIN ESTAR PAGA*.
 *Necesito que vayas a cobrarle hoy con prioridad máxima a ${boleta.clientName}*:
 
 📄 *Boleta:* #${boleta.boletaNumber} (Firmada / Fiada)
@@ -102,29 +104,29 @@ Por favor salí a la calle hoy a cobrar esta boleta y confirmame cuando la tenga
   }
 
   if (status.category === 'admin_6d') {
-    return `⚠️ *AVISO A LOS 6 DÍAS DE EMISIÓN*
+    return `⚠️ *AVISO A LOS ${days} DÍAS DE LA VENTA*
 🏢 *${config.distributorName}*
 
 Hola ${sellerName}, soy *${activeAdminName}*.
-Te notificamos que la boleta #${boleta.boletaNumber} de *${boleta.clientName}* cumple *6 días* desde su emisión:
+Te notificamos que la boleta #${boleta.boletaNumber} de *${boleta.clientName}* cumple *${days} días* desde la venta:
 
 📍 *Dirección:* ${boleta.clientAddress || 'Ver ficha'}
 📅 *Venta:* ${formatDateEs(boleta.saleDate)}
 ⏰ *Vence:* ${formatDateEs(boleta.dueDate)}
 ${amountSection}
 
-Aviso enviado en simultáneo a los dueños para seguimiento. Por favor coordiná el cobro para evitar que ingrese en mora de 10 días.`;
+Aviso enviado en simultáneo a los dueños para seguimiento. Por favor coordiná el cobro antes de que entre en modo alerta (${thresholds.alertModeDays} días desde la venta).`;
   }
 
   if (status.category === 'vendedor_2d') {
-    return `📋 *RECORDATORIO A LOS 2 DÍAS DE VENTA*
+    return `📋 *RECORDATORIO A LOS ${days} DÍAS DE LA VENTA*
 🏢 *${config.distributorName}*
 
 Hola ${sellerName}, soy *${activeAdminName}*.
-Recordatorio preventivo: hace 2 días se entregó fiada la boleta #${boleta.boletaNumber} a *${boleta.clientName}*:
+Recordatorio preventivo: hace ${days} días se entregó fiada la boleta #${boleta.boletaNumber} a *${boleta.clientName}*:
 
 📍 *Dirección:* ${boleta.clientAddress || 'Ver ficha'}
-📅 *Venta:* ${formatDateEs(boleta.saleDate)} (Lleva 2 días)
+📅 *Venta:* ${formatDateEs(boleta.saleDate)} (Lleva ${days} días)
 ⏰ *Vence:* ${formatDateEs(boleta.dueDate)} (Plazo ${boleta.termDays} días)
 ${amountSection}
 
@@ -318,15 +320,16 @@ export function generateAdminWhatsAppMessage(
   const status = calculateAlertStatus(boleta, config);
   const adminName = admin?.name || 'Administrador / Dueño';
   const days = status.daysElapsed;
+  const thresholds = getAlertThresholds(config);
   const balance = getBoletaBalance(boleta);
   const formattedBalanceDue = formatCurrency(balance.balanceDue, config.currencySymbol);
 
   if (status.category === 'critical_15d') {
-    return `🚨 *ALERTA CRÍTICA DUEÑOS (15+ DÍAS): BOLETA SIGUE SIN ESTAR PAGA* 🚨
+    return `🚨 *ALERTA CRÍTICA DUEÑOS (${thresholds.criticalSaleDays}+ DÍAS DESDE LA VENTA): BOLETA SIGUE SIN ESTAR PAGA* 🚨
 🏢 *${config.distributorName}*
 
 Hola ${adminName}, alerta de mora máxima:
-La boleta #${boleta.boletaNumber} del vendedor *${boleta.salespersonName}* para el cliente *${boleta.clientName}* lleva *${days} días emitida y SIGUE SIN ESTAR PAGA*.
+La boleta #${boleta.boletaNumber} del vendedor *${boleta.salespersonName}* para el cliente *${boleta.clientName}* lleva *${days} días desde la venta y SIGUE SIN ESTAR PAGA*.
 
 🧑‍💼 *Vendedor a cargo:* ${boleta.salespersonName}
 👤 *Cliente:* ${boleta.clientName} (${boleta.clientAddress || 'Sin dir'})
@@ -334,15 +337,15 @@ La boleta #${boleta.boletaNumber} del vendedor *${boleta.salespersonName}* para 
 📅 *Emisión:* ${formatDateEs(boleta.saleDate)} (*${days} días de antigüedad*)
 💰 *Saldo adeudado:* *${formattedBalanceDue}*
 
-⚠️ Esta boleta superó los 15 días y está en rojo prioritario en el sistema central. Se notificó al vendedor para exigir el cobro urgente hoy.`;
+⚠️ Esta boleta superó los ${thresholds.criticalSaleDays} días desde la venta y está en rojo prioritario en el sistema central. Se notificó al vendedor para exigir el cobro urgente hoy.`;
   }
 
   if (status.category === 'critical_10d') {
-    return `🚨 *ALERTA DUEÑOS (10+ DÍAS): BOLETA SIGUE SIN ESTAR PAGA* 🚨
+    return `🚨 *ALERTA DUEÑOS (${thresholds.alertModeDays}+ DÍAS DESDE LA VENTA): BOLETA SIGUE SIN ESTAR PAGA* 🚨
 🏢 *${config.distributorName}*
 
 Hola ${adminName}, atención con boleta demorada:
-La boleta #${boleta.boletaNumber} del vendedor *${boleta.salespersonName}* para el cliente *${boleta.clientName}* ya cumplió *${days} días y SIGUE SIN ESTAR PAGA*.
+La boleta #${boleta.boletaNumber} del vendedor *${boleta.salespersonName}* para el cliente *${boleta.clientName}* ya cumplió *${days} días desde la venta y SIGUE SIN ESTAR PAGA*.
 
 🧑‍💼 *Vendedor responsable:* ${boleta.salespersonName}
 👤 *Cliente:* ${boleta.clientName} (${boleta.clientAddress || 'Sin dir'})
@@ -354,18 +357,18 @@ La boleta #${boleta.boletaNumber} del vendedor *${boleta.salespersonName}* para 
   }
 
   if (status.category === 'admin_6d') {
-    return `⚠️ *ALERTA 6 DÍAS PARA DUEÑOS: SEGUIMIENTO DE COBRANZA*
+    return `⚠️ *AVISO A DUEÑOS (${days} DÍAS DESDE LA VENTA): SEGUIMIENTO DE COBRANZA*
 🏢 *${config.distributorName}*
 
 Hola ${adminName}, aviso preventivo de control:
-El vendedor *${boleta.salespersonName}* tiene la boleta #${boleta.boletaNumber} de *${boleta.clientName}* que hoy cumple *6 días* sin cobrarse:
+El vendedor *${boleta.salespersonName}* tiene la boleta #${boleta.boletaNumber} de *${boleta.clientName}* que hoy cumple *${days} días* desde la venta sin cobrarse:
 
 🧑‍💼 *Vendedor:* ${boleta.salespersonName}
 👤 *Cliente:* ${boleta.clientName}
 💰 *Importe:* *${formattedBalanceDue}*
 ⏰ *Vence:* ${formatDateEs(boleta.dueDate)}
 
-Se emitió aviso al vendedor para que realice el cobro antes de ingresar en zona de mora de 10 días.`;
+Se emitió aviso al vendedor para que realice el cobro antes de entrar en modo alerta (${thresholds.alertModeDays} días desde la venta).`;
   }
 
   return `📊 *ALERTA DE CONTROL PARA ADMINISTRADORES*

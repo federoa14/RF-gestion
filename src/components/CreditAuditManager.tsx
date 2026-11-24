@@ -319,7 +319,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
             {punctualClientsCount} <span className="text-xs font-normal text-slate-400">comercios</span>
           </p>
           <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold block mt-0.5">
-            Pagan dentro de los 5, 7 o 15 días pactados
+            Pagan dentro del plazo pactado de cada boleta
           </span>
         </div>
 

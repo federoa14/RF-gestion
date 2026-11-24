@@ -16,6 +16,7 @@ import {
 import { Boleta, DistributorConfig, Salesperson, Client } from '../types';
 import { calculateAlertStatus, formatCurrency, formatDateEs, getBoletaBalance } from '../utils/alerts';
 import { createWhatsAppUrl, generateClientWhatsAppMessage, generateUserSignedReminder } from '../utils/whatsapp';
+import { getAlertThresholds } from '../utils/alertThresholds';
 
 interface CriticalOverdueBubbleModalProps {
   isOpen: boolean;
@@ -47,7 +48,7 @@ export const CriticalOverdueBubbleModal: React.FC<CriticalOverdueBubbleModalProp
   if (!isOpen) return null;
 
   // Filter only pending boletas with daysPastDueDate >= 5 (or configured grace days)
-  const graceThreshold = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  const graceThreshold = getAlertThresholds(config).overdueGraceDays;
   const criticalOverdueBoletas = boletas
     .filter((b) => b.status === 'pending')
     .map((b) => ({
@@ -78,14 +79,14 @@ export const CriticalOverdueBubbleModal: React.FC<CriticalOverdueBubbleModalProp
                   🔴 Burbuja de Fiado Vencido Crítico
                 </span>
                 <span className="text-xs text-rose-600 font-bold">
-                  +{graceThreshold} días posteriores al vencimiento
+                  {graceThreshold} o más días de mora (después del vencimiento)
                 </span>
               </div>
               <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white mt-1">
                 Plata en la Calle que ya Debería Haber Sido Cobrada
               </h2>
               <p className="text-xs text-slate-500 max-w-2xl mt-0.5">
-                Facturas fiadas cuyo plazo fijado ya venció hace más de 5 días. Aquí puedes revisarlas, gestionar el cobro inmediato o <strong>prorrogarles los días</strong> si el comercio solicitó una extensión.
+                Facturas fiadas cuyo plazo fijado ya venció hace {graceThreshold} días o más. Aquí puedes revisarlas, gestionar el cobro inmediato o <strong>prorrogarles los días</strong> si el comercio solicitó una extensión.
               </p>
             </div>
           </div>
@@ -102,7 +103,7 @@ export const CriticalOverdueBubbleModal: React.FC<CriticalOverdueBubbleModalProp
         <div className="bg-gradient-to-r from-rose-900 via-red-900 to-rose-950 text-white p-5 rounded-2xl shadow-md border border-rose-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <span className="text-xs uppercase font-bold text-rose-300 tracking-wider block">
-              Total Vencido Crítico en Calle (+{graceThreshold}d)
+              Total vencido crítico en la calle ({graceThreshold}+ días de mora)
             </span>
             <span className="text-3xl sm:text-4xl font-black font-mono tracking-tight text-white block mt-1">
               {formatCurrency(totalCriticalDebt, config.currencySymbol)}
@@ -138,7 +139,7 @@ export const CriticalOverdueBubbleModal: React.FC<CriticalOverdueBubbleModalProp
           {criticalOverdueBoletas.length === 0 ? (
             <div className="p-8 text-center bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 text-slate-400 space-y-1">
               <p className="font-semibold text-emerald-600 dark:text-emerald-400 text-sm">
-                🎉 ¡Excelente! No hay boletas con más de {graceThreshold} días de vencidas.
+                🎉 ¡Excelente! No hay boletas con {graceThreshold} o más días de mora.
               </p>
               <p className="text-xs">
                 Todo el fiado en la calle se encuentra al día o dentro del margen habitual de cobranza.

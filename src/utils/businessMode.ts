@@ -1,5 +1,6 @@
 import { Boleta, BusinessRubro, DistributorConfig, SaleLineItem } from '../types';
 import { addDaysToDate, getBoletaBalance } from './alerts';
+import { RUBRO_ESCALATION_DEFAULTS } from './alertThresholds';
 
 export interface RubroProfile {
   id: BusinessRubro;
@@ -238,6 +239,8 @@ export function applyRubroProfileToConfig(
     adminAlertDays: profile.defaultAdminAlertDays,
     overdueGraceDays: profile.defaultOverdueGraceDays,
     overdueAlertDays: profile.defaultTermDays,
+    saleAlertModeDays: RUBRO_ESCALATION_DEFAULTS[profile.id]?.alertModeDays,
+    saleCriticalDays: RUBRO_ESCALATION_DEFAULTS[profile.id]?.criticalSaleDays,
     defaultClientCreditLimit: profile.defaultClientCreditLimit,
     defaultInstallmentInterestPercent: profile.defaultInstallmentInterestPercent,
   };
