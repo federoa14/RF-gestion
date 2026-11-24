@@ -168,9 +168,9 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="bg-[#0B1933] text-[#F1F5F9] border-b border-[#B6C2D2]/20 sticky top-0 z-30">
       {/* Main Top Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-16 py-2.5 flex items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-16 py-2.5 flex flex-wrap items-center justify-between gap-3">
         {/* Left Zone: Mobile Menu + Breadcrumb */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1 basis-56">
           {onOpenMobileMenu && (
             <button
               type="button"
@@ -202,11 +202,11 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="hidden sm:inline text-xs font-medium text-[#8D9CB0]">
                 {tabInfo.section} /
               </span>
-              <h1 className="text-sm sm:text-base font-bold tracking-tight text-white truncate">
+              <h1 className="text-sm sm:text-base font-bold tracking-tight text-white break-words">
                 {tabInfo.title}
               </h1>
               {activeAdmin && (
-                <span className="hidden md:inline-block text-[11px] font-medium text-[#CBD5E1] bg-[#13264A] border border-[#B6C2D2]/20 px-2 py-0.5 rounded-md">
+                <span className="hidden md:inline-block whitespace-nowrap text-[11px] font-medium text-[#CBD5E1] bg-[#13264A] border border-[#B6C2D2]/20 px-2 py-0.5 rounded-md">
                   Operador: {activeAdmin.name.split(' ')[0]}
                 </span>
               )}
@@ -215,33 +215,34 @@ export const Header: React.FC<HeaderProps> = ({
                   type="button"
                   onClick={onOpenUserProfile}
                   title="Cambiar de rubro sobre la marcha o editar mi usuario"
-                  className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-mono font-bold text-[#E2E8F0] bg-[#162E59] hover:bg-[#1E3A6D] border border-[#B6C2D2]/30 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                  className="hidden sm:inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] font-mono font-bold text-[#E2E8F0] bg-[#162E59] hover:bg-[#1E3A6D] border border-[#B6C2D2]/30 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
                 >
                   <span>Rubro: {labels.shortLabel}</span>
                 </button>
               ) : (
-                <span className="hidden sm:inline-block text-[11px] font-mono font-bold text-[#CBD5E1] bg-[#13264A] border border-[#B6C2D2]/20 px-2 py-0.5 rounded-md">
+                <span className="hidden sm:inline-block whitespace-nowrap text-[11px] font-mono font-bold text-[#CBD5E1] bg-[#13264A] border border-[#B6C2D2]/20 px-2 py-0.5 rounded-md">
                   {labels.shortLabel}
                 </span>
               )}
             </div>
-            <p className="hidden sm:block text-xs text-[#94A3B8] truncate">
+            <p className="hidden sm:block text-xs leading-snug text-[#94A3B8]">
               {tabInfo.subtitle}
             </p>
           </div>
         </div>
 
         {/* Right Zone: Primary CTAs & Account Controls */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
           {onOpenQuickGuide && (
             <button
               type="button"
               onClick={onOpenQuickGuide}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#13264A] hover:bg-[#1B3566] text-[#CBD5E1] hover:text-white border border-[#B6C2D2]/25 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#13264A] hover:bg-[#1B3566] text-[#CBD5E1] hover:text-white border border-[#B6C2D2]/25 transition-colors cursor-pointer"
               title="Abrir guía rápida para saber dónde hacer cada gestión"
             >
-              <HelpCircle className="w-3.5 h-3.5" />
+              <HelpCircle className="w-3.5 h-3.5" aria-hidden="true" />
               <span className="hidden md:inline">¿Dónde ingreso?</span>
+              <span className="sr-only md:hidden">¿Dónde ingreso?</span>
             </button>
           )}
 
@@ -270,7 +271,8 @@ export const Header: React.FC<HeaderProps> = ({
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#E2E8F0] hover:bg-white text-[#091428] rounded-lg text-xs font-bold border border-white/60 transition-colors cursor-pointer shadow-xs"
           >
             <PlusCircle className="w-3.5 h-3.5 text-[#0B1933]" />
-            <span>Cargar {labels.saleSingular}</span>
+            <span className="sm:hidden">Cargar</span>
+            <span className="hidden sm:inline">Cargar {labels.saleSingular}</span>
           </button>
 
           {currentUser && (

@@ -299,10 +299,10 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
           <div className="space-y-3 max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[#1B3668] text-[#E2E8F0] text-xs font-bold border border-[#B6C2D2]/30">
               <Zap className="w-3.5 h-3.5 text-emerald-400" />
-              <span>SISTEMA AUTOMÁTICO DIRECTO (MANOS LIBRES)</span>
+              <span>ENVÍO AUTOMÁTICO DIARIO</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
-              Despacho Automático Directo de WhatsApp
+              Envío automático diario por WhatsApp
             </h2>
             <p className="text-sm text-emerald-100/90 leading-relaxed">
               No tenés que estar presionando botones. Cada mañana a las <strong>{dispatchTime} hs</strong> el servidor despacha directamente:
@@ -344,7 +344,7 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-slate-950" />
-                  <span>Probar Despacho Directo Ahora</span>
+                  <span>Probar envío ahora</span>
                 </>
               )}
             </button>
@@ -354,10 +354,16 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
         {/* STATUS BAR */}
         <div className="mt-6 pt-5 border-t border-emerald-500/20 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
           <div>
-            <span className="text-[#94A3B8] block text-[11px] font-semibold">Daemon en Servidor</span>
+            <span className="text-[#94A3B8] block text-[11px] font-semibold">Estado</span>
             <span className="font-bold text-white flex items-center gap-1.5 mt-0.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-              <span>Activo (Monitoreo 24/7)</span>
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${
+                  config.autoDispatchEnabled !== false ? 'bg-emerald-400' : 'bg-slate-400'
+                }`}
+              />
+              <span>
+                {config.autoDispatchEnabled !== false ? 'Envío automático: activo' : 'Envío automático: pausado'}
+              </span>
             </span>
           </div>
           <div>
@@ -842,7 +848,7 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
             <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in">
               <h4 className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-2">
                 <Zap className="w-4 h-4 text-emerald-600" />
-                <span>Pasarela de Envío Directo (API / Webhook / Daemon)</span>
+                <span>Pasarela de envío (API o webhook)</span>
               </h4>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

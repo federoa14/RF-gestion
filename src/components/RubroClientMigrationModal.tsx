@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { hasUsablePhone } from '../utils/whatsapp';
 import {
   X,
   ArrowRight,
@@ -310,7 +311,7 @@ export const RubroClientMigrationModal: React.FC<RubroClientMigrationModalProps>
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-[#94A3B8] flex flex-wrap items-center gap-2 mt-0.5">
                         <span>{client.contactPerson || 'Sin titular'}</span>
-                        {client.phone && <span className="font-mono">· {client.phone}</span>}
+                        {hasUsablePhone(client.phone) && <span className="font-mono">· {client.phone}</span>}
                         {hasDebt && debtInfo ? (
                           <span className="font-mono font-bold text-rose-600 dark:text-rose-400">
                             · Debe {formatCurrency(debtInfo.totalDue, config.currencySymbol)} ({debtInfo.count} comp.)

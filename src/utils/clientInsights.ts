@@ -58,6 +58,13 @@ const WEEKDAYS_ES = [
   'Sábado',
 ];
 
+/** "Sábado" -> "sábados", "Lunes" -> "lunes": para frases como "Suele comprar los sábados". */
+export function formatWeekdayPlural(label: string): string {
+  const lower = (label || '').trim().toLowerCase();
+  if (!lower) return '';
+  return lower.endsWith('s') ? lower : `${lower}s`;
+}
+
 function parseIsoDateLocal(dateStr: string): Date | null {
   if (!dateStr || typeof dateStr !== 'string') return null;
   const clean = dateStr.slice(0, 10);
@@ -362,7 +369,7 @@ export function analyzeClientPurchaseInsights(
     const parts: string[] = [];
     if (topWeekdays.length > 0 && topMonthPeriods.length > 0) {
       parts.push(
-        `Suele comprar mayormente los días ${topWeekdays[0].label} (${topWeekdays[0].percent}%) a ${topMonthPeriods[0].label.toLowerCase()} (${topMonthPeriods[0].subLabel})`
+        `Suele comprar mayormente los ${formatWeekdayPlural(topWeekdays[0].label)} (${topWeekdays[0].percent}%) a ${topMonthPeriods[0].label.toLowerCase()} (${topMonthPeriods[0].subLabel})`
       );
     }
     if (averageDaysBetweenPurchases !== null) {

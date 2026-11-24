@@ -7,6 +7,11 @@ export function sanitizePhone(phone: string): string {
   return phone.replace(/[^0-9]/g, '');
 }
 
+// Un teléfono es utilizable si tiene una cantidad mínima de dígitos (descarta valores como "0" o "-")
+export function hasUsablePhone(phone?: string | null): boolean {
+  return sanitizePhone(phone || '').replace(/^0+/, '').length >= 6;
+}
+
 /**
  * Mensaje personalizado con firma del usuario activo:
  * "Soy [Usuario] y necesito que vayas a cobrarle a [Cliente]..."

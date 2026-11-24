@@ -2703,8 +2703,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     <div className="space-y-5">
       {/* Top Banner & Public Share Controls */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5 min-w-0 flex-1 basis-80">
             <BrandMark
               logoUrl={config.distributorLogoUrl || tenant?.logoUrl}
               icon={config.distributorIcon || tenant?.icon}
@@ -2746,7 +2746,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleTogglePublished}
@@ -2908,8 +2908,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         )}
 
         {/* KPI Row + Sub-navigation */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-1">
+          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-fit max-w-full">
             <button
               type="button"
               onClick={() => setSubTab('productos')}
@@ -3185,7 +3185,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 />
               </div>
 
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {availableCategories.map((cat) => (
                   <button
                     key={cat}

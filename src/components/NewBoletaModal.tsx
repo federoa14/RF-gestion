@@ -44,7 +44,7 @@ import {
   SaleItemPaymentMode,
 } from '../types';
 import { addDaysToDate, formatCurrency, formatDateEs, getNextWednesday, getBoletaBalance } from '../utils/alerts';
-import { createWhatsAppUrl, generateBlockedChargeOwnerWhatsAppMessage } from '../utils/whatsapp';
+import { createWhatsAppUrl, generateBlockedChargeOwnerWhatsAppMessage, hasUsablePhone } from '../utils/whatsapp';
 import {
   getBusinessLabels,
   calculateInstallmentPlanPreview,
@@ -1251,7 +1251,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                             ? `${config.currencySymbol} ${clientCreditLimit.toLocaleString('es-AR')}`
                             : 'Sin tope fijo'}
                         </strong>
-                        {selectedClient.phone ? (
+                        {hasUsablePhone(selectedClient.phone) ? (
                           <span className="text-[11px] text-slate-400 font-mono">· {selectedClient.phone}</span>
                         ) : (
                           <span className="text-[11px] text-slate-400 italic">· Sin teléfono</span>

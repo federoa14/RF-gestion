@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { Client, Salesperson, Boleta, DistributorConfig } from '../types';
 import { calculateAlertStatus, formatCurrency, formatDateEs, getBoletaBalance } from '../utils/alerts';
-import { createWhatsAppUrl } from '../utils/whatsapp';
+import { createWhatsAppUrl, hasUsablePhone } from '../utils/whatsapp';
 
 interface CreditAuditManagerProps {
   clients: Client[];
@@ -551,7 +551,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
 
                         {/* WhatsApp Contact */}
                         <td className="py-3 px-4 text-right whitespace-nowrap">
-                          {item.client.phone && (
+                          {hasUsablePhone(item.client.phone) && (
                             <a
                               href={createWhatsAppUrl(
                                 item.client.phone,

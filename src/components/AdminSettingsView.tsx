@@ -1142,8 +1142,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
       {/* Regla de Retención de 30 Días para Optimización de Almacenamiento / Base de Datos */}
       <div className="bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-950/60 rounded-2xl p-5 shadow-xs">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1 basis-72">
             <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 mt-0.5">
               <Database className="w-5 h-5" />
             </div>
@@ -1167,7 +1167,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   <strong>Memoria Permanente de Clientes Problemáticos vs Confiables:</strong> El sistema evalúa continuamente a cada cliente en base a sus boletas activas y pagos tardíos, manteniendo su ficha de riesgo y calificación actualizada sin importar las depuraciones de espacio.
                 </span>
               </div>
-              <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
                 <span>
                   Boletas purgadas históricamente: <strong className="text-indigo-600 font-bold">{config.totalPurgedBoletasCount || 0}</strong>
                 </span>
@@ -1195,8 +1195,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
       {/* Base de Datos Interna del Dispositivo (IndexedDB) y Copia de Seguridad Local */}
       <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/25 rounded-2xl p-5 shadow-2xs space-y-4">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1 basis-72">
             <div className="p-2.5 rounded-xl bg-[#0B1933] dark:bg-[#162E59] text-white shrink-0">
               <HardDrive className="w-5 h-5 text-sky-300" />
             </div>
@@ -1232,7 +1232,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => {
