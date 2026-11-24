@@ -519,6 +519,14 @@ export const WebLoyaltyClientsPanel: React.FC<WebLoyaltyClientsPanelProps> = ({
                         Puntos disponibles:{' '}
                         <strong className="text-[#0B1933]">{customer.pointsBalance} pts</strong>
                       </span>
+                      {customer.storeCreditBalance > 0 && (
+                        <>
+                          <span>·</span>
+                          <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold">
+                            Saldo a favor: {formatCurrency(customer.storeCreditBalance, currencySymbol)}
+                          </span>
+                        </>
+                      )}
                       <span>·</span>
                       <span>
                         {customer.highestUnlockedTier ? (

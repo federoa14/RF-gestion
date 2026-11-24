@@ -51,8 +51,13 @@ import {
   CatalogPromoSubscriber,
   CatalogStockAlertRequest,
   CatalogLoyaltyAccount,
+  CatalogAbandonedCart,
+  CatalogGiftCard,
+  SubscriptionPlanTier,
+  PlatformBillingConfig,
   PublishedPublicCatalog,
   SaleLineItem,
+  TenantPlanChangeRecord,
 } from './types';
 import {
   loadConfig,
@@ -86,7 +91,7 @@ import {
   calculateExcessPaymentAllocation,
 } from './utils/businessMode';
 import { analyzeColdClientsForIndumentaria } from './utils/coldClientsRadar';
-import { applyOrderStockDeltaToProducts } from './utils/catalogStock';
+import { applyOrderStockDeltaToProducts, normalizeDni } from './utils/catalogStock';
 import { Header } from './components/Header';
 import { SidebarNav } from './components/SidebarNav';
 import { QuickGuideModal } from './components/QuickGuideModal';
@@ -108,6 +113,13 @@ import { ReturnCreditNoteModal } from './components/ReturnCreditNoteModal';
 import { ContactChannelsModal } from './components/ContactChannelsModal';
 import { ClientStatementQuickShareModal } from './components/ClientStatementQuickShareModal';
 import { WebOrderDetailModal } from './components/WebOrderDetailModal';
+import {
+  WebOrderReturnModal,
+  WebOrderReturnConfirmPayload,
+} from './components/WebOrderReturnModal';
+import { PlanUpgradeModal, PlanUpgradeTriggerContext } from './components/PlanUpgradeModal';
+import { TermsConditionsScrollBox } from './components/TermsConditionsModal';
+import { getPlanTransitionImpactSummary, TERMS_VERSION } from './utils/termsAndConditions';
 
 const NewBoletaModal = lazy(() =>
   import('./components/NewBoletaModal').then((m) => ({ default: m.NewBoletaModal }))
@@ -148,6 +160,9 @@ const SuperAdminPanel = lazy(() =>
 const PublicClientPayView = lazy(() =>
   import('./components/PublicClientPayView').then((m) => ({ default: m.PublicClientPayView }))
 );
+const PublicTenantSubPayView = lazy(() =>
+  import('./components/PublicTenantSubPayView').then((m) => ({ default: m.PublicTenantSubPayView }))
+);
 const SalespersonRendicionView = lazy(() =>
   import('./components/SalespersonRendicionView').then((m) => ({ default: m.SalespersonRendicionView }))
 );
@@ -180,10 +195,14 @@ import {
   dismissAnnouncementId,
   syncTenantDataFromSupabase,
   syncAuthCatalogFromSupabase,
+  loadPlatformBillingConfig,
+  fetchPlatformBillingConfigFromServer,
 } from './utils/multiTenantStorage';
 import { SUPABASE_SYNC_EVENT } from './utils/supabaseSync';
 import { ensureCloudHydrated } from './utils/localInternalDb';
 import {
+  fetchCatalogAbandonedCartsForTenantFromSupabase,
+  fetchCatalogGiftCardsForTenantFromSupabase,
   fetchCatalogLoyaltyAccountsForTenantFromSupabase,
   fetchCatalogOrdersForTenantFromSupabase,
   fetchCatalogPromoSubscribersForTenantFromSupabase,
@@ -193,8 +212,11 @@ import {
   markClientPaymentOrderReconciledInSupabase,
   publishPublicCatalogToSupabase,
   saveMerchantMpAccessTokenSecret,
+  setPublicCatalogSuperAdminEnabledInSupabase,
   syncCatalogOrderToSupabase,
+  upsertCatalogGiftCardToSupabase,
   upsertCatalogLoyaltyAccountToSupabase,
+  upsertPublicAbandonedCartToSupabase,
   verifyAndRecordTenantPaymentInSupabase,
   verifyCatalogTransferReceiptViaServer,
 } from './utils/supabaseServices';
@@ -208,6 +230,11 @@ import {
   getCurrentMonthInfo,
   toggleTenantMonthlyPayment,
   setTenantPausedState,
+  ensureTenantSubscription,
+  getSubscriptionPlanDefinitions,
+  getPlanDefinitionByTier,
+  getTenantEffectiveFeatureAccess,
+  resolveTenantPlanTier,
 } from './utils/tenantSubscription';
 import { PlatformUser, Tenant } from './types';
 
@@ -224,6 +251,13 @@ export default function App() {
     if (typeof window === 'undefined') return null;
     const handle = new URLSearchParams(window.location.search).get('catalog');
     return handle && handle.trim() ? handle.trim() : null;
+  });
+
+  // Public Tenant Subscription Payment mode (?sub_pay=token)
+  const [tenantSubPayToken, setTenantSubPayToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const token = new URLSearchParams(window.location.search).get('sub_pay');
+    return token && token.trim() ? token.trim() : null;
   });
 
   // User Session & Multi-Tenant Platform State
@@ -300,6 +334,27 @@ export default function App() {
     }
     return [];
   });
+  const [catalogAbandonedCarts, setCatalogAbandonedCarts] = useState<CatalogAbandonedCart[]>(() => {
+    const user = getCurrentSessionUser();
+    if (user && user.role !== 'superadmin' && user.tenantId) {
+      return loadTenantData(user.tenantId).catalogAbandonedCarts || [];
+    }
+    return [];
+  });
+  const [catalogGiftCards, setCatalogGiftCards] = useState<CatalogGiftCard[]>(() => {
+    const user = getCurrentSessionUser();
+    if (user && user.role !== 'superadmin' && user.tenantId) {
+      return loadTenantData(user.tenantId).catalogGiftCards || [];
+    }
+    return [];
+  });
+  const [platformBillingCfg, setPlatformBillingCfg] = useState<PlatformBillingConfig>(loadPlatformBillingConfig);
+
+  useEffect(() => {
+    fetchPlatformBillingConfigFromServer()
+      .then((cfg) => setPlatformBillingCfg(cfg))
+      .catch(() => {});
+  }, []);
 
   // Helper to load complete dataset for a specific tenant
   const loadDataForTenant = (tenantId: string) => {
@@ -329,6 +384,8 @@ export default function App() {
     setCatalogStockAlerts(data.catalogStockAlerts || []);
     setCatalogPromoSubscribers(data.catalogPromoSubscribers || []);
     setCatalogLoyaltyAccounts(data.catalogLoyaltyAccounts || []);
+    setCatalogAbandonedCarts(data.catalogAbandonedCarts || []);
+    setCatalogGiftCards(data.catalogGiftCards || []);
   };
 
   // Sync data whenever selected tenant changes (local cache + Supabase cloud refresh)
@@ -407,13 +464,19 @@ export default function App() {
     if (activeTab === 'rendicion' && effectiveRubro !== 'distribuidora') {
       setActiveTab('boletas');
     }
-    if (
-      (activeTab === 'catalogo' || activeTab === 'ventas_web') &&
-      selectedTenant?.catalogEnabled === false
-    ) {
+    const webAllowed = selectedTenant
+      ? getTenantEffectiveFeatureAccess(selectedTenant).canAccessWebCatalog
+      : true;
+    if ((activeTab === 'catalogo' || activeTab === 'ventas_web') && !webAllowed) {
       setActiveTab('boletas');
     }
-  }, [config.businessRubro, activeTab, selectedTenant?.catalogEnabled]);
+  }, [
+    config.businessRubro,
+    activeTab,
+    selectedTenant?.catalogEnabled,
+    selectedTenant?.subscription?.planTier,
+    selectedTenant?.status,
+  ]);
 
   useEffect(() => {
     if (
@@ -430,6 +493,10 @@ export default function App() {
         activeTab === 'clientes'
       ) {
         void handleRefreshCatalogLoyaltyAccounts();
+      }
+      if (activeTab === 'catalogo' || activeTab === 'ventas_web') {
+        void handleRefreshCatalogAbandonedCarts();
+        void handleRefreshCatalogGiftCards();
       }
       if (activeTab === 'catalogo' || activeTab === 'boletas') {
         void handleRefreshCatalogStockAlerts();
@@ -455,12 +522,24 @@ export default function App() {
   const [isCriticalBubbleOpen, setIsCriticalBubbleOpen] = useState(false);
   const [isUserProfileOpen, setIsUserProfileOpen] = useState(false);
   const [isSubscriptionPayOpen, setIsSubscriptionPayOpen] = useState(false);
+  const [chosenPlanTierForPayModal, setChosenPlanTierForPayModal] = useState<
+    SubscriptionPlanTier | undefined
+  >(undefined);
+  const [autoGenSubPayLink, setAutoGenSubPayLink] = useState(false);
+  const [planUpgradePrompt, setPlanUpgradePrompt] =
+    useState<PlanUpgradeTriggerContext | null>(null);
+  const [pendingGatePlanTier, setPendingGatePlanTier] =
+    useState<SubscriptionPlanTier | null>(null);
+  const [gatePlanTermsAccepted, setGatePlanTermsAccepted] = useState(false);
+  const promptedTrialExpiredTenantRef = useRef<string | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isQuickGuideOpen, setIsQuickGuideOpen] = useState(false);
   const [isEditBrandModalOpen, setIsEditBrandModalOpen] = useState(false);
   const [isContactChannelsOpen, setIsContactChannelsOpen] = useState(false);
   const [activeReceiptData, setActiveReceiptData] = useState<ReceiptModalData | null>(null);
   const [selectedWebOrderDetail, setSelectedWebOrderDetail] = useState<CatalogPickupOrder | null>(null);
+  const [selectedWebOrderForReturn, setSelectedWebOrderForReturn] =
+    useState<CatalogPickupOrder | null>(null);
   const [statementShareTarget, setStatementShareTarget] = useState<{
     client: Client;
     sourceBoletaNumber?: string;
@@ -556,6 +635,169 @@ export default function App() {
 
   // Tenant state persistence is synced directly to Supabase via saveBoletas / saveTenantData.
 
+  // Helper to classify tenant into Plan Sección 1, 2 or 3 with accepted Terms & Conditions
+  const handleSelectTenantPlanTier = (
+    targetTenantId: string,
+    tier: SubscriptionPlanTier,
+    termsMeta?: { acceptedTermsAt: string; termsVersion: string }
+  ) => {
+    const planDef = getPlanDefinitionByTier(tier, platformBillingCfg);
+    const nextCatalogEnabled = tier !== 'basico';
+    const freshList = loadTenants();
+    const targetBefore = freshList.find((t) => t.id === targetTenantId) || null;
+    let updatedTargetForCloud: Tenant | null = null;
+    if (targetBefore) {
+      const sub = ensureTenantSubscription(targetBefore);
+      const prevTier = resolveTenantPlanTier(targetBefore);
+      const prevDef = prevTier ? getPlanDefinitionByTier(prevTier, platformBillingCfg) : null;
+      const nowIso = termsMeta?.acceptedTermsAt || new Date().toISOString();
+      const usedTermsVersion = termsMeta?.termsVersion || TERMS_VERSION;
+      const changeRec: TenantPlanChangeRecord | undefined =
+        prevTier !== tier
+          ? {
+              id: `pchange-${Date.now()}`,
+              fromTier: prevTier,
+              toTier: tier,
+              fromLabel: prevDef ? `${prevDef.sectionBadge} · ${prevDef.shortName}` : 'Prueba / Sin Sección',
+              toLabel: `${planDef.sectionBadge} · ${planDef.shortName}`,
+              previousMonthlyFee: sub.monthlyFee,
+              newMonthlyFee: planDef.monthlyPrice,
+              changedAt: nowIso,
+              changedBy: 'tenant_self_upgrade',
+              triggerReason: prevTier
+                ? `Cambio de plan (${prevDef?.sectionBadge || prevTier} → ${planDef.sectionBadge})`
+                : `Selección inicial de plan (${planDef.sectionBadge})`,
+              acceptedTerms: true,
+              acceptedTermsAt: nowIso,
+              termsVersion: usedTermsVersion,
+            }
+          : sub.lastPlanChange;
+      updatedTargetForCloud = {
+        ...targetBefore,
+        catalogEnabled: nextCatalogEnabled,
+        subscription: {
+          ...sub,
+          planTier: tier,
+          planSelectedAt: nowIso,
+          monthlyFee: planDef.monthlyPrice,
+          termsAccepted: true,
+          termsAcceptedAt: sub.termsAcceptedAt || nowIso,
+          termsVersion: usedTermsVersion,
+          lastPlanChange: changeRec,
+          planChangeHistory:
+            changeRec && prevTier !== tier
+              ? [changeRec, ...(sub.planChangeHistory || [])].slice(0, 20)
+              : sub.planChangeHistory,
+        },
+      };
+    }
+    const updatedList = freshList.map((t) =>
+      t.id === targetTenantId && updatedTargetForCloud ? updatedTargetForCloud : t
+    );
+    saveTenants(updatedList);
+    setAllTenants(updatedList);
+    if (selectedTenant && selectedTenant.id === targetTenantId && updatedTargetForCloud) {
+      setSelectedTenant(updatedTargetForCloud);
+    }
+    if (updatedTargetForCloud) {
+      void setPublicCatalogSuperAdminEnabledInSupabase(updatedTargetForCloud, nextCatalogEnabled);
+      const tData = loadTenantData(targetTenantId);
+      if (nextCatalogEnabled && (tData.catalogSettings || (tData.catalogProducts || []).length > 0)) {
+        publishCatalogSnapshot(
+          tData.catalogSettings || catalogSettings,
+          tData.catalogProducts || catalogProducts,
+          tData.config,
+          updatedTargetForCloud
+        );
+      }
+    }
+    if (!nextCatalogEnabled && (activeTab === 'catalogo' || activeTab === 'ventas_web')) {
+      setActiveTab('boletas');
+    }
+    setChosenPlanTierForPayModal(tier);
+  };
+
+  // Bidirectional self-service plan change (Sección 1 ↔ 2 ↔ 3) with accepted Terms & Conditions
+  const handleConfirmPlanChange = (details: {
+    targetTier: SubscriptionPlanTier;
+    triggerReason: string;
+    acceptedTermsAt: string;
+    termsVersion: string;
+    newMonthlyFee: number;
+    openPaymentAfter?: boolean;
+  }) => {
+    if (!selectedTenant) return;
+    const freshList = loadTenants();
+    const targetBefore = freshList.find((t) => t.id === selectedTenant.id) || selectedTenant;
+    const sub = ensureTenantSubscription(targetBefore);
+    const fromTier = resolveTenantPlanTier(targetBefore);
+    const fromDef = fromTier ? getPlanDefinitionByTier(fromTier, platformBillingCfg) : null;
+    const targetDef = getPlanDefinitionByTier(details.targetTier, platformBillingCfg);
+    const nextCatalogEnabled = details.targetTier !== 'basico';
+
+    const changeRecord: TenantPlanChangeRecord = {
+      id: `pchange-${Date.now()}`,
+      fromTier,
+      toTier: details.targetTier,
+      fromLabel: fromDef ? `${fromDef.sectionBadge} · ${fromDef.shortName}` : 'Prueba / Sin Sección',
+      toLabel: `${targetDef.sectionBadge} · ${targetDef.shortName}`,
+      previousMonthlyFee: sub.monthlyFee,
+      newMonthlyFee: details.newMonthlyFee,
+      changedAt: details.acceptedTermsAt,
+      changedBy: 'tenant_self_upgrade',
+      triggerReason: details.triggerReason,
+      acceptedTerms: true,
+      acceptedTermsAt: details.acceptedTermsAt,
+      termsVersion: details.termsVersion,
+    };
+    const updatedTarget: Tenant = {
+      ...targetBefore,
+      catalogEnabled: nextCatalogEnabled,
+      subscription: {
+        ...sub,
+        planTier: details.targetTier,
+        planSelectedAt: details.acceptedTermsAt,
+        monthlyFee: details.newMonthlyFee,
+        termsAccepted: true,
+        termsAcceptedAt: sub.termsAcceptedAt || details.acceptedTermsAt,
+        termsVersion: details.termsVersion,
+        lastPlanChange: changeRecord,
+        planChangeHistory: [changeRecord, ...(sub.planChangeHistory || [])].slice(0, 20),
+      },
+    };
+    const updatedList = freshList.some((t) => t.id === updatedTarget.id)
+      ? freshList.map((t) => (t.id === updatedTarget.id ? updatedTarget : t))
+      : [updatedTarget, ...freshList];
+
+    saveTenants(updatedList);
+    setAllTenants(updatedList);
+    setSelectedTenant(updatedTarget);
+    void setPublicCatalogSuperAdminEnabledInSupabase(updatedTarget, nextCatalogEnabled);
+    if (nextCatalogEnabled) {
+      const tData = loadTenantData(updatedTarget.id);
+      publishCatalogSnapshot(
+        tData.catalogSettings || catalogSettings,
+        tData.catalogProducts || catalogProducts,
+        tData.config,
+        updatedTarget
+      );
+    } else if (activeTab === 'catalogo' || activeTab === 'ventas_web') {
+      setActiveTab('boletas');
+    }
+
+    setPlanUpgradePrompt(null);
+
+    if (details.openPaymentAfter) {
+      setChosenPlanTierForPayModal(details.targetTier);
+      setAutoGenSubPayLink(false);
+      setIsSubscriptionPayOpen(true);
+    }
+
+    showToast(
+      `Plan actualizado a ${targetDef.sectionBadge} · ${targetDef.shortName} (Términos v${details.termsVersion} aceptados).`
+    );
+  };
+
   // Helper to apply approved SaaS subscription payment to tenant state (1 Mes o Plan Anual 12 Meses)
   const applyApprovedTenantPayment = (
     targetTenantId: string,
@@ -569,15 +811,18 @@ export default function App() {
       receiptImageUrl?: string;
       verificationNote?: string;
       planType?: 'monthly' | 'annual';
+      planTier?: SubscriptionPlanTier;
+      planTierLabel?: string;
       monthsCount?: number;
     }
   ) => {
     const isAnnual = details.planType === 'annual' || (details.monthsCount ?? 1) >= 12;
     const monthsCount = isAnnual ? 12 : 1;
     const freshList = loadTenants();
+    let updatedTargetForCloud: Tenant | null = null;
     const updatedList = freshList.map((t) => {
       if (t.id !== targetTenantId) return t;
-      return toggleTenantMonthlyPayment(
+      const updated = toggleTenantMonthlyPayment(
         t,
         details.monthKey,
         true,
@@ -595,22 +840,44 @@ export default function App() {
           receiptImageUrl: details.receiptImageUrl,
           verificationNote: details.verificationNote,
           planType: isAnnual ? 'annual' : 'monthly',
+          planTier: details.planTier,
+          planTierLabel: details.planTierLabel,
           monthsCount,
         }
       );
+      if (details.planTier && updated.subscription) {
+        const planDef = getPlanDefinitionByTier(details.planTier, platformBillingCfg);
+        const enriched: Tenant = {
+          ...updated,
+          catalogEnabled: details.planTier !== 'basico',
+          subscription: {
+            ...updated.subscription,
+            monthlyFee: planDef.monthlyPrice,
+          },
+        };
+        updatedTargetForCloud = enriched;
+        return enriched;
+      }
+      updatedTargetForCloud = updated;
+      return updated;
     });
     saveTenants(updatedList);
     setAllTenants(updatedList);
-    const updatedTarget = updatedList.find((t) => t.id === targetTenantId) || null;
-    if (selectedTenant && selectedTenant.id === targetTenantId && updatedTarget) {
-      setSelectedTenant(updatedTarget);
+    if (selectedTenant && selectedTenant.id === targetTenantId && updatedTargetForCloud) {
+      setSelectedTenant(updatedTargetForCloud);
+    }
+    if (updatedTargetForCloud && details.planTier) {
+      void setPublicCatalogSuperAdminEnabledInSupabase(
+        updatedTargetForCloud,
+        details.planTier !== 'basico'
+      );
     }
   };
 
   // Detect Mercado Pago return parameters or server-verified webhook payments automatically
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (clientPayToken || publicCatalogHandle) return; // Enlaces públicos manejados por vistas dedicadas
+    if (clientPayToken || publicCatalogHandle || tenantSubPayToken) return; // Enlaces públicos manejados por vistas dedicadas
     const params = new URLSearchParams(window.location.search);
     const mpStatus = params.get('mp_status') || params.get('collection_status') || params.get('status');
     const mpPaymentId = params.get('payment_id') || params.get('collection_id') || undefined;
@@ -620,6 +887,11 @@ export default function App() {
     let monthKeyParam = params.get('monthKey') || '';
     let planTypeParam: 'monthly' | 'annual' =
       params.get('planType') === 'annual' ? 'annual' : 'monthly';
+    const rawPlanTierParam = params.get('planTier');
+    const planTierParam: SubscriptionPlanTier | undefined =
+      rawPlanTierParam === 'basico' || rawPlanTierParam === 'web' || rawPlanTierParam === 'full'
+        ? rawPlanTierParam
+        : undefined;
     const amountParam = Number(params.get('amount') || 0);
 
     if (extRef && extRef.includes('::')) {
@@ -639,6 +911,12 @@ export default function App() {
         collectionStatus: 'approved',
         paymentMethod: 'mercadopago',
         planType: planTypeParam,
+        planTier: planTierParam,
+        planTierLabel: planTierParam
+          ? `${getPlanDefinitionByTier(planTierParam, platformBillingCfg).sectionBadge} · ${
+              getPlanDefinitionByTier(planTierParam, platformBillingCfg).name
+            }`
+          : undefined,
         monthsCount: planTypeParam === 'annual' ? 12 : 1,
       })
         .then((data) => {
@@ -647,6 +925,7 @@ export default function App() {
               data.payment.planType === 'annual' || planTypeParam === 'annual' ? 'annual' : 'monthly';
             const approvedMonthsCount =
               approvedPlanType === 'annual' ? Number(data.payment.monthsCount) || 12 : 1;
+            const resolvedTier = data.payment.planTier || planTierParam;
             applyApprovedTenantPayment(tenantIdParam, {
               monthKey: monthKeyParam,
               amount: data.payment.amount || amountParam || 25000,
@@ -655,6 +934,14 @@ export default function App() {
               mpPreferenceId: data.payment.mpPreferenceId,
               receiptAlias: data.payment.aliasUsed,
               planType: approvedPlanType,
+              planTier: resolvedTier,
+              planTierLabel:
+                data.payment.planTierLabel ||
+                (resolvedTier
+                  ? `${getPlanDefinitionByTier(resolvedTier, platformBillingCfg).sectionBadge} · ${
+                      getPlanDefinitionByTier(resolvedTier, platformBillingCfg).name
+                    }`
+                  : undefined),
               monthsCount: approvedMonthsCount,
             });
             showToast(
@@ -701,7 +988,22 @@ export default function App() {
           .catch(() => {});
       }
     }
-  }, [selectedTenant?.id, currentUser?.role, clientPayToken]);
+  }, [selectedTenant?.id, currentUser?.role, clientPayToken, tenantSubPayToken]);
+
+  // Al cumplirse los 30 días de prueba (trial_expired), refrescamos la escala de precios para mostrar las 3 opciones claras
+  useEffect(() => {
+    if (!selectedTenant || currentUser?.role === 'superadmin') return;
+    const st = getTenantSubscriptionStatus(selectedTenant);
+    if (
+      (st.status === 'trial_expired' || st.status === 'paused') &&
+      promptedTrialExpiredTenantRef.current !== selectedTenant.id
+    ) {
+      promptedTrialExpiredTenantRef.current = selectedTenant.id;
+      fetchPlatformBillingConfigFromServer()
+        .then((cfg) => setPlatformBillingCfg(cfg))
+        .catch(() => {});
+    }
+  }, [selectedTenant, currentUser?.role]);
 
   // Background automated dispatch check on mount (client engine persisted to Supabase)
   useEffect(() => {
@@ -906,50 +1208,68 @@ export default function App() {
   const publishCatalogSnapshot = (
     nextSettings: OnlineCatalogSettings,
     nextProducts: CatalogProduct[],
-    overrideConfig?: DistributorConfig
+    overrideConfig?: DistributorConfig,
+    overrideTenant?: Tenant
   ) => {
-    if (!selectedTenant) return;
-    const tenantCfg = loadTenantData(selectedTenant.id).config;
+    const targetTenant = overrideTenant || selectedTenant;
+    if (!targetTenant) return;
+    const tenantCfg = loadTenantData(targetTenant.id).config;
     const cfg = overrideConfig || tenantCfg || config;
+    const effAccess = getTenantEffectiveFeatureAccess(targetTenant);
+    const isFullFeatures = effAccess.canAccessFullFeatures;
     const activeCatalogRubro =
-      selectedTenant.catalogRubro ||
+      targetTenant.catalogRubro ||
       nextSettings.catalogRubro ||
       cfg.businessRubro ||
       'distribuidora';
-    const scopedProducts = nextProducts.filter(
+    const rawScopedProducts = nextProducts.filter(
       (p) => (p.rubro || activeCatalogRubro) === activeCatalogRubro
     );
+    const scopedProducts: CatalogProduct[] = isFullFeatures
+      ? rawScopedProducts
+      : rawScopedProducts.map((p) => ({
+          ...p,
+          featured: false,
+          isOutlet: false,
+          flashSalePrice: undefined,
+          flashSaleEndsAt: undefined,
+          wholesaleMinQty: undefined,
+          wholesalePrice: undefined,
+          loyaltyPoints: undefined,
+        }));
     const resolvedLogoUrl = overrideConfig
       ? overrideConfig.distributorLogoUrl
-      : cfg.distributorLogoUrl ?? selectedTenant.logoUrl;
+      : cfg.distributorLogoUrl ?? targetTenant.logoUrl;
     const snapshot: PublishedPublicCatalog = {
-      tenantId: selectedTenant.id,
-      tenantCode: cfg.tenantCode || selectedTenant.tenantCode,
+      tenantId: targetTenant.id,
+      tenantCode: cfg.tenantCode || targetTenant.tenantCode,
       slug: nextSettings.slug,
       enabledBySuperAdmin:
-        selectedTenant.catalogEnabled !== false &&
-        selectedTenant.status !== 'suspended' &&
-        !selectedTenant.subscription?.isPaused,
+        targetTenant.catalogEnabled !== false &&
+        targetTenant.status !== 'suspended' &&
+        !targetTenant.subscription?.isPaused,
+      planTier: effAccess.tier,
+      canAccessFullFeatures: isFullFeatures,
       published: nextSettings.published !== false,
       catalogRubro: activeCatalogRubro,
       rubroFilters: nextSettings.rubroFilters,
       customSubfilters: nextSettings.customSubfilters,
-      storeName: nextSettings.storeName || cfg.distributorName || selectedTenant.name,
+      storeName: nextSettings.storeName || cfg.distributorName || targetTenant.name,
       tagline:
         nextSettings.tagline ||
         'Armá tu carrito de compras, elegí retiro en tienda o envío a domicilio y envialo por WhatsApp.',
       logoUrl: resolvedLogoUrl,
-      icon: cfg.distributorIcon || selectedTenant.icon,
+      icon: cfg.distributorIcon || targetTenant.icon,
       whatsappPhone:
         nextSettings.whatsappPhone ||
         cfg.senderPhone ||
         cfg.distributorPhone ||
-        selectedTenant.phone ||
+        targetTenant.phone ||
         '',
       allowPickup: nextSettings.allowPickup !== false,
       allowDelivery: nextSettings.allowDelivery !== false,
       deliveryNote: nextSettings.deliveryNote,
-      pickupAddress: nextSettings.pickupAddress || selectedTenant.address || '',
+      pickupAddress: nextSettings.pickupAddress || targetTenant.address || '',
       pickupHours: nextSettings.pickupHours || 'Lunes a Sábado · 9:00 a 19:00 hs',
       pickupInstructions: nextSettings.pickupInstructions,
       paymentNote: nextSettings.paymentNote,
@@ -959,20 +1279,25 @@ export default function App() {
       merchantPaymentHolder: cfg.merchantPaymentHolder,
       merchantMpCheckoutLink: cfg.merchantMpCheckoutLink,
       hasMerchantMpAccessToken: Boolean(cfg.hasMerchantMpAccessToken),
-      cashOrTransferDiscountPercent: nextSettings.cashOrTransferDiscountPercent,
-      coupons: (nextSettings.coupons || []).filter((c) => c.active !== false),
-      enablePromoClub: nextSettings.enablePromoClub !== false,
-      promoClubTitle: nextSettings.promoClubTitle,
-      promoClubIncentive: nextSettings.promoClubIncentive,
-      promoClubWelcomeCoupon: nextSettings.promoClubWelcomeCoupon,
-      promoBanners: (nextSettings.promoBanners || []).filter((b) => b.active !== false),
-      enableLoyaltyProgram: Boolean(nextSettings.enableLoyaltyProgram),
-      loyaltyPointsPerUnit:
-        typeof nextSettings.loyaltyPointsPerUnit === 'number'
+      cashOrTransferDiscountPercent: isFullFeatures ? nextSettings.cashOrTransferDiscountPercent : 0,
+      coupons: isFullFeatures ? (nextSettings.coupons || []).filter((c) => c.active !== false) : [],
+      enablePromoClub: isFullFeatures ? nextSettings.enablePromoClub !== false : false,
+      promoClubTitle: isFullFeatures ? nextSettings.promoClubTitle : undefined,
+      promoClubIncentive: isFullFeatures ? nextSettings.promoClubIncentive : undefined,
+      promoClubWelcomeCoupon: isFullFeatures ? nextSettings.promoClubWelcomeCoupon : undefined,
+      promoBanners: isFullFeatures
+        ? (nextSettings.promoBanners || []).filter((b) => b.active !== false)
+        : [],
+      enableLoyaltyProgram: isFullFeatures ? Boolean(nextSettings.enableLoyaltyProgram) : false,
+      loyaltyPointsPerUnit: isFullFeatures
+        ? typeof nextSettings.loyaltyPointsPerUnit === 'number'
           ? nextSettings.loyaltyPointsPerUnit
-          : 10,
-      loyaltyTiers: nextSettings.loyaltyTiers,
-      loyaltyRestrictRedeemMethods: nextSettings.loyaltyRestrictRedeemMethods !== false,
+          : 10
+        : 0,
+      loyaltyTiers: isFullFeatures ? nextSettings.loyaltyTiers : undefined,
+      loyaltyRestrictRedeemMethods: isFullFeatures
+        ? nextSettings.loyaltyRestrictRedeemMethods !== false
+        : true,
       currencySymbol: nextSettings.currencySymbol || cfg.currencySymbol || '$',
       products: scopedProducts,
       updatedAt: new Date().toISOString(),
@@ -1092,7 +1417,12 @@ export default function App() {
       saveTenantData(selectedTenant.id, cur);
       updated.forEach((acc) => {
         const prev = prevById.get(acc.id);
-        if (!prev || prev.updatedAt !== acc.updatedAt || prev.pointsBalance !== acc.pointsBalance) {
+        if (
+          !prev ||
+          prev.updatedAt !== acc.updatedAt ||
+          prev.pointsBalance !== acc.pointsBalance ||
+          (prev.storeCreditBalance || 0) !== (acc.storeCreditBalance || 0)
+        ) {
           void upsertCatalogLoyaltyAccountToSupabase(acc);
         }
       });
@@ -1120,6 +1450,260 @@ export default function App() {
     const cur = loadTenantData(selectedTenant.id);
     cur.catalogLoyaltyAccounts = merged;
     saveTenantData(selectedTenant.id, cur);
+  };
+
+  const handleSaveCatalogAbandonedCarts = (updated: CatalogAbandonedCart[]) => {
+    setCatalogAbandonedCarts(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      const prevById = new Map(
+        (cur.catalogAbandonedCarts || catalogAbandonedCarts).map((c) => [c.id, c])
+      );
+      cur.catalogAbandonedCarts = updated;
+      saveTenantData(selectedTenant.id, cur);
+      updated.forEach((cart) => {
+        const prev = prevById.get(cart.id);
+        if (
+          !prev ||
+          prev.updatedAt !== cart.updatedAt ||
+          prev.status !== cart.status ||
+          prev.reminderCount !== cart.reminderCount
+        ) {
+          void upsertPublicAbandonedCartToSupabase(cart);
+        }
+      });
+    }
+  };
+
+  const handleRefreshCatalogAbandonedCarts = async () => {
+    if (!selectedTenant) return;
+    const remoteCarts = await fetchCatalogAbandonedCartsForTenantFromSupabase(selectedTenant.id);
+    const curTenantData = loadTenantData(selectedTenant.id);
+    const localCarts = curTenantData.catalogAbandonedCarts || catalogAbandonedCarts;
+    if (remoteCarts.length === 0 && localCarts.length === 0) return;
+    const mergedMap = new Map<string, CatalogAbandonedCart>();
+    for (const c of localCarts) mergedMap.set(c.id, c);
+    for (const r of remoteCarts) {
+      const existing = mergedMap.get(r.id);
+      if (!existing || (r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt)) {
+        mergedMap.set(r.id, r);
+      }
+    }
+    const merged = Array.from(mergedMap.values()).sort((a, b) =>
+      (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+    );
+    setCatalogAbandonedCarts(merged);
+    const cur = loadTenantData(selectedTenant.id);
+    cur.catalogAbandonedCarts = merged;
+    saveTenantData(selectedTenant.id, cur);
+  };
+
+  const handleSaveCatalogGiftCards = (updated: CatalogGiftCard[]) => {
+    setCatalogGiftCards(updated);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      const prevById = new Map((cur.catalogGiftCards || catalogGiftCards).map((g) => [g.id, g]));
+      cur.catalogGiftCards = updated;
+      saveTenantData(selectedTenant.id, cur);
+      updated.forEach((gc) => {
+        const prev = prevById.get(gc.id);
+        if (
+          !prev ||
+          prev.updatedAt !== gc.updatedAt ||
+          prev.remainingBalance !== gc.remainingBalance ||
+          prev.status !== gc.status
+        ) {
+          void upsertCatalogGiftCardToSupabase(gc);
+        }
+      });
+    }
+  };
+
+  const handleRefreshCatalogGiftCards = async () => {
+    if (!selectedTenant) return;
+    const remoteCards = await fetchCatalogGiftCardsForTenantFromSupabase(selectedTenant.id);
+    const curTenantData = loadTenantData(selectedTenant.id);
+    const localCards = curTenantData.catalogGiftCards || catalogGiftCards;
+    if (remoteCards.length === 0 && localCards.length === 0) return;
+    const mergedMap = new Map<string, CatalogGiftCard>();
+    for (const g of localCards) mergedMap.set(g.id, g);
+    for (const r of remoteCards) {
+      const existing = mergedMap.get(r.id);
+      if (!existing || (r.updatedAt || r.createdAt) >= (existing.updatedAt || existing.createdAt)) {
+        mergedMap.set(r.id, r);
+      }
+    }
+    const merged = Array.from(mergedMap.values()).sort((a, b) =>
+      (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+    );
+    setCatalogGiftCards(merged);
+    const cur = loadTenantData(selectedTenant.id);
+    cur.catalogGiftCards = merged;
+    saveTenantData(selectedTenant.id, cur);
+  };
+
+  const handleProcessWebOrderReturn = (payload: WebOrderReturnConfirmPayload) => {
+    const now = new Date().toISOString();
+
+    const updatedOrders = catalogOrders.map((o) => {
+      if (o.id !== payload.order.id) return o;
+      const prevReturnedAmount = Number(o.returnedAmount) || 0;
+      const prevDeductedPoints = Number(o.returnedPointsDeducted) || 0;
+      const prevCreditIssued = Number(o.creditBalanceIssued) || 0;
+      const existingRecords = Array.isArray(o.returnRecords) ? o.returnRecords : [];
+      return {
+        ...o,
+        status: payload.markOrderAsFullyReturned ? ('devuelto' as const) : o.status,
+        returnStatus:
+          payload.returnType === 'devolucion_total'
+            ? ('devolucion_total' as const)
+            : payload.returnType === 'cambio'
+            ? ('cambio' as const)
+            : ('devolucion_parcial' as const),
+        returnedAmount:
+          Math.round((prevReturnedAmount + payload.returnRecord.returnedAmount) * 100) / 100,
+        returnedPointsDeducted: prevDeductedPoints + (payload.pointsToDeduct || 0),
+        creditBalanceIssued:
+          Math.round((prevCreditIssued + (payload.creditIssuedAmount || 0)) * 100) / 100,
+        returnRecords: [payload.returnRecord, ...existingRecords],
+        updatedAt: now,
+      };
+    });
+    handleSaveCatalogOrders(updatedOrders);
+
+    let workingProducts = [...catalogProducts];
+    let stockUpdated = false;
+    if (payload.restoreStockItems.length > 0) {
+      const restored = applyOrderStockDeltaToProducts(
+        workingProducts,
+        payload.restoreStockItems,
+        'restore'
+      );
+      workingProducts = restored.updatedProducts;
+      if (restored.changed) stockUpdated = true;
+    }
+    if (payload.deductReplacementItems.length > 0) {
+      const deducted = applyOrderStockDeltaToProducts(
+        workingProducts,
+        payload.deductReplacementItems,
+        'deduct'
+      );
+      workingProducts = deducted.updatedProducts;
+      if (deducted.changed) stockUpdated = true;
+    }
+    if (stockUpdated) {
+      handleSaveCatalogProducts(workingProducts);
+    }
+
+    const cleanDni = normalizeDni(payload.dni || payload.order.customerDni || '');
+    const ptsToDeduct = payload.deductPointsImmediate ? Math.max(0, payload.pointsToDeduct || 0) : 0;
+    const ptsToRestore = Math.max(0, payload.restoreRedeemedPoints || 0);
+    const creditToAdd = Math.max(0, Math.round((payload.creditIssuedAmount || 0) * 100) / 100);
+
+    if (cleanDni && selectedTenant && (ptsToDeduct > 0 || ptsToRestore > 0 || creditToAdd > 0)) {
+      const accIdx = catalogLoyaltyAccounts.findIndex((a) => normalizeDni(a.dni) === cleanDni);
+      const baseAcc: CatalogLoyaltyAccount =
+        accIdx >= 0
+          ? catalogLoyaltyAccounts[accIdx]
+          : {
+              id: `loy-${selectedTenant.id}-${cleanDni}`,
+              tenantId: selectedTenant.id,
+              dni: cleanDni,
+              customerName: payload.order.customerName,
+              customerPhone: payload.order.customerPhone,
+              pointsBalance: 0,
+              totalPointsEarned: 0,
+              totalPointsRedeemed: 0,
+              storeCreditBalance: 0,
+              storeCreditHistory: [],
+              ordersCount: 1,
+              lastOrderAt: payload.order.createdAt || now,
+              history: [],
+              createdAt: now,
+              updatedAt: now,
+            };
+
+      let nextPointsBalance = Number(baseAcc.pointsBalance) || 0;
+      let nextTotalEarned = Number(baseAcc.totalPointsEarned) || 0;
+      let nextTotalRedeemed = Number(baseAcc.totalPointsRedeemed) || 0;
+      const nextMovements = [...(baseAcc.history || [])];
+
+      if (ptsToDeduct > 0) {
+        nextPointsBalance = Math.max(0, nextPointsBalance - ptsToDeduct);
+        nextTotalEarned = Math.max(0, nextTotalEarned - ptsToDeduct);
+        nextMovements.unshift({
+          id: `loy-rev-${Date.now()}-d`,
+          date: now,
+          type: 'reversed',
+          pointsDelta: -ptsToDeduct,
+          orderId: payload.order.id,
+          orderNumber: payload.order.orderNumber,
+          note: `Descuento inmediato de puntos por ${
+            payload.returnType === 'cambio' ? 'cambio' : 'devolución'
+          } (#${payload.order.orderNumber})`,
+        });
+      }
+
+      if (ptsToRestore > 0) {
+        nextPointsBalance += ptsToRestore;
+        nextTotalRedeemed = Math.max(0, nextTotalRedeemed - ptsToRestore);
+        nextMovements.unshift({
+          id: `loy-rev-${Date.now()}-r`,
+          date: now,
+          type: 'manual_adjustment',
+          pointsDelta: ptsToRestore,
+          orderId: payload.order.id,
+          orderNumber: payload.order.orderNumber,
+          note: `Devolución de puntos canjeados (#${payload.order.orderNumber})`,
+        });
+      }
+
+      let nextCreditBalance = Number(baseAcc.storeCreditBalance) || 0;
+      const nextCreditHistory = [...(baseAcc.storeCreditHistory || [])];
+      if (creditToAdd > 0) {
+        nextCreditBalance = Math.round((nextCreditBalance + creditToAdd) * 100) / 100;
+        nextCreditHistory.unshift({
+          id: `cred-ret-${Date.now()}`,
+          date: now,
+          type: 'credited_return',
+          amountDelta: creditToAdd,
+          orderId: payload.order.id,
+          orderNumber: payload.order.orderNumber,
+          note: `Saldo a favor por ${
+            payload.returnType === 'cambio' ? 'cambio' : 'devolución'
+          } (#${payload.order.orderNumber})`,
+        });
+      }
+
+      const updatedAcc: CatalogLoyaltyAccount = {
+        ...baseAcc,
+        pointsBalance: nextPointsBalance,
+        totalPointsEarned: nextTotalEarned,
+        totalPointsRedeemed: nextTotalRedeemed,
+        storeCreditBalance: nextCreditBalance,
+        storeCreditHistory: nextCreditHistory.slice(0, 60),
+        history: nextMovements.slice(0, 80),
+        updatedAt: now,
+      };
+
+      const nextAccounts =
+        accIdx >= 0
+          ? catalogLoyaltyAccounts.map((a, idx) => (idx === accIdx ? updatedAcc : a))
+          : [updatedAcc, ...catalogLoyaltyAccounts];
+      handleSaveCatalogLoyaltyAccounts(nextAccounts);
+    }
+
+    const summaryParts: string[] = [
+      `${payload.returnType === 'cambio' ? 'Cambio' : 'Devolución'} registrado en #${payload.order.orderNumber}`,
+    ];
+    if (ptsToDeduct > 0) summaryParts.push(`-${ptsToDeduct} pts descontados al DNI`);
+    if (creditToAdd > 0) {
+      summaryParts.push(
+        `+$${creditToAdd.toLocaleString('es-AR')} saldo a favor DNI`
+      );
+    }
+    if (stockUpdated) summaryParts.push('stock actualizado');
+    showToast(summaryParts.join(' · '));
   };
 
   const handleVerifyWebOrderTransferReceipt = async (order: CatalogPickupOrder) => {
@@ -2791,16 +3375,19 @@ export default function App() {
 
   const paidWebOrders = catalogOrders.filter((o) => o.status === 'retirado');
   const pendingWebOrders = catalogOrders
-    .filter((o) => o.status !== 'retirado' && o.status !== 'cancelado')
+    .filter((o) => o.status !== 'retirado' && o.status !== 'cancelado' && o.status !== 'devuelto')
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   const pendingWebOrdersCount = pendingWebOrders.length;
   const totalWebSalesRevenue = paidWebOrders.reduce(
-    (acc, o) => acc + (Number(o.totalAmount) || 0),
+    (acc, o) => acc + Math.max(0, (Number(o.totalAmount) || 0) - (Number(o.returnedAmount) || 0)),
     0
   );
   const todayWebSalesRevenue = paidWebOrders
     .filter((o) => (o.dispatchedAt || o.createdAt || '').slice(0, 10) === currentDateRef)
-    .reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
+    .reduce(
+      (acc, o) => acc + Math.max(0, (Number(o.totalAmount) || 0) - (Number(o.returnedAmount) || 0)),
+      0
+    );
 
   const urgent10dDebt = pendingBoletas.reduce((acc, b) => {
     const st = calculateAlertStatus(b, config, currentDateRef);
@@ -3097,6 +3684,24 @@ export default function App() {
     );
   }
 
+  // 0c. If public tenant subscription payment link (?sub_pay=<token>) -> Standalone checkout portal
+  if (tenantSubPayToken) {
+    return (
+      <Suspense fallback={<LazyViewFallback />}>
+        <PublicTenantSubPayView
+          token={tenantSubPayToken}
+          onExitToApp={() => {
+            if (typeof window !== 'undefined') {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+            void ensureCloudHydrated();
+            setTenantSubPayToken(null);
+          }}
+        />
+      </Suspense>
+    );
+  }
+
   // 1. If not logged in -> Show direct Login Page
   if (!currentUser) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
@@ -3129,147 +3734,191 @@ export default function App() {
 
   // Subscription and SaaS billing status for the logged-in company
   const tenantSubscriptionStatus = selectedTenant ? getTenantSubscriptionStatus(selectedTenant) : null;
+  const tenantFeatureAccess = selectedTenant
+    ? getTenantEffectiveFeatureAccess(selectedTenant)
+    : {
+        tier: 'full' as SubscriptionPlanTier,
+        sectionLabel: 'Sección 3 · Full',
+        isTrialFullPreview: false,
+        canAccessWebCatalog: true,
+        canAccessFullFeatures: true,
+      };
+  const planDefinitions = getSubscriptionPlanDefinitions(platformBillingCfg);
 
-  // 3. If Company is Paused by SuperAdmin -> Show blocked screen
-  if (selectedTenant && (selectedTenant.status === 'suspended' || tenantSubscriptionStatus?.status === 'paused')) {
+  // 3 & 3B. If Company is Paused (or suspended) OR 30-Day Trial Expired -> Show the 3 Plan Tiers (Sección 1, 2, 3) with amounts + feature comparison & direct pay redirect
+  if (
+    selectedTenant &&
+    (selectedTenant.status === 'suspended' ||
+      tenantSubscriptionStatus?.status === 'paused' ||
+      tenantSubscriptionStatus?.status === 'trial_expired')
+  ) {
+    const isTrialExpiredGate = tenantSubscriptionStatus?.status === 'trial_expired';
+    const isPausedByTrialEnd = selectedTenant.subscription?.pausedBy === 'trial_expired';
     return (
-      <div className="min-h-screen bg-[#071021] text-[#E2E8F0] flex items-center justify-center p-4 font-sans">
-        <div className="bg-[#0B1933] border border-[#B6C2D2]/25 rounded-2xl p-8 max-w-lg w-full text-center space-y-5 shadow-2xl">
-          <div className="w-16 h-16 rounded-2xl bg-rose-950/60 text-rose-400 flex items-center justify-center mx-auto border border-rose-500/30">
-            <ShieldAlert className="w-8 h-8" />
-          </div>
-
-          <div className="space-y-2">
-            <span className="inline-block px-3 py-1 rounded-md text-xs font-mono font-bold bg-rose-950/60 text-rose-300 border border-rose-500/35">
-              {selectedTenant.tenantCode} · CUENTA EN PAUSA
-            </span>
-            <h2 className="text-xl font-bold text-white">Cuenta Pausada</h2>
-            <p className="text-xs text-[#94A3B8] leading-relaxed">
-              El acceso a la plataforma para <strong className="text-white">{selectedTenant.name}</strong> se encuentra en pausa.
-              {selectedTenant.subscription?.pauseReason ? ` (${selectedTenant.subscription.pauseReason})` : ''}
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-[#081224] border border-[#B6C2D2]/20 text-xs text-[#CBD5E1] space-y-1.5 text-left">
-            <p className="font-semibold text-white">¿Cómo reactivar el servicio automáticamente?</p>
-            <p className="text-[#94A3B8]">
-              Abonando tu suscripción mensual vía <strong>Mercado Pago</strong> o al Alias configurado, el sistema detecta el pago al instante, reanuda tu cuenta y la pasa a estado activo.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-2.5 pt-2">
-            <button
-              type="button"
-              onClick={() => setIsSubscriptionPayOpen(true)}
-              className="w-full py-3 px-4 rounded-xl bg-[#009EE3] hover:bg-[#008AD0] text-white text-xs font-bold shadow-md cursor-pointer flex items-center justify-center gap-2 transition-colors"
+      <div className="min-h-screen bg-[#071021] text-[#E2E8F0] flex items-center justify-center p-4 sm:p-6 font-sans">
+        <div className="bg-[#0B1933] border border-[#B6C2D2]/25 rounded-2xl p-6 sm:p-8 max-w-5xl w-full space-y-6 shadow-2xl">
+          <div className="text-center space-y-2">
+            <span
+              className={`inline-block px-3 py-1 rounded-md text-xs font-mono font-bold border ${
+                isTrialExpiredGate
+                  ? 'bg-amber-950/70 text-amber-300 border-amber-500/40'
+                  : 'bg-rose-950/60 text-rose-300 border-rose-500/35'
+              }`}
             >
-              <CreditCard className="w-4 h-4" />
-              <span>Pagar con Mercado Pago / Alias para Reactivar</span>
-            </button>
-            <div className="flex flex-col sm:flex-row gap-2.5">
+              {selectedTenant.tenantCode} ·{' '}
+              {isTrialExpiredGate
+                ? 'PRUEBA DE 30 DÍAS FINALIZADA'
+                : isPausedByTrialEnd
+                ? 'CUENTA PAUSADA · PRUEBA 30 DÍAS FINALIZADA'
+                : 'CUENTA EN PAUSA'}
+            </span>
+            <h2 className="text-2xl font-bold text-white">
+              {isTrialExpiredGate
+                ? 'Finalizó tu Prueba Gratis de 30 Días · Elegí tu Plan'
+                : 'Cuenta Pausada · Elegí un Plan para Reactivar'}
+            </h2>
+            <p className="text-xs text-[#94A3B8] max-w-2xl mx-auto leading-relaxed">
+              {isTrialExpiredGate ? (
+                <>
+                  Tu período de prueba gratuito para <strong className="text-white">{selectedTenant.name}</strong> finalizó el{' '}
+                  <strong className="text-white font-mono">{tenantSubscriptionStatus?.trialEndsAt}</strong>.
+                </>
+              ) : (
+                <>
+                  El acceso a la plataforma para <strong className="text-white">{selectedTenant.name}</strong> se encuentra en pausa.
+                  {selectedTenant.subscription?.pauseReason ? ` (${selectedTenant.subscription.pauseReason})` : ''}
+                </>
+              )}{' '}
+              Todos tus clientes, vendedores y boletas siguen guardados. Compará qué podés hacer en cada una de las 3 tipologías y elegí la tuya para pasar directo a pagar y quedar clasificado automáticamente:
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {planDefinitions.map((plan) => {
+              const isSelected =
+                (chosenPlanTierForPayModal || resolveTenantPlanTier(selectedTenant)) === plan.tier;
+              return (
+                <div
+                  key={plan.tier}
+                  className={`rounded-2xl border p-5 flex flex-col justify-between transition-all ${
+                    plan.highlighted
+                      ? 'bg-[#102244] border-sky-400/60 shadow-lg ring-1 ring-sky-400/30'
+                      : isSelected
+                      ? 'bg-[#0F2040] border-emerald-400/60'
+                      : 'bg-[#081224] border-[#B6C2D2]/20 hover:border-[#B6C2D2]/40'
+                  }`}
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                          plan.tier === 'full'
+                            ? 'bg-sky-500/20 text-sky-200 border-sky-400/40'
+                            : plan.tier === 'web'
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'
+                            : 'bg-slate-700/50 text-slate-200 border-slate-500/40'
+                        }`}
+                      >
+                        {plan.sectionBadge}
+                      </span>
+                      {plan.highlighted && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                          Más completo
+                        </span>
+                      )}
+                    </div>
+
+                    <div>
+                      <h3 className="text-base font-bold text-white">{plan.shortName}</h3>
+                      <p className="text-[11px] text-[#94A3B8] mt-1 leading-relaxed">
+                        {plan.tagline}
+                      </p>
+                    </div>
+
+                    <div className="pt-2 pb-3 border-y border-[#B6C2D2]/15">
+                      <p className="text-[10px] uppercase tracking-wider text-[#94A3B8]">
+                        Abono Mensual
+                      </p>
+                      <p className="text-2xl font-extrabold text-emerald-400 font-mono tabular-nums mt-0.5">
+                        $ {plan.monthlyPrice.toLocaleString('es-AR')}
+                        <span className="text-xs font-normal text-[#94A3B8]"> / mes</span>
+                      </p>
+                    </div>
+
+                    <ul className="space-y-1.5 text-[11px]">
+                      {plan.includedFeatures.map((feat, idx) => (
+                        <li key={idx} className="flex items-start gap-1.5 text-[#E2E8F0]">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                          <span>{feat}</span>
+                        </li>
+                      ))}
+                      {plan.excludedFeatures.map((ex, idx) => (
+                        <li key={`ex-${idx}`} className="flex items-start gap-1.5 text-slate-500">
+                          <X className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+                          <span className="line-through">{ex}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingGatePlanTier(plan.tier);
+                      setGatePlanTermsAccepted(false);
+                    }}
+                    className={`mt-5 w-full py-2.5 px-3 rounded-xl text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-colors ${
+                      plan.highlighted
+                        ? 'bg-[#009EE3] hover:bg-[#008AD0] text-white shadow-md'
+                        : 'bg-[#E2E8F0] hover:bg-white text-[#091428]'
+                    }`}
+                  >
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Elegir {plan.sectionBadge} y Pagar</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-2 border-t border-[#B6C2D2]/15">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <button
                 type="button"
-                onClick={handleLogout}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-[#13264A] hover:bg-[#1B3566] text-[#E2E8F0] border border-[#B6C2D2]/25 text-xs font-semibold cursor-pointer transition-colors"
+                onClick={() => {
+                  setAutoGenSubPayLink(true);
+                  setIsSubscriptionPayOpen(true);
+                }}
+                className="flex-1 sm:flex-initial py-2.5 px-4 rounded-xl bg-[#009EE3]/20 hover:bg-[#009EE3]/30 text-sky-200 border border-[#009EE3]/45 text-xs font-bold cursor-pointer flex items-center justify-center gap-2 transition-colors"
               >
-                Cerrar Sesión
+                <CreditCard className="w-4 h-4 text-sky-300" />
+                <span>Generar Link de Pago (Mercado Pago / WA)</span>
               </button>
+              {isTrialExpiredGate && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handlePauseOwnTenant('Cuenta pausada al finalizar los 30 días de prueba gratis', 'trial_expired')
+                  }
+                  className="flex-1 sm:flex-initial py-2.5 px-4 rounded-xl bg-[#13264A] hover:bg-rose-950/60 text-rose-200 border border-rose-500/35 text-xs font-bold cursor-pointer flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Pause className="w-4 h-4 text-rose-400" />
+                  <span>No continuar ahora · Pausar Cuenta</span>
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
               <button
                 type="button"
                 onClick={() => setIsContactChannelsOpen(true)}
-                className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5 transition-colors"
-              >
-                <span>Canales de Contacto</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <TenantSubscriptionPayModal
-          isOpen={isSubscriptionPayOpen}
-          onClose={() => setIsSubscriptionPayOpen(false)}
-          tenant={selectedTenant}
-          payerEmail={currentUser.email}
-          onPaymentApproved={(details) => {
-            applyApprovedTenantPayment(selectedTenant.id, details);
-            showToast('Pago aprobado. Tu cuenta ha sido reactivada automáticamente.');
-          }}
-        />
-        <ContactChannelsModal
-          isOpen={isContactChannelsOpen}
-          onClose={() => setIsContactChannelsOpen(false)}
-          tenant={selectedTenant}
-          currentUser={currentUser}
-        />
-      </div>
-    );
-  }
-
-  // 3B. If 30-Day Free Trial Expired -> Prompt to Pay & Continue OR Pause Account
-  if (selectedTenant && tenantSubscriptionStatus?.status === 'trial_expired') {
-    return (
-      <div className="min-h-screen bg-[#071021] text-[#E2E8F0] flex items-center justify-center p-4 font-sans">
-        <div className="bg-[#0B1933] border border-[#B6C2D2]/25 rounded-2xl p-8 max-w-lg w-full text-center space-y-5 shadow-2xl">
-          <div className="w-16 h-16 rounded-2xl bg-[#13264A] text-[#E2E8F0] flex items-center justify-center mx-auto border border-[#B6C2D2]/30">
-            <Calendar className="w-8 h-8 text-amber-300" />
-          </div>
-
-          <div className="space-y-2">
-            <span className="inline-block px-3 py-1 rounded-md text-xs font-mono font-bold bg-amber-950/70 text-amber-300 border border-amber-500/40">
-              {selectedTenant.tenantCode} · PRUEBA DE 30 DÍAS FINALIZADA
-            </span>
-            <h2 className="text-xl font-bold text-white">Finalizó tu Prueba Gratis de 30 Días</h2>
-            <p className="text-xs text-[#94A3B8] leading-relaxed">
-              Tu período de prueba gratuito para <strong className="text-white">{selectedTenant.name}</strong> finalizó el{' '}
-              <strong className="text-white font-mono">{tenantSubscriptionStatus.trialEndsAt}</strong>. Todos tus clientes, vendedores y boletas siguen guardados de forma segura.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl bg-[#081224] border border-[#B6C2D2]/20 text-xs text-[#CBD5E1] space-y-1.5 text-left">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-white">Abono Mensual del Sistema:</span>
-              <span className="font-mono font-bold text-emerald-400 tabular-nums text-sm">
-                $ {tenantSubscriptionStatus.monthlyFee.toLocaleString('es-AR')} / mes
-              </span>
-            </div>
-            <p className="text-[#94A3B8]">
-              Elegí efectuar el pago ahora con <strong>Mercado Pago</strong> o transferencia al <strong>Alias</strong> para pasar a cuenta activa en funcionamiento, o pausá la cuenta hasta que decidas retomarla.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-2.5 pt-2">
-            <button
-              type="button"
-              onClick={() => setIsSubscriptionPayOpen(true)}
-              className="w-full py-3 px-4 rounded-xl bg-[#E2E8F0] hover:bg-white text-[#091428] text-xs font-bold shadow-md cursor-pointer flex items-center justify-center gap-2 transition-colors"
-            >
-              <CreditCard className="w-4 h-4" />
-              <span>Efectuar el Pago y Mantener Activa</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                handlePauseOwnTenant('Cuenta pausada al finalizar los 30 días de prueba gratis', 'trial_expired')
-              }
-              className="w-full py-2.5 px-4 rounded-xl bg-[#13264A] hover:bg-rose-950/60 text-rose-200 border border-rose-500/35 text-xs font-bold cursor-pointer flex items-center justify-center gap-2 transition-colors"
-            >
-              <Pause className="w-4 h-4 text-rose-400" />
-              <span>No continuar ahora · Pausar Cuenta</span>
-            </button>
-
-            <div className="flex flex-col sm:flex-row gap-2">
-              <button
-                type="button"
-                onClick={() => setIsContactChannelsOpen(true)}
-                className="flex-1 py-2 px-4 rounded-xl bg-[#13264A] hover:bg-[#1B3566] text-sky-300 border border-sky-400/25 text-xs font-semibold cursor-pointer transition-colors"
+                className="py-2 px-4 rounded-xl bg-[#13264A] hover:bg-[#1B3566] text-sky-300 border border-sky-400/25 text-xs font-semibold cursor-pointer transition-colors"
               >
                 Canales de Contacto
               </button>
               <button
                 type="button"
                 onClick={handleLogout}
-                className="flex-1 py-2 px-4 rounded-xl text-[#94A3B8] hover:text-white text-xs font-semibold cursor-pointer transition-colors"
+                className="py-2 px-4 rounded-xl text-[#94A3B8] hover:text-white text-xs font-semibold cursor-pointer transition-colors"
               >
                 Cerrar Sesión
               </button>
@@ -3277,17 +3926,130 @@ export default function App() {
           </div>
         </div>
 
+        {/* Modal de aceptación obligatoria de Términos y Condiciones al elegir plan en cuenta pausada / fin de prueba */}
+        {pendingGatePlanTier && (() => {
+          const chosenDef = getPlanDefinitionByTier(pendingGatePlanTier, platformBillingCfg);
+          const impact = getPlanTransitionImpactSummary(
+            resolveTenantPlanTier(selectedTenant),
+            pendingGatePlanTier
+          );
+          return (
+            <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white text-slate-900 border border-slate-200 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto">
+                <div className="px-5 py-4 bg-[#0B1933] text-white flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-sky-300">
+                      Confirmación de Plan · Términos y Condiciones (v{TERMS_VERSION})
+                    </div>
+                    <h3 className="text-base font-bold">
+                      {chosenDef.sectionBadge} · {chosenDef.shortName} ($ {chosenDef.monthlyPrice.toLocaleString('es-AR')}/mes)
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPendingGatePlanTier(null)}
+                    className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 cursor-pointer"
+                    aria-label="Cerrar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                          impact.direction === 'downgrade'
+                            ? 'bg-amber-200 text-amber-950'
+                            : 'bg-emerald-200 text-emerald-950'
+                        }`}
+                      >
+                        {impact.badgeLabel}
+                      </span>
+                      <span className="text-xs font-bold text-[#0B1933]">{impact.headline}</span>
+                    </div>
+                    <ul className="space-y-1 text-xs text-slate-700">
+                      {impact.bullets.map((b, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                          <span>{b}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <TermsConditionsScrollBox variant="light" maxHeightClass="max-h-52" />
+
+                  <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 bg-white cursor-pointer hover:border-[#0B1933]">
+                    <input
+                      type="checkbox"
+                      checked={gatePlanTermsAccepted}
+                      onChange={(e) => setGatePlanTermsAccepted(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-300 text-[#0B1933]"
+                    />
+                    <span className="text-xs font-semibold text-slate-900 leading-snug">
+                      He leído y acepto los Términos y Condiciones de Uso y Manejo (v{TERMS_VERSION}) y confirmo operar con{' '}
+                      <strong>
+                        {chosenDef.sectionBadge} · {chosenDef.shortName}
+                      </strong>{' '}
+                      (${chosenDef.monthlyPrice.toLocaleString('es-AR')}/mes).
+                    </span>
+                  </label>
+
+                  <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-2 border-t border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setPendingGatePlanTier(null)}
+                      className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 cursor-pointer"
+                    >
+                      Volver a comparar planes
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!gatePlanTermsAccepted}
+                      onClick={() => {
+                        const chosen = pendingGatePlanTier;
+                        handleSelectTenantPlanTier(selectedTenant.id, chosen, {
+                          acceptedTermsAt: new Date().toISOString(),
+                          termsVersion: TERMS_VERSION,
+                        });
+                        setPendingGatePlanTier(null);
+                        setGatePlanTermsAccepted(false);
+                        setAutoGenSubPayLink(false);
+                        setIsSubscriptionPayOpen(true);
+                      }}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-bold inline-flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <CreditCard className="w-4 h-4" />
+                      <span>Aceptar Términos e Ir a Pagar</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         <TenantSubscriptionPayModal
           isOpen={isSubscriptionPayOpen}
-          onClose={() => setIsSubscriptionPayOpen(false)}
+          onClose={() => {
+            setIsSubscriptionPayOpen(false);
+            setAutoGenSubPayLink(false);
+          }}
           tenant={selectedTenant}
           payerEmail={currentUser.email}
+          autoGenerateLinkOnOpen={autoGenSubPayLink}
+          initialPlanTier={chosenPlanTierForPayModal || resolveTenantPlanTier(selectedTenant)}
+          onSelectPlanTier={(tier, termsMeta) =>
+            handleSelectTenantPlanTier(selectedTenant.id, tier, termsMeta)
+          }
           onPaymentApproved={(details) => {
             applyApprovedTenantPayment(selectedTenant.id, details);
             showToast(
               details.planType === 'annual'
-                ? 'Plan Anual (12 meses) acreditado. Tu cuenta pasó a funcionamiento normal.'
-                : 'Pago acreditado. Tu cuenta pasó de prueba a funcionamiento normal.'
+                ? 'Plan Anual (12 meses) acreditado. Tu cuenta quedó activa.'
+                : 'Pago acreditado. Tu cuenta quedó activa en funcionamiento.'
             );
           }}
         />
@@ -3324,11 +4086,28 @@ export default function App() {
         onOpenQuickGuide={() => setIsQuickGuideOpen(true)}
         onOpenEditBrand={() => setIsEditBrandModalOpen(true)}
         onOpenContactChannels={() => setIsContactChannelsOpen(true)}
-        onOpenSubscriptionPay={selectedTenant ? () => setIsSubscriptionPayOpen(true) : undefined}
+        onOpenSubscriptionPay={
+          selectedTenant
+            ? () => {
+                setChosenPlanTierForPayModal(resolveTenantPlanTier(selectedTenant));
+                setIsSubscriptionPayOpen(true);
+              }
+            : undefined
+        }
+        onOpenChangePlan={
+          selectedTenant
+            ? () => setPlanUpgradePrompt({ reasonKey: 'manual_switch' })
+            : undefined
+        }
         isPaidCurrentMonth={tenantSubscriptionStatus?.isPaidForCurrentMonth}
         currentDateRef={currentDateRef}
-        catalogEnabled={selectedTenant?.catalogEnabled !== false}
+        catalogEnabled={tenantFeatureAccess.canAccessWebCatalog}
         webOrdersCount={paidWebOrders.length}
+        featureAccess={{
+          canAccessWebCatalog: tenantFeatureAccess.canAccessWebCatalog,
+          canAccessFullFeatures: tenantFeatureAccess.canAccessFullFeatures,
+        }}
+        planSectionLabel={tenantFeatureAccess.sectionLabel}
       />
 
       {/* Right Main Column */}
@@ -3379,11 +4158,14 @@ export default function App() {
               <div className="flex items-center gap-2 shrink-0 flex-wrap justify-center">
                 <button
                   type="button"
-                  onClick={() => setIsSubscriptionPayOpen(true)}
+                  onClick={() => {
+                    setAutoGenSubPayLink(false);
+                    setIsSubscriptionPayOpen(true);
+                  }}
                   className="py-2 px-3.5 bg-[#E2E8F0] hover:bg-white text-[#091428] font-bold rounded-lg text-xs cursor-pointer flex items-center gap-1.5 transition-colors"
                 >
                   <CreditCard className="w-3.5 h-3.5" />
-                  <span>Efectuar Pago / Continuar</span>
+                  <span>Generar Pago / Continuar</span>
                 </button>
 
                 {!confirmTrialPauseInline ? (
@@ -4360,20 +5142,52 @@ export default function App() {
 
         {/* TAB: DESPACHO AUTOMÁTICO DIARIO (WHATSAPP & EMAILS) */}
         {activeTab === 'automatizacion' && (
-          <Suspense fallback={<LazyViewFallback />}>
-            <AutomatedDispatchManager
-              boletas={boletas}
-              paidBoletas={paidBoletas}
-              clients={clients}
-              salespeople={salespeople}
-              admins={admins}
-              config={config}
-              logs={autoLogs}
-              onSaveConfig={handleSaveConfig}
-              onAddLogs={handleAddAutoLogs}
-              onClearLogs={handleClearAutoLogs}
-            />
-          </Suspense>
+          !tenantFeatureAccess.canAccessFullFeatures ? (
+            <div className="bg-white dark:bg-[#0B1933] border border-slate-200 dark:border-[#B6C2D2]/20 rounded-2xl p-8 max-w-2xl mx-auto text-center space-y-4">
+              <div className="w-12 h-12 rounded-xl bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 flex items-center justify-center mx-auto">
+                <CreditCard className="w-6 h-6" />
+              </div>
+              <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-200">
+                Exclusivo Sección 3 · Plan Full
+              </span>
+              <h3 className="text-lg font-bold text-[#0B1933] dark:text-white">
+                Automatización Diaria por WhatsApp incluida en Plan Full
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-[#94A3B8] leading-relaxed">
+                Tu cuenta está operando en <strong className="text-[#0B1933] dark:text-white">{tenantFeatureAccess.sectionLabel}</strong>. Actualizá a <strong>Sección 3 · Plan Full</strong> para habilitar despachos automáticos por WhatsApp, cierres diarios, promociones y fidelización completa.
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  setPlanUpgradePrompt({
+                    reasonKey: 'full_feature',
+                    title: 'Pasar a Sección 3 · Plan Full (Todo Incluido)',
+                    detail:
+                      'Habilitá automatización diaria por WhatsApp, promociones, SuperClub por DNI y capacidad ilimitada de rubros y prendas.',
+                  })
+                }
+                className="px-5 py-2.5 rounded-xl bg-[#009EE3] hover:bg-[#008AD0] text-white text-xs font-bold cursor-pointer inline-flex items-center gap-2"
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Pasar a Plan Full (Sección 3)</span>
+              </button>
+            </div>
+          ) : (
+            <Suspense fallback={<LazyViewFallback />}>
+              <AutomatedDispatchManager
+                boletas={boletas}
+                paidBoletas={paidBoletas}
+                clients={clients}
+                salespeople={salespeople}
+                admins={admins}
+                config={config}
+                logs={autoLogs}
+                onSaveConfig={handleSaveConfig}
+                onAddLogs={handleAddAutoLogs}
+                onClearLogs={handleClearAutoLogs}
+              />
+            </Suspense>
+          )
         )}
 
         {/* TAB: AVISOS & PROMOS A VENDEDORES */}
@@ -4462,6 +5276,10 @@ export default function App() {
               }}
               onQuickSendStatement={(client) => openQuickStatementForClient(client)}
               catalogEnabled={selectedTenant?.catalogEnabled !== false}
+              webLoyaltyEnabled={
+                selectedTenant?.catalogEnabled !== false &&
+                tenantFeatureAccess.canAccessFullFeatures
+              }
               catalogLoyaltyAccounts={catalogLoyaltyAccounts}
               catalogOrders={catalogOrders}
               catalogProducts={catalogProducts}
@@ -4520,6 +5338,8 @@ export default function App() {
               stockAlerts={catalogStockAlerts}
               promoSubscribers={catalogPromoSubscribers}
               loyaltyAccounts={catalogLoyaltyAccounts}
+              abandonedCarts={catalogAbandonedCarts}
+              giftCards={catalogGiftCards}
               activeUserName={activeAdmin?.name || currentUser?.fullName || 'Administración'}
               onSaveSettings={handleSaveCatalogSettings}
               onSaveMerchantPaymentConfig={(paymentCfg) => {
@@ -4536,12 +5356,17 @@ export default function App() {
               onSaveStockAlerts={handleSaveCatalogStockAlerts}
               onSavePromoSubscribers={handleSaveCatalogPromoSubscribers}
               onSaveLoyaltyAccounts={handleSaveCatalogLoyaltyAccounts}
+              onSaveAbandonedCarts={handleSaveCatalogAbandonedCarts}
+              onSaveGiftCards={handleSaveCatalogGiftCards}
               onRefreshOrders={handleRefreshCatalogOrders}
               onRefreshStockAlerts={handleRefreshCatalogStockAlerts}
               onRefreshPromoSubscribers={handleRefreshCatalogPromoSubscribers}
               onRefreshLoyaltyAccounts={handleRefreshCatalogLoyaltyAccounts}
+              onRefreshAbandonedCarts={handleRefreshCatalogAbandonedCarts}
+              onRefreshGiftCards={handleRefreshCatalogGiftCards}
               onBillOrder={handleBillCatalogOrder}
               onOpenReceipt={(receipt) => setActiveReceiptData(receipt)}
+              onOpenReturnModal={(order) => setSelectedWebOrderForReturn(order)}
               onOpenPublicPreview={(handle) => {
                 publishCatalogSnapshot(catalogSettings, catalogProducts);
                 if (typeof window !== 'undefined') {
@@ -4550,6 +5375,13 @@ export default function App() {
                 setPublicCatalogHandle(handle);
               }}
               onOpenEditBrand={() => setIsEditBrandModalOpen(true)}
+              planFeatureAccess={{
+                tier: tenantFeatureAccess.tier,
+                canAccessFullFeatures: tenantFeatureAccess.canAccessFullFeatures,
+              }}
+              onRequestUpgradePlan={(ctx) =>
+                setPlanUpgradePrompt(ctx || { reasonKey: 'full_feature' })
+              }
               showToast={showToast}
             />
           </Suspense>
@@ -4569,6 +5401,11 @@ export default function App() {
               onOpenReceipt={(receipt) => setActiveReceiptData(receipt)}
               onBillOrder={handleBillCatalogOrder}
               onMarkOrderAsRetirado={handleMarkWebOrderRetirado}
+              onOpenReturnModal={
+                tenantFeatureAccess.canAccessFullFeatures
+                  ? (order) => setSelectedWebOrderForReturn(order)
+                  : undefined
+              }
               onChangeOrderPaymentMethod={handleUpdateWebOrderPaymentMethod}
               showToast={showToast}
             />
@@ -4577,9 +5414,41 @@ export default function App() {
 
         {/* TAB 5: MARKETING STUDIO */}
         {activeTab === 'promociones' && (
-          <Suspense fallback={<LazyViewFallback />}>
-            <MarketingStudio config={config} />
-          </Suspense>
+          !tenantFeatureAccess.canAccessFullFeatures ? (
+            <div className="bg-white dark:bg-[#0B1933] border border-slate-200 dark:border-[#B6C2D2]/20 rounded-2xl p-8 max-w-2xl mx-auto text-center space-y-4">
+              <div className="w-12 h-12 rounded-xl bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 flex items-center justify-center mx-auto">
+                <CreditCard className="w-6 h-6" />
+              </div>
+              <span className="inline-block px-2.5 py-0.5 rounded text-[11px] font-bold bg-sky-100 dark:bg-sky-950/60 text-sky-800 dark:text-sky-200">
+                Exclusivo Sección 3 · Plan Full
+              </span>
+              <h3 className="text-lg font-bold text-[#0B1933] dark:text-white">
+                Estudio de Flyers y Promociones incluido en Plan Full
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-[#94A3B8] leading-relaxed">
+                Tu cuenta está operando en <strong className="text-[#0B1933] dark:text-white">{tenantFeatureAccess.sectionLabel}</strong>. Actualizá a <strong>Sección 3 · Plan Full</strong> para diseñar banners promocionales, campañas y automatizaciones completas.
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  setPlanUpgradePrompt({
+                    reasonKey: 'full_feature',
+                    title: 'Pasar a Sección 3 · Plan Full (Todo Incluido)',
+                    detail:
+                      'Habilitá el Estudio de Flyers y Promociones, burbujas de ofertas, SuperClub por DNI, seguimiento de clientes y capacidad ilimitada.',
+                  })
+                }
+                className="px-5 py-2.5 rounded-xl bg-[#009EE3] hover:bg-[#008AD0] text-white text-xs font-bold cursor-pointer inline-flex items-center gap-2"
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Pasar a Plan Full (Sección 3)</span>
+              </button>
+            </div>
+          ) : (
+            <Suspense fallback={<LazyViewFallback />}>
+              <MarketingStudio config={config} />
+            </Suspense>
+          )
         )}
 
         {/* TAB 6: ADMINS & SETTINGS */}
@@ -4799,9 +5668,17 @@ export default function App() {
       {selectedTenant && (
         <TenantSubscriptionPayModal
           isOpen={isSubscriptionPayOpen}
-          onClose={() => setIsSubscriptionPayOpen(false)}
+          onClose={() => {
+            setIsSubscriptionPayOpen(false);
+            setAutoGenSubPayLink(false);
+          }}
           tenant={selectedTenant}
           payerEmail={currentUser.email}
+          autoGenerateLinkOnOpen={autoGenSubPayLink}
+          initialPlanTier={chosenPlanTierForPayModal || resolveTenantPlanTier(selectedTenant)}
+          onSelectPlanTier={(tier, termsMeta) =>
+            handleSelectTenantPlanTier(selectedTenant.id, tier, termsMeta)
+          }
           onPaymentApproved={(details) => {
             applyApprovedTenantPayment(selectedTenant.id, details);
             showToast(
@@ -4855,7 +5732,49 @@ export default function App() {
         onBillOrder={handleBillCatalogOrder}
         onChangePaymentMethod={handleUpdateWebOrderPaymentMethod}
         onVerifyTransferReceipt={handleVerifyWebOrderTransferReceipt}
+        onOpenReturnModal={
+          tenantFeatureAccess.canAccessFullFeatures
+            ? (order) => {
+                setSelectedWebOrderDetail(null);
+                setSelectedWebOrderForReturn(order);
+              }
+            : undefined
+        }
       />
+
+      {/* Gestión directa de Cambios y Devoluciones de Pedidos Web (con resta inmediata de puntos y saldo a favor DNI) */}
+      <WebOrderReturnModal
+        isOpen={Boolean(selectedWebOrderForReturn)}
+        onClose={() => setSelectedWebOrderForReturn(null)}
+        order={
+          selectedWebOrderForReturn
+            ? catalogOrders.find((o) => o.id === selectedWebOrderForReturn.id) || selectedWebOrderForReturn
+            : null
+        }
+        products={catalogProducts}
+        loyaltyAccounts={catalogLoyaltyAccounts}
+        storeDefaultPointsPerUnit={
+          typeof catalogSettings.loyaltyPointsPerUnit === 'number'
+            ? catalogSettings.loyaltyPointsPerUnit
+            : 10
+        }
+        currencySymbol={catalogSettings.currencySymbol || config.currencySymbol || '$'}
+        storeName={catalogSettings.storeName || config.distributorName || selectedTenant?.name || 'Tienda'}
+        activeUserName={activeAdmin?.name || currentUser?.fullName || 'Administración'}
+        onConfirmReturn={handleProcessWebOrderReturn}
+      />
+
+      {/* Modal de Cambio de Plan Bidireccional (Sección 1 ↔ 2 ↔ 3) con Términos y Condiciones */}
+      {selectedTenant && (
+        <PlanUpgradeModal
+          isOpen={Boolean(planUpgradePrompt)}
+          onClose={() => setPlanUpgradePrompt(null)}
+          tenant={selectedTenant}
+          billingConfig={platformBillingCfg}
+          triggerContext={planUpgradePrompt}
+          onConfirmPlanChange={handleConfirmPlanChange}
+        />
+      )}
     </div>
   );
 }

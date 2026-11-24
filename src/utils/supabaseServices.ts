@@ -1,5 +1,7 @@
 import type {
   BusinessRubro,
+  CatalogAbandonedCart,
+  CatalogGiftCard,
   CatalogLoyaltyAccount,
   CatalogPickupOrder,
   CatalogProduct,
@@ -10,7 +12,9 @@ import type {
   PlatformBillingConfig,
   PlatformSupportConfig,
   PublishedPublicCatalog,
+  SubscriptionPlanTier,
   Tenant,
+  TenantSubscriptionPayOrder,
 } from '../types';
 import { normalizeDni } from './catalogStock';
 import { dbGetItem, dbSetItem } from './localInternalDb';
@@ -29,6 +33,8 @@ export interface VerifiedTenantPaymentRecord {
   amount: number;
   status: 'approved' | 'pending' | 'rejected';
   planType?: 'monthly' | 'annual';
+  planTier?: SubscriptionPlanTier;
+  planTierLabel?: string;
   monthsCount?: number;
   paymentMethod: 'mercadopago' | 'transferencia';
   mpPaymentId?: string;
@@ -647,6 +653,8 @@ export async function verifyAndRecordTenantPaymentInSupabase(params: {
   monthKey: string;
   amount?: number;
   planType?: 'monthly' | 'annual';
+  planTier?: SubscriptionPlanTier;
+  planTierLabel?: string;
   monthsCount?: number;
   paymentId?: string;
   preferenceId?: string;
@@ -722,6 +730,8 @@ export async function verifyAndRecordTenantPaymentInSupabase(params: {
     amount: Number(params.amount || 25000),
     status: 'approved',
     planType: safePlanType,
+    planTier: params.planTier,
+    planTierLabel: params.planTierLabel,
     monthsCount: safeMonthsCount,
     paymentMethod: params.paymentMethod === 'transferencia' ? 'transferencia' : 'mercadopago',
     mpPaymentId: params.paymentId?.trim() || `MP-${Date.now().toString().slice(-8)}`,
@@ -744,6 +754,211 @@ export async function verifyAndRecordTenantPaymentInSupabase(params: {
   });
 
   return { approved: true, payment: record };
+}
+
+// ============================================================================
+// LINKS Y ÓRDENES DE PAGO COMPARTIBLES PARA SUSCRIPCIONES / FIN DE PRUEBA 30D
+// ============================================================================
+
+const TENANT_SUB_PAY_ORDER_PREFIX = 'tenant_sub_pay_order_';
+
+export async function saveTenantSubPayOrderEverywhere(
+  order: TenantSubscriptionPayOrder
+): Promise<void> {
+  if (!order?.token) return;
+  const key = `${TENANT_SUB_PAY_ORDER_PREFIX}${order.token}`;
+  try {
+    await dbSetItem(key, JSON.stringify(order));
+  } catch {
+    // non-blocking
+  }
+  await insertOrUpdateCloudStoreKey(key, order);
+}
+
+export async function getTenantSubPayOrderFromCloud(
+  token: string
+): Promise<TenantSubscriptionPayOrder | null> {
+  if (!token) return null;
+  const cleanToken = token.trim();
+  const key = `${TENANT_SUB_PAY_ORDER_PREFIX}${cleanToken}`;
+  const cloud = await readCloudJsonRecord<TenantSubscriptionPayOrder>(key);
+  if (cloud && cloud.token) return cloud;
+
+  try {
+    const raw = await dbGetItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw) as TenantSubscriptionPayOrder;
+      if (parsed && parsed.token) return parsed;
+    }
+  } catch {
+    // non-blocking
+  }
+  return null;
+}
+
+export async function createTenantSubscriptionPayOrder(params: {
+  tenant: Tenant;
+  monthKey: string;
+  monthName: string;
+  planType: 'monthly' | 'annual';
+  planTier?: SubscriptionPlanTier;
+  planTierLabel?: string;
+  monthsCount: number;
+  amount: number;
+  billingConfig: PlatformBillingConfig;
+  payerEmail?: string;
+  generatedBy: 'tenant' | 'superadmin';
+  notes?: string;
+  returnBaseUrl?: string;
+}): Promise<{ order: TenantSubscriptionPayOrder; payUrl: string }> {
+  const token = `SUB-${(params.tenant.tenantCode || 'EMP').replace(/[^A-Z0-9-]/gi, '').slice(0, 12)}-${Date.now().toString(36).toUpperCase()}`;
+  const origin =
+    params.returnBaseUrl ||
+    (typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : '');
+  const cleanBase = origin.replace(/\/$/, '');
+  const payUrl = cleanBase ? `${cleanBase}/?sub_pay=${encodeURIComponent(token)}` : `?sub_pay=${encodeURIComponent(token)}`;
+
+  let mpInitPoint: string | undefined;
+  let mpPreferenceId: string | undefined;
+
+  // 1. Intentar generar preferencia oficial de Mercado Pago vía Supabase Edge Function
+  try {
+    const edgePref = await createMercadoPagoPreferenceViaEdgeFunction({
+      scope: 'tenant_subscription',
+      tenantId: params.tenant.id,
+      tenantName: params.tenant.name,
+      monthKey: params.monthKey,
+      planType: params.planType,
+      amount: params.amount,
+      payerEmail: params.payerEmail || params.tenant.email || undefined,
+      returnUrl: payUrl,
+    });
+    if (edgePref.ok && edgePref.initPoint) {
+      mpInitPoint = edgePref.initPoint;
+      mpPreferenceId = edgePref.preferenceId;
+    }
+  } catch {
+    // non-blocking
+  }
+
+  // 2. Respaldo: intentar servidor Express (/api/mercadopago/create-preference)
+  if (!mpInitPoint && typeof fetch === 'function') {
+    try {
+      const res = await fetch('/api/mercadopago/create-preference', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId: params.tenant.id,
+          tenantCode: params.tenant.tenantCode,
+          tenantName: params.tenant.name,
+          monthKey: params.monthKey,
+          monthName: params.monthName,
+          amount: params.amount,
+          planType: params.planType,
+          monthsCount: params.monthsCount,
+          payerEmail: params.payerEmail || params.tenant.email || undefined,
+          originUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.initPoint) {
+          mpInitPoint = data.initPoint;
+          mpPreferenceId = data.preferenceId;
+        }
+      }
+    } catch {
+      // non-blocking
+    }
+  }
+
+  const order: TenantSubscriptionPayOrder = {
+    token,
+    tenantId: params.tenant.id,
+    tenantCode: params.tenant.tenantCode,
+    tenantName: params.tenant.name,
+    monthKey: params.monthKey,
+    monthName: params.monthName,
+    planType: params.planType,
+    planTier: params.planTier || params.tenant.subscription?.planTier,
+    planTierLabel: params.planTierLabel,
+    monthsCount: params.monthsCount,
+    amount: Number(params.amount || 0),
+    currencySymbol: params.tenant.subscription?.currency || '$',
+    alias: params.billingConfig.alias || undefined,
+    cvu: params.billingConfig.cvu || undefined,
+    holderName: params.billingConfig.accountHolderName || undefined,
+    bankName: params.billingConfig.bankOrWalletName || 'Mercado Pago',
+    mpCheckoutLink: params.billingConfig.mpCheckoutLink || undefined,
+    mpInitPoint,
+    mpPreferenceId,
+    status: 'pending',
+    generatedBy: params.generatedBy,
+    notes: params.notes?.trim() || undefined,
+    createdAt: new Date().toISOString(),
+  };
+
+  await saveTenantSubPayOrderEverywhere(order);
+  return { order, payUrl };
+}
+
+export async function verifyAndApproveTenantSubPayOrder(params: {
+  token: string;
+  paymentId?: string;
+  collectionStatus?: string;
+  paymentMethod?: 'mercadopago' | 'transferencia';
+  confirmInstant?: boolean;
+  receiptImageUrl?: string;
+  verificationSummary?: string;
+  verifiedViaReceipt?: boolean;
+}): Promise<{ approved: boolean; order: TenantSubscriptionPayOrder | null; message?: string }> {
+  const order = await getTenantSubPayOrderFromCloud(params.token);
+  if (!order) {
+    return { approved: false, order: null, message: 'No se encontró la orden de pago.' };
+  }
+
+  if (order.status === 'approved' && !params.receiptImageUrl) {
+    return { approved: true, order };
+  }
+
+  const res = await verifyAndRecordTenantPaymentInSupabase({
+    tenantId: order.tenantId,
+    monthKey: order.monthKey,
+    amount: order.amount,
+    planType: order.planType,
+    planTier: order.planTier,
+    planTierLabel: order.planTierLabel,
+    monthsCount: order.monthsCount,
+    paymentId: params.paymentId,
+    preferenceId: order.mpPreferenceId,
+    collectionStatus: params.collectionStatus,
+    paymentMethod: params.paymentMethod || 'mercadopago',
+    confirmInstant: params.confirmInstant,
+    aliasUsed: order.alias,
+    receiptImageUrl: params.receiptImageUrl,
+    verificationSummary:
+      params.verificationSummary ||
+      order.notes ||
+      `Pago de suscripción ${order.planType === 'annual' ? 'Anual (12M)' : order.monthName}${order.planTierLabel ? ` · ${order.planTierLabel}` : ''}`,
+    verifiedViaReceipt: params.verifiedViaReceipt,
+  });
+
+  if (!res.approved || !res.payment) {
+    return { approved: false, order, message: res.message };
+  }
+
+  const updatedOrder: TenantSubscriptionPayOrder = {
+    ...order,
+    status: 'approved',
+    paymentMethod: res.payment.paymentMethod,
+    mpPaymentId: res.payment.mpPaymentId,
+    paidAt: res.payment.paidAt || new Date().toISOString().split('T')[0],
+    receiptImageUrl: params.receiptImageUrl || order.receiptImageUrl,
+    verificationSummary: res.payment.verificationSummary || order.verificationSummary,
+  };
+
+  await saveTenantSubPayOrderEverywhere(updatedOrder);
+  return { approved: true, order: updatedOrder };
 }
 
 // ============================================================================
@@ -1884,6 +2099,7 @@ export async function upsertCatalogLoyaltyAccountToSupabase(
     pointsBalance: Math.max(0, Math.floor(Number(account.pointsBalance) || 0)),
     totalPointsEarned: Math.max(0, Math.floor(Number(account.totalPointsEarned) || 0)),
     totalPointsRedeemed: Math.max(0, Math.floor(Number(account.totalPointsRedeemed) || 0)),
+    storeCreditBalance: Math.max(0, Math.round((Number(account.storeCreditBalance) || 0) * 100) / 100),
     ordersCount: Math.max(0, Math.floor(Number(account.ordersCount) || 0)),
     updatedAt: account.updatedAt || new Date().toISOString(),
   };
@@ -1979,4 +2195,295 @@ export async function fetchCatalogLoyaltyAccountsForTenantFromSupabase(
   return Array.from(mergedMap.values()).sort((a, b) =>
     (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
   );
+}
+
+// ============================================================================
+// #1 — CARRITOS ABANDONADOS (CAPTURA Y RECUPERO POR WHATSAPP)
+// ============================================================================
+
+export async function upsertPublicAbandonedCartToSupabase(
+  cart: CatalogAbandonedCart
+): Promise<boolean> {
+  if (!cart?.id || !cart?.tenantId) return false;
+  const publicKey = `catalog_abandoned_cart_${cart.id}`;
+  const tenantEntityKey = `rec:${cart.tenantId}:catalogAbandonedCarts:${cart.id}`;
+  const cacheKey = `public_abandoned_carts_cache_${cart.tenantId}`;
+
+  try {
+    const raw = dbGetItem(cacheKey);
+    const existing: CatalogAbandonedCart[] = raw ? JSON.parse(raw) : [];
+    const filtered = Array.isArray(existing) ? existing.filter((c) => c.id !== cart.id) : [];
+    dbSetItem(cacheKey, JSON.stringify([cart, ...filtered].slice(0, 250)));
+  } catch {
+    // ignore cache error
+  }
+
+  const [okPublic, okEntity] = await Promise.all([
+    insertOrUpdateCloudStoreKey(publicKey, cart),
+    insertOrUpdateCloudStoreKey(tenantEntityKey, cart),
+  ]);
+  return okPublic || okEntity;
+}
+
+export async function fetchPublicAbandonedCartByIdFromSupabase(
+  cartId: string,
+  tenantIdHint?: string
+): Promise<CatalogAbandonedCart | null> {
+  const cleanId = (cartId || '').trim();
+  if (!cleanId) return null;
+
+  let localFallback: CatalogAbandonedCart | null = null;
+  if (tenantIdHint) {
+    try {
+      const raw = dbGetItem(`public_abandoned_carts_cache_${tenantIdHint}`);
+      const arr: CatalogAbandonedCart[] = raw ? JSON.parse(raw) : [];
+      localFallback = arr.find((c) => c.id === cleanId) || null;
+    } catch {
+      localFallback = null;
+    }
+  }
+
+  const remote = await readCloudJsonRecord<CatalogAbandonedCart>(`catalog_abandoned_cart_${cleanId}`);
+  if (remote && remote.id) {
+    if (!localFallback || (remote.updatedAt || remote.createdAt) >= (localFallback.updatedAt || localFallback.createdAt)) {
+      return remote;
+    }
+  }
+  return localFallback || remote;
+}
+
+export async function fetchCatalogAbandonedCartsForTenantFromSupabase(
+  tenantId: string
+): Promise<CatalogAbandonedCart[]> {
+  if (!tenantId) return [];
+  const mergedMap = new Map<string, CatalogAbandonedCart>();
+
+  const mergeEntry = (c: CatalogAbandonedCart | undefined) => {
+    if (!c || !c.id || c.tenantId !== tenantId) return;
+    const prev = mergedMap.get(c.id);
+    if (!prev || (c.updatedAt || c.createdAt) >= (prev.updatedAt || prev.createdAt)) {
+      mergedMap.set(c.id, c);
+    }
+  };
+
+  try {
+    const rawLocal = dbGetItem(`public_abandoned_carts_cache_${tenantId}`);
+    if (rawLocal) {
+      const arr = JSON.parse(rawLocal);
+      if (Array.isArray(arr)) {
+        for (const item of arr) mergeEntry(item as CatalogAbandonedCart);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(CLOUD_TABLE)
+        .select('value')
+        .like('key', `rec:${tenantId}:catalogAbandonedCarts:%`)
+        .order('updated_at', { ascending: false })
+        .limit(250);
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          mergeEntry(row?.value as CatalogAbandonedCart | undefined);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return Array.from(mergedMap.values()).sort((a, b) =>
+    (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+  );
+}
+
+// ============================================================================
+// #3 — GIFT CARDS Y VOUCHERS DIGITALES CON CÓDIGO Y QR
+// ============================================================================
+
+export function normalizeGiftCardCode(rawCode: string): string {
+  return String(rawCode || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '');
+}
+
+export async function upsertCatalogGiftCardToSupabase(
+  giftCard: CatalogGiftCard
+): Promise<boolean> {
+  const cleanCode = normalizeGiftCardCode(giftCard.code);
+  if (!giftCard?.tenantId || !cleanCode) return false;
+
+  const normalized: CatalogGiftCard = {
+    ...giftCard,
+    code: cleanCode,
+    initialAmount: Math.max(0, Math.round((Number(giftCard.initialAmount) || 0) * 100) / 100),
+    remainingBalance: Math.max(0, Math.round((Number(giftCard.remainingBalance) || 0) * 100) / 100),
+    updatedAt: giftCard.updatedAt || new Date().toISOString(),
+  };
+
+  const publicKey = `catalog_gift_card_${normalized.tenantId}_${cleanCode}`;
+  const tenantEntityKey = `rec:${normalized.tenantId}:catalogGiftCards:${normalized.id}`;
+  const cacheKey = `public_gift_cards_cache_${normalized.tenantId}`;
+
+  try {
+    const raw = dbGetItem(cacheKey);
+    const existing: CatalogGiftCard[] = raw ? JSON.parse(raw) : [];
+    const filtered = Array.isArray(existing)
+      ? existing.filter((g) => g.id !== normalized.id && normalizeGiftCardCode(g.code) !== cleanCode)
+      : [];
+    dbSetItem(cacheKey, JSON.stringify([normalized, ...filtered].slice(0, 300)));
+  } catch {
+    // ignore cache error
+  }
+
+  const [okPublic, okEntity] = await Promise.all([
+    insertOrUpdateCloudStoreKey(publicKey, normalized),
+    insertOrUpdateCloudStoreKey(tenantEntityKey, normalized),
+  ]);
+  return okPublic || okEntity;
+}
+
+export async function fetchPublicGiftCardByCodeFromSupabase(
+  tenantId: string,
+  rawCode: string
+): Promise<CatalogGiftCard | null> {
+  const cleanCode = normalizeGiftCardCode(rawCode);
+  if (!tenantId || cleanCode.length < 3) return null;
+
+  let localFallback: CatalogGiftCard | null = null;
+  try {
+    const raw = dbGetItem(`public_gift_cards_cache_${tenantId}`);
+    if (raw) {
+      const arr: CatalogGiftCard[] = JSON.parse(raw);
+      localFallback = arr.find((g) => normalizeGiftCardCode(g.code) === cleanCode) || null;
+    }
+  } catch {
+    localFallback = null;
+  }
+
+  const publicKey = `catalog_gift_card_${tenantId}_${cleanCode}`;
+  const remote = await readCloudJsonRecord<CatalogGiftCard>(publicKey);
+  if (remote && normalizeGiftCardCode(remote.code) === cleanCode) {
+    if (!localFallback || (remote.updatedAt || remote.createdAt) >= (localFallback.updatedAt || localFallback.createdAt)) {
+      return remote;
+    }
+  }
+  return localFallback || remote;
+}
+
+export async function fetchCatalogGiftCardsForTenantFromSupabase(
+  tenantId: string
+): Promise<CatalogGiftCard[]> {
+  if (!tenantId) return [];
+  const mergedMap = new Map<string, CatalogGiftCard>();
+
+  const mergeEntry = (g: CatalogGiftCard | undefined) => {
+    if (!g || !g.code || g.tenantId !== tenantId) return;
+    const cleanCode = normalizeGiftCardCode(g.code);
+    const prev = mergedMap.get(cleanCode);
+    if (!prev || (g.updatedAt || g.createdAt) >= (prev.updatedAt || prev.createdAt)) {
+      mergedMap.set(cleanCode, { ...g, code: cleanCode });
+    }
+  };
+
+  try {
+    const raw = dbGetItem(`public_gift_cards_cache_${tenantId}`);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        for (const item of arr) mergeEntry(item as CatalogGiftCard);
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(CLOUD_TABLE)
+        .select('value')
+        .like('key', `rec:${tenantId}:catalogGiftCards:%`)
+        .order('updated_at', { ascending: false })
+        .limit(300);
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          mergeEntry(row?.value as CatalogGiftCard | undefined);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return Array.from(mergedMap.values()).sort((a, b) =>
+    (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
+  );
+}
+
+// ============================================================================
+// #6 — HISTORIAL DE COMPRAS POR DNI (RECOMPRA EN 1 CLIC)
+// ============================================================================
+
+export async function fetchPublicCatalogOrdersByDniFromSupabase(
+  tenantId: string,
+  rawDni: string
+): Promise<CatalogPickupOrder[]> {
+  const cleanDni = normalizeDni(rawDni);
+  if (!tenantId || cleanDni.length < 6) return [];
+
+  const mergedMap = new Map<string, CatalogPickupOrder>();
+  const mergeOrder = (o: CatalogPickupOrder | undefined) => {
+    if (!o || !o.id || o.tenantId !== tenantId) return;
+    if (normalizeDni(o.customerDni || '') !== cleanDni) return;
+    const prev = mergedMap.get(o.id);
+    if (!prev || (o.updatedAt || o.createdAt) >= (prev.updatedAt || prev.createdAt)) {
+      mergedMap.set(o.id, o);
+    }
+  };
+
+  try {
+    const raw = dbGetItem(`public_orders_cache_${tenantId}`);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        for (const o of arr) mergeOrder(o as CatalogPickupOrder);
+      }
+    }
+  } catch {
+    // ignore local cache read error
+  }
+
+  const supabase = getSupabaseClient();
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from(CLOUD_TABLE)
+        .select('value')
+        .like('key', 'rec:%:catalogOrders:%')
+        .eq('value->>tenantId', tenantId)
+        .eq('value->>customerDni', cleanDni)
+        .order('updated_at', { ascending: false })
+        .limit(25);
+      if (!error && Array.isArray(data)) {
+        for (const row of data) {
+          mergeOrder(row?.value as CatalogPickupOrder | undefined);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return Array.from(mergedMap.values())
+    .filter((o) => o.status !== 'cancelado')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 8);
 }

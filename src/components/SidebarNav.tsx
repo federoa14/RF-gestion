@@ -20,6 +20,7 @@ import {
   ClipboardCheck,
   Store,
   ShoppingBag,
+  ArrowLeftRight,
 } from 'lucide-react';
 import { DistributorConfig, Boleta } from '../types';
 import { calculateAlertStatus, formatCurrency } from '../utils/alerts';
@@ -39,10 +40,16 @@ interface SidebarNavProps {
   onOpenEditBrand: () => void;
   onOpenContactChannels?: () => void;
   onOpenSubscriptionPay?: () => void;
+  onOpenChangePlan?: () => void;
   isPaidCurrentMonth?: boolean;
   currentDateRef?: string;
   catalogEnabled?: boolean;
   webOrdersCount?: number;
+  featureAccess?: {
+    canAccessWebCatalog: boolean;
+    canAccessFullFeatures: boolean;
+  };
+  planSectionLabel?: string;
 }
 
 interface NavGroup {
@@ -70,11 +77,16 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   onOpenEditBrand,
   onOpenContactChannels,
   onOpenSubscriptionPay,
+  onOpenChangePlan,
   isPaidCurrentMonth,
   currentDateRef,
   catalogEnabled = true,
   webOrdersCount = 0,
+  featureAccess,
+  planSectionLabel,
 }) => {
+  const canShowWebCatalog = featureAccess ? featureAccess.canAccessWebCatalog : catalogEnabled !== false;
+  const canShowFullSuite = featureAccess ? featureAccess.canAccessFullFeatures : true;
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
   const graceDays = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
   const refDate = currentDateRef || new Date().toISOString().split('T')[0];
@@ -169,8 +181,10 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         {
           id: 'automatizacion',
           label: 'WhatsApp Automático',
-          hint: 'Envío diario programado',
+          hint: canShowFullSuite ? 'Envío diario programado' : 'Exclusivo Plan Full (Sección 3)',
           icon: Bot,
+          badge: !canShowFullSuite ? 'Full' : undefined,
+          badgeTone: 'navy',
         },
         {
           id: 'avisos',
@@ -189,7 +203,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     {
       title: 'Empresa y Ajustes',
       items: [
-        ...(catalogEnabled !== false
+        ...(canShowWebCatalog
           ? [
               {
                 id: 'catalogo',
@@ -210,8 +224,10 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         {
           id: 'promociones',
           label: 'Estudio de Flyers',
-          hint: 'Promociones para clientes',
+          hint: canShowFullSuite ? 'Promociones para clientes' : 'Exclusivo Plan Full (Sección 3)',
           icon: Sparkles,
+          badge: !canShowFullSuite ? 'Full' : undefined,
+          badgeTone: 'navy',
         },
         {
           id: 'administradores',
@@ -254,6 +270,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             <p className="text-[11px] font-mono text-[#94A3B8] truncate">
               {labels.shortLabel} · {config.tenantCode || 'ACTIVA'} · {config.defaultTermDays}d
             </p>
+            {planSectionLabel && (
+              <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-[#13264A] border border-sky-400/30 text-[10px] font-bold text-sky-300 truncate max-w-full">
+                {planSectionLabel}
+              </span>
+            )}
           </div>
         </button>
 
@@ -371,6 +392,23 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             <span className="flex items-center gap-2">
               <CreditCard className="w-3.5 h-3.5 text-[#CBD5E1]" />
               <span>{isPaidCurrentMonth ? 'Abono Mensual: Al Día' : 'Pagar Abono Mensual'}</span>
+            </span>
+            <ChevronRight className="w-3.5 h-3.5 text-[#8D9CB0]" />
+          </button>
+        )}
+
+        {onOpenChangePlan && (
+          <button
+            type="button"
+            onClick={() => {
+              onOpenChangePlan();
+              onCloseMobile();
+            }}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#0F2142] hover:bg-[#162E59] text-amber-200 hover:text-amber-100 border border-amber-400/25 text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <span className="flex items-center gap-2">
+              <ArrowLeftRight className="w-3.5 h-3.5 text-amber-300" />
+              <span>Cambiar de Plan (1 ↔ 2 ↔ 3)</span>
             </span>
             <ChevronRight className="w-3.5 h-3.5 text-[#8D9CB0]" />
           </button>

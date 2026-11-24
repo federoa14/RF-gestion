@@ -1,4 +1,217 @@
-import { Tenant, TenantSubscription, TenantMonthlyPayment } from '../types';
+import {
+  PlatformBillingConfig,
+  PlatformPlanPrices,
+  SubscriptionPlanTier,
+  Tenant,
+  TenantMonthlyPayment,
+  TenantSubscription,
+} from '../types';
+
+export const DEFAULT_PLAN_PRICES: PlatformPlanPrices = {
+  basico: 18000,
+  web: 28000,
+  full: 42000,
+};
+
+export const PLAN_WEB_MAX_RUBROS = 5;
+export const PLAN_WEB_MAX_PRODUCTS = 50;
+
+export interface SubscriptionPlanDefinition {
+  tier: SubscriptionPlanTier;
+  sectionNumber: 1 | 2 | 3;
+  sectionBadge: string;
+  name: string;
+  shortName: string;
+  tagline: string;
+  monthlyPrice: number;
+  highlighted?: boolean;
+  includesWebCatalog: boolean;
+  includesFullSuite: boolean;
+  includedFeatures: string[];
+  excludedFeatures: string[];
+}
+
+export function normalizePlanPrices(billingConfig?: Partial<PlatformBillingConfig> | null): PlatformPlanPrices {
+  const raw = billingConfig?.planPrices;
+  const fallbackBase = Math.max(0, Number(billingConfig?.defaultMonthlyFee) || DEFAULT_PLAN_PRICES.web);
+  return {
+    basico: Math.max(0, Number(raw?.basico ?? DEFAULT_PLAN_PRICES.basico) || DEFAULT_PLAN_PRICES.basico),
+    web: Math.max(0, Number(raw?.web ?? fallbackBase) || DEFAULT_PLAN_PRICES.web),
+    full: Math.max(0, Number(raw?.full ?? DEFAULT_PLAN_PRICES.full) || DEFAULT_PLAN_PRICES.full),
+  };
+}
+
+export function getPlanPriceForTier(
+  tier: SubscriptionPlanTier,
+  billingConfig?: Partial<PlatformBillingConfig> | null
+): number {
+  const prices = normalizePlanPrices(billingConfig);
+  return prices[tier];
+}
+
+export function applyPercentageToPlanPrices(
+  prices: PlatformPlanPrices,
+  percent: number
+): PlatformPlanPrices {
+  const factor = 1 + (Number(percent) || 0) / 100;
+  const roundPrice = (v: number) => Math.max(0, Math.round((v * factor) / 100) * 100);
+  return {
+    basico: roundPrice(prices.basico),
+    web: roundPrice(prices.web),
+    full: roundPrice(prices.full),
+  };
+}
+
+export function getSubscriptionPlanDefinitions(
+  billingConfig?: Partial<PlatformBillingConfig> | null
+): SubscriptionPlanDefinition[] {
+  const prices = normalizePlanPrices(billingConfig);
+  return [
+    {
+      tier: 'basico',
+      sectionNumber: 1,
+      sectionBadge: 'Sección 1',
+      name: 'Plan Básico · Gestión Sin Web',
+      shortName: 'Básico (Sin Web)',
+      tagline: 'Control integral de cobranzas, boletas, clientes, vendedores y mora interna.',
+      monthlyPrice: prices.basico,
+      includesWebCatalog: false,
+      includesFullSuite: false,
+      includedFeatures: [
+        'Panel de cobranzas, boletas y pagos parciales',
+        'Gestión de clientes, vendedores, rutas y rendiciones',
+        'Auditoría de mora (2d, 6d, 10d y alertas rojas)',
+        'Historial de cobradas, agenda del día y envíos WhatsApp manuales',
+      ],
+      excludedFeatures: [
+        'Sin Catálogo Online / Página Web propia',
+        'Sin Pedidos Web ni Ventas Online',
+        'Sin Puntos por DNI, Gift Cards QR ni Automatizaciones',
+      ],
+    },
+    {
+      tier: 'web',
+      sectionNumber: 2,
+      sectionBadge: 'Sección 2',
+      name: 'Plan Comercial · Página Web Básica',
+      shortName: 'Página Web Básica',
+      tagline:
+        'Página web básica con pagos en tienda y manejo de stock (hasta 5 rubros y 50 prendas/objetos).',
+      monthlyPrice: prices.web,
+      includesWebCatalog: true,
+      includesFullSuite: false,
+      includedFeatures: [
+        'Todo lo incluido en Plan Básico (Sección 1)',
+        'Página Web / Catálogo Online básico con link y QR propio',
+        'Pagos en la tienda (Efectivo, Transferencia / Alias y Mercado Pago)',
+        'Manejo de stock por producto y variante · Hasta 5 rubros y 50 prendas/objetos',
+      ],
+      excludedFeatures: [
+        'Sin burbujas ni banners de ofertas, Outlet ni Ofertas Relámpago',
+        'Sin seguimiento de clientes (Avisos de Stock, Carritos Abandonados, Clientes Web)',
+        'Sin SuperClub / Puntos por DNI ni cupones o descuentos',
+        'Tope de 5 rubros y 50 prendas/objetos (ampliable al instante a Plan Full)',
+      ],
+    },
+    {
+      tier: 'full',
+      sectionNumber: 3,
+      sectionBadge: 'Sección 3',
+      name: 'Plan Full · Todo Incluido',
+      shortName: 'Full (Todo Incluido)',
+      tagline: 'Acceso absoluto a todas las herramientas de venta, fidelización y automatización.',
+      monthlyPrice: prices.full,
+      highlighted: true,
+      includesWebCatalog: true,
+      includesFullSuite: true,
+      includedFeatures: [
+        'Todo lo del Plan Básico + Página Web (Secciones 1 y 2)',
+        'Programa de Puntos por DNI, Favoritos, Recompra 1-clic y Analítica Web',
+        'Recupero automático de Carritos Abandonados + Ofertas Relámpago / Outlet',
+        'Gift Cards Digitales con QR + Cambios/Devoluciones con Saldo a Favor por DNI',
+        'Club Promos, Estudio de Flyers, WhatsApp Automático y Radar Clientes Fríos',
+      ],
+      excludedFeatures: [],
+    },
+  ];
+}
+
+export function getPlanDefinitionByTier(
+  tier: SubscriptionPlanTier,
+  billingConfig?: Partial<PlatformBillingConfig> | null
+): SubscriptionPlanDefinition {
+  return (
+    getSubscriptionPlanDefinitions(billingConfig).find((d) => d.tier === tier) ||
+    getSubscriptionPlanDefinitions(billingConfig)[1]
+  );
+}
+
+export function resolveTenantPlanTier(tenant: Tenant): SubscriptionPlanTier | undefined {
+  if (tenant.subscription?.planTier) {
+    return tenant.subscription.planTier;
+  }
+  if (tenant.catalogEnabled === false) {
+    return 'basico';
+  }
+  return undefined;
+}
+
+export interface TenantEffectiveFeatureAccess {
+  tier?: SubscriptionPlanTier;
+  sectionLabel: string;
+  isTrialFullPreview: boolean;
+  canAccessWebCatalog: boolean;
+  canAccessFullFeatures: boolean;
+}
+
+export function getTenantEffectiveFeatureAccess(tenant: Tenant): TenantEffectiveFeatureAccess {
+  const evalStatus = getTenantSubscriptionStatus(tenant);
+  const explicitTier = resolveTenantPlanTier(tenant);
+  const isTrialFullPreview = evalStatus.status === 'trial_active';
+
+  // Durante la prueba gratis de 30 días habilitamos todo salvo que el superadmin haya apagado la web manualmente
+  if (isTrialFullPreview) {
+    const webEnabled = tenant.catalogEnabled !== false;
+    return {
+      tier: explicitTier,
+      sectionLabel: explicitTier
+        ? `${getPlanDefinitionByTier(explicitTier).sectionBadge} · ${getPlanDefinitionByTier(explicitTier).shortName}`
+        : 'Prueba Gratis 30d (Acceso Full)',
+      isTrialFullPreview: true,
+      canAccessWebCatalog: webEnabled,
+      canAccessFullFeatures: true,
+    };
+  }
+
+  if (explicitTier === 'basico') {
+    return {
+      tier: 'basico',
+      sectionLabel: 'Sección 1 · Básico (Sin Web)',
+      isTrialFullPreview: false,
+      canAccessWebCatalog: false,
+      canAccessFullFeatures: false,
+    };
+  }
+
+  if (explicitTier === 'web') {
+    return {
+      tier: 'web',
+      sectionLabel: 'Sección 2 · Con Página Web',
+      isTrialFullPreview: false,
+      canAccessWebCatalog: tenant.catalogEnabled !== false,
+      canAccessFullFeatures: false,
+    };
+  }
+
+  // Empresas en Sección 3 ('full') o cuentas históricas sin restricción explícita conservan acceso completo
+  return {
+    tier: explicitTier || 'full',
+    sectionLabel: explicitTier === 'full' ? 'Sección 3 · Full (Todo Incluido)' : 'Acceso Completo',
+    isTrialFullPreview: false,
+    canAccessWebCatalog: tenant.catalogEnabled !== false,
+    canAccessFullFeatures: true,
+  };
+}
 
 export const MESES_ES = [
   'Enero',
@@ -65,6 +278,13 @@ export function ensureTenantSubscription(tenant: Tenant): TenantSubscription {
     return {
       monthlyFee: tenant.subscription.monthlyFee ?? 25000,
       currency: tenant.subscription.currency || '$',
+      planTier: tenant.subscription.planTier,
+      planSelectedAt: tenant.subscription.planSelectedAt,
+      lastPlanChange: tenant.subscription.lastPlanChange,
+      planChangeHistory: tenant.subscription.planChangeHistory,
+      termsAccepted: tenant.subscription.termsAccepted,
+      termsAcceptedAt: tenant.subscription.termsAcceptedAt,
+      termsVersion: tenant.subscription.termsVersion,
       paymentWindowStartDay: 1,
       paymentWindowEndDay: 5,
       lastPaidMonth: tenant.subscription.lastPaidMonth,
@@ -398,6 +618,8 @@ export function toggleTenantMonthlyPayment(
     receiptImageUrl?: string;
     verificationNote?: string;
     planType?: 'monthly' | 'annual';
+    planTier?: SubscriptionPlanTier;
+    planTierLabel?: string;
     monthsCount?: number;
   }
 ): Tenant {
@@ -405,6 +627,10 @@ export function toggleTenantMonthlyPayment(
   const planType: 'monthly' | 'annual' = paymentDetails?.planType === 'annual' ? 'annual' : 'monthly';
   const monthsCount = planType === 'annual' ? Math.max(12, Number(paymentDetails?.monthsCount) || 12) : 1;
   const todayStr = new Date().toISOString().split('T')[0];
+  const resolvedPlanTier = paymentDetails?.planTier || sub.planTier;
+  const resolvedPlanTierLabel =
+    paymentDetails?.planTierLabel ||
+    (resolvedPlanTier ? getPlanDefinitionByTier(resolvedPlanTier).name : undefined);
 
   const existingHistory = sub.paymentHistory || [];
 
@@ -417,6 +643,10 @@ export function toggleTenantMonthlyPayment(
     const totalPaidValue = amount || (planType === 'annual' ? (sub.monthlyFee || 25000) * 12 : sub.monthlyFee || 25000);
     const perMonthEquivalent = Math.round(totalPaidValue / monthsCount);
     const untilMonthKey = monthKeysToCover[monthKeysToCover.length - 1];
+    const nextMonthlyFee =
+      planType === 'monthly' && amount && amount > 0
+        ? amount
+        : sub.monthlyFee;
 
     const newRecords: TenantMonthlyPayment[] = monthKeysToCover.map((mk, idx) => {
       const mName = formatMonthKeyEs(mk);
@@ -428,6 +658,8 @@ export function toggleTenantMonthlyPayment(
         amountPaid: idx === 0 ? totalPaidValue : perMonthEquivalent,
         status: 'paid',
         planType,
+        planTier: resolvedPlanTier,
+        planTierLabel: resolvedPlanTierLabel,
         coveredMonthsCount: monthsCount,
         paymentMethod: paymentDetails?.paymentMethod || 'manual',
         mpPaymentId: paymentDetails?.mpPaymentId,
@@ -438,8 +670,8 @@ export function toggleTenantMonthlyPayment(
         notes:
           notes ||
           (planType === 'annual'
-            ? `Suscripción Anual (12 meses: ${formatMonthKeyEs(monthKey)} a ${formatMonthKeyEs(untilMonthKey)})`
-            : `Pago de abono mensual ${mName} registrado`),
+            ? `Suscripción Anual (12 meses: ${formatMonthKeyEs(monthKey)} a ${formatMonthKeyEs(untilMonthKey)})${resolvedPlanTierLabel ? ` · ${resolvedPlanTierLabel}` : ''}`
+            : `Pago de abono mensual ${mName}${resolvedPlanTierLabel ? ` · ${resolvedPlanTierLabel}` : ''}`),
         markedBy: adminName,
       };
     });
@@ -449,8 +681,17 @@ export function toggleTenantMonthlyPayment(
     return {
       ...tenant,
       status: 'active', // Pasa automáticamente de prueba/pausada a Funcionando
+      catalogEnabled:
+        resolvedPlanTier !== undefined
+          ? resolvedPlanTier !== 'basico'
+          : tenant.catalogEnabled,
       subscription: {
         ...sub,
+        monthlyFee: nextMonthlyFee,
+        planTier: resolvedPlanTier,
+        planSelectedAt: resolvedPlanTier
+          ? sub.planSelectedAt || new Date().toISOString()
+          : sub.planSelectedAt,
         isPaused: false,
         pausedAt: undefined,
         pauseReason: undefined,

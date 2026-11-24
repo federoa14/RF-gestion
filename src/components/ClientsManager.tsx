@@ -81,6 +81,7 @@ interface ClientsManagerProps {
   onQuickSendStatement?: (client: Client) => void;
   initialSection?: 'directory' | 'cold_radar' | 'web_clients';
   catalogEnabled?: boolean;
+  webLoyaltyEnabled?: boolean;
   catalogLoyaltyAccounts?: CatalogLoyaltyAccount[];
   catalogOrders?: CatalogPickupOrder[];
   catalogProducts?: CatalogProduct[];
@@ -107,6 +108,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
   onQuickSendStatement,
   initialSection = 'directory',
   catalogEnabled = false,
+  webLoyaltyEnabled,
   catalogLoyaltyAccounts = [],
   catalogOrders = [],
   catalogProducts = [],
@@ -115,12 +117,13 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
   onRefreshCatalogLoyaltyAccounts,
   showToast,
 }) => {
+  const canShowWebClients = webLoyaltyEnabled ?? catalogEnabled;
   const labels = getBusinessLabels(config);
   const isIndumentaria = config.businessRubro === 'indumentaria';
   const [sectionMode, setSectionMode] = useState<'directory' | 'cold_radar' | 'web_clients'>(
     isIndumentaria && initialSection === 'cold_radar'
       ? 'cold_radar'
-      : catalogEnabled && initialSection === 'web_clients'
+      : canShowWebClients && initialSection === 'web_clients'
       ? 'web_clients'
       : 'directory'
   );
@@ -132,14 +135,14 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
   React.useEffect(() => {
     if (sectionMode === 'cold_radar' && !isIndumentaria) {
       setSectionMode('directory');
-    } else if (sectionMode === 'web_clients' && !catalogEnabled) {
+    } else if (sectionMode === 'web_clients' && !canShowWebClients) {
       setSectionMode('directory');
     } else if (isIndumentaria && initialSection === 'cold_radar') {
       setSectionMode('cold_radar');
-    } else if (catalogEnabled && initialSection === 'web_clients') {
+    } else if (canShowWebClients && initialSection === 'web_clients') {
       setSectionMode('web_clients');
     }
-  }, [isIndumentaria, catalogEnabled, initialSection]);
+  }, [isIndumentaria, canShowWebClients, initialSection]);
 
   const coldClientsCount = React.useMemo(() => {
     if (!isIndumentaria) return 0;
@@ -360,7 +363,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
       </div>
 
       {/* Sub-navigation for Rubro Indumentaria and/or Web Catalog (Clientes Web con DNI) */}
-      {(isIndumentaria || catalogEnabled) && (
+      {(isIndumentaria || canShowWebClients) && (
         <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-[#0B1933] px-4 py-2.5 rounded-xl border border-[#CBD5E1] dark:border-[#B6C2D2]/20">
           <div className="inline-flex flex-wrap items-center gap-1 p-1 rounded-lg bg-[#F4F6F9] dark:bg-[#071021] border border-[#CBD5E1] dark:border-[#B6C2D2]/20">
             <button
@@ -389,7 +392,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
                 <span>Radar de Clientes Fríos ({coldClientsCount})</span>
               </button>
             )}
-            {catalogEnabled && (
+            {canShowWebClients && (
               <button
                 type="button"
                 onClick={() => {
@@ -417,7 +420,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
         </div>
       )}
 
-      {catalogEnabled && sectionMode === 'web_clients' ? (
+      {canShowWebClients && sectionMode === 'web_clients' ? (
         <WebLoyaltyClientsPanel
           loyaltyAccounts={catalogLoyaltyAccounts}
           orders={catalogOrders}

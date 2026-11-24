@@ -43,6 +43,7 @@ export interface WebLoyaltyCustomerInsight {
   customerName: string;
   customerPhone: string;
   pointsBalance: number;
+  storeCreditBalance: number;
   totalPointsEarned: number;
   totalPointsRedeemed: number;
   highestUnlockedTier: CatalogLoyaltyTier | null;
@@ -330,9 +331,11 @@ export function buildWebLoyaltyCustomerInsights(params: {
   upcomingEvent: { key: string; label: string; hint: string };
 } {
   const { loyaltyAccounts, orders, products, loyaltyTiers, nowDate = new Date() } = params;
-  const activeOrders = orders.filter((o) => o.status !== 'cancelado');
+  const activeOrders = orders.filter((o) => o.status !== 'cancelado' && o.status !== 'devuelto');
+  const getOrderNetAmount = (o: CatalogPickupOrder) =>
+    Math.max(0, (Number(o.totalAmount) || 0) - (Number(o.returnedAmount) || 0));
   const totalStoreWebRevenue = activeOrders.reduce(
-    (sum, o) => sum + (Number(o.totalAmount) || 0),
+    (sum, o) => sum + getOrderNetAmount(o),
     0
   );
 
@@ -413,7 +416,7 @@ export function buildWebLoyaltyCustomerInsights(params: {
     const resolvedName = (acc.customerName || latestOrder?.customerName || 'Cliente Web').trim();
     const resolvedPhone = (acc.customerPhone || latestOrder?.customerPhone || '').trim();
 
-    const totalSpent = dniOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+    const totalSpent = dniOrders.reduce((sum, o) => sum + getOrderNetAmount(o), 0);
     totalLoyaltyRevenue += totalSpent;
     const ordersCount = Math.max(dniOrders.length, acc.ordersCount || 0);
     const averageTicket =
@@ -453,7 +456,7 @@ export function buildWebLoyaltyCustomerInsights(params: {
         spent: 0,
       };
       prevSeason.ordersCount += 1;
-      prevSeason.spent += Number(order.totalAmount) || 0;
+      prevSeason.spent += getOrderNetAmount(order);
       commercialMap.set(season.key, prevSeason);
 
       const mSeg = getMonthSegment(order.createdAt);
@@ -465,7 +468,7 @@ export function buildWebLoyaltyCustomerInsights(params: {
         spent: 0,
       };
       prevMSeg.ordersCount += 1;
-      prevMSeg.spent += Number(order.totalAmount) || 0;
+      prevMSeg.spent += getOrderNetAmount(order);
       monthPeriodMap.set(mSeg.key, prevMSeg);
 
       const seenProductsInOrder = new Set<string>();
@@ -590,6 +593,7 @@ export function buildWebLoyaltyCustomerInsights(params: {
       customerName: resolvedName,
       customerPhone: resolvedPhone,
       pointsBalance: acc.pointsBalance,
+      storeCreditBalance: Math.max(0, Number(acc.storeCreditBalance) || 0),
       totalPointsEarned: acc.totalPointsEarned,
       totalPointsRedeemed: acc.totalPointsRedeemed,
       highestUnlockedTier: highestUnlocked,

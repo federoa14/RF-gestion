@@ -19,10 +19,14 @@ import {
   Headphones,
   Database,
   Upload,
+  FileText,
+  ShieldCheck,
 } from 'lucide-react';
 import { PlatformUser, Tenant, BusinessRubro } from '../types';
 import { RUBRO_PROFILES } from '../utils/businessMode';
 import { ContactChannelsModal } from './ContactChannelsModal';
+import { TermsConditionsModal, TermsConditionsScrollBox } from './TermsConditionsModal';
+import { TERMS_VERSION } from '../utils/termsAndConditions';
 import { importInternalDatabaseBackup } from '../utils/localInternalDb';
 import {
   authenticateUser,
@@ -66,7 +70,15 @@ const PROVINCIAS_ARG = [
 ];
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('trial') === '1' || params.get('register') === '1') {
+        return 'register';
+      }
+    }
+    return 'login';
+  });
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -88,6 +100,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [regError, setRegError] = useState<string | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [regAcceptedTerms, setRegAcceptedTerms] = useState(false);
+  const [showInlineTermsPreview, setShowInlineTermsPreview] = useState(false);
+  const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
 
   // Password Recovery Modal State
   const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
@@ -159,6 +174,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setRegError('La contraseña debe tener al menos 4 caracteres.');
       return;
     }
+    if (regEmail.trim() && !regEmail.includes('@')) {
+      setRegError('Ingresá un correo electrónico válido o dejalo vacío.');
+      return;
+    }
+    if (!regAcceptedTerms) {
+      setRegError('Debés leer y aceptar los Términos y Condiciones de Uso y Manejo para crear tu cuenta.');
+      return;
+    }
 
     setIsRegistering(true);
     try {
@@ -173,6 +196,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         city: regCity,
         province: regProvince,
         businessRubro: regBusinessRubro,
+        acceptedTerms: true,
+        termsAcceptedAt: new Date().toISOString(),
+        termsVersion: TERMS_VERSION,
       });
 
       if (!res.success || !res.user || !res.tenant) {
@@ -442,14 +468,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   </span>
                 </div>
                 <p className="text-xs text-[#94A3B8] mt-1">
-                  Creá tu distribuidora al instante con acceso completo durante 30 días sin cargo. Al finalizar, elegís si continuar o pausar la cuenta.
+                  Creá tu perfil al instante con acceso completo durante 30 días sin cargo. Al cumplirse los 30 días, se habilitará la opción para generar tu pago y continuar operando o pausar la cuenta.
                 </p>
               </div>
 
               <div className="mb-4 p-3 rounded-xl bg-[#0F2142] border border-[#B6C2D2]/25 flex items-center gap-2.5 text-xs text-[#E2E8F0]">
                 <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>
-                  Activación inmediata: se crea tu espacio aislado y apareces como cuenta <strong>A Prueba</strong> hasta elegir continuar.
+                  Activación inmediata: tu cuenta figura como <strong>A Prueba (30 días)</strong> y al vencer podrás generar el pago por Mercado Pago o transferencia.
                 </span>
               </div>
 
@@ -666,13 +692,72 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   </div>
                 </div>
 
+                {/* Términos y Condiciones de Uso y Manejo obligatorios al crear la cuenta */}
+                <div className="p-3.5 rounded-xl bg-[#071021] border border-[#B6C2D2]/25 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-white">
+                      <ShieldCheck className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span>Términos y Condiciones de Uso y Manejo</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowInlineTermsPreview((prev) => !prev)}
+                        className="text-[11px] font-semibold text-sky-300 hover:text-sky-200 underline cursor-pointer"
+                      >
+                        {showInlineTermsPreview ? 'Ocultar resumen' : 'Ver aquí'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsTermsModalOpen(true)}
+                        className="px-2 py-1 rounded-lg bg-[#13264A] hover:bg-[#1B3566] border border-sky-400/30 text-[11px] font-bold text-sky-200 inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <FileText className="w-3 h-3" />
+                        <span>Leer completos</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {showInlineTermsPreview && (
+                    <TermsConditionsScrollBox variant="dark" maxHeightClass="max-h-44" />
+                  )}
+
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-[#0B1933] border border-[#B6C2D2]/20 cursor-pointer hover:border-sky-400/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={regAcceptedTerms}
+                      onChange={(e) => {
+                        setRegAcceptedTerms(e.target.checked);
+                        if (e.target.checked && regError?.includes('Términos')) {
+                          setRegError(null);
+                        }
+                      }}
+                      className="mt-0.5 rounded border-slate-500 text-emerald-500"
+                    />
+                    <span className="text-[11px] text-[#E2E8F0] leading-snug">
+                      He leído y acepto los{' '}
+                      <button
+                        type="button"
+                        onClick={(ev) => {
+                          ev.preventDefault();
+                          setIsTermsModalOpen(true);
+                        }}
+                        className="font-bold text-sky-300 underline cursor-pointer"
+                      >
+                        Términos y Condiciones de Uso y Manejo
+                      </button>{' '}
+                      del sistema (v{TERMS_VERSION}), incluyendo la prueba gratuita de 30 días y las reglas de cambio entre planes.
+                    </span>
+                  </label>
+                </div>
+
                 <button
                   type="submit"
-                  disabled={isRegistering}
-                  className="w-full py-3 px-4 rounded-xl bg-[#E2E8F0] hover:bg-white text-[#091428] font-bold text-sm shadow-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+                  disabled={isRegistering || !regAcceptedTerms}
+                  className="w-full py-3 px-4 rounded-xl bg-[#E2E8F0] hover:bg-white text-[#091428] font-bold text-sm shadow-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer"
                 >
                   <UserPlus className="w-4 h-4" />
-                  <span>{isRegistering ? 'Creando cuenta de 30 días...' : 'Comenzar Prueba Gratis de 30 Días'}</span>
+                  <span>{isRegistering ? 'Creando cuenta de 30 días...' : 'Aceptar y Comenzar Prueba Gratis (30 Días)'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </form>
@@ -920,6 +1005,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           </div>
         </div>
       )}
+      <TermsConditionsModal
+        isOpen={isTermsModalOpen}
+        onClose={() => setIsTermsModalOpen(false)}
+        contextTitle="Términos y Condiciones · Alta de Cuenta (30 Días Gratis)"
+        onAcceptAndClose={() => setRegAcceptedTerms(true)}
+      />
     </div>
   );
 };

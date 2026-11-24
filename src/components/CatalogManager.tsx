@@ -49,9 +49,17 @@ import {
   BarChart3,
   Award,
   UserCheck,
+  Flame,
+  QrCode,
+  RotateCcw,
+  ShoppingCart,
+  Lock,
+  Crown,
 } from 'lucide-react';
 import {
+  CatalogAbandonedCart,
   CatalogCoupon,
+  CatalogGiftCard,
   CatalogLoyaltyAccount,
   CatalogLoyaltyTier,
   CatalogOrderStageNotification,
@@ -64,25 +72,31 @@ import {
   DistributorConfig,
   OnlineCatalogSettings,
   SaleLineItem,
+  SubscriptionPlanTier,
   Tenant,
 } from '../types';
 import { formatCurrency } from '../utils/alerts';
 import {
   CatalogOrderProcessStage,
   createWhatsAppUrl,
+  generateAbandonedCartRecoveryWhatsAppMessage,
   generateCatalogBirthdayPromoWhatsAppMessage,
   generateCatalogOrderCustomerProcessMessage,
   generateCatalogPromoClubWhatsAppMessage,
+  generateGiftCardWhatsAppMessage,
   generatePaymentReceiptWhatsAppMessage,
   generateStockAlertRestockWhatsAppMessage,
 } from '../utils/whatsapp';
 import {
   buildPublicCatalogHandle,
+  normalizeGiftCardCode,
   notifyCatalogOrderCustomerStageViaServer,
   notifyCatalogStockAlertViaServer,
   sendCatalogPromoWhatsAppViaServer,
   syncCatalogOrderToSupabase,
   testMerchantMercadoPagoConnection,
+  upsertCatalogGiftCardToSupabase,
+  upsertPublicAbandonedCartToSupabase,
   verifyCatalogTransferReceiptViaServer,
 } from '../utils/supabaseServices';
 import {
@@ -101,6 +115,7 @@ import {
   getUpcomingBirthdaySubscribers,
   getVariantStock,
   hasProductVariants,
+  isProductFlashSaleActive,
   isProductFullyOutOfStock,
   normalizeDni,
   normalizeLoyaltyTiers,
@@ -116,10 +131,15 @@ import {
   getCatalogRubroPreset,
   normalizeFilterList,
 } from '../utils/catalogRubros';
+import {
+  PLAN_WEB_MAX_PRODUCTS,
+  PLAN_WEB_MAX_RUBROS,
+} from '../utils/tenantSubscription';
 import { BrandMark } from './BrandMark';
 import type { ReceiptModalData } from './PaymentReceiptModal';
 import { WebOrderDetailModal } from './WebOrderDetailModal';
 import { WebLoyaltyClientsPanel } from './WebLoyaltyClientsPanel';
+import { QrCodeSvg } from './QrCodeSvg';
 
 interface CatalogManagerProps {
   config: DistributorConfig;
@@ -130,6 +150,8 @@ interface CatalogManagerProps {
   stockAlerts?: CatalogStockAlertRequest[];
   promoSubscribers?: CatalogPromoSubscriber[];
   loyaltyAccounts?: CatalogLoyaltyAccount[];
+  abandonedCarts?: CatalogAbandonedCart[];
+  giftCards?: CatalogGiftCard[];
   activeUserName?: string;
   onSaveSettings: (next: OnlineCatalogSettings) => void;
   onSaveMerchantPaymentConfig?: (paymentCfg: {
@@ -145,15 +167,34 @@ interface CatalogManagerProps {
   onSaveStockAlerts?: (next: CatalogStockAlertRequest[]) => void;
   onSavePromoSubscribers?: (next: CatalogPromoSubscriber[]) => void;
   onSaveLoyaltyAccounts?: (next: CatalogLoyaltyAccount[]) => void;
+  onSaveAbandonedCarts?: (next: CatalogAbandonedCart[]) => void;
+  onSaveGiftCards?: (next: CatalogGiftCard[]) => void;
   onRefreshOrders?: () => Promise<void>;
   onRefreshStockAlerts?: () => Promise<void>;
   onRefreshPromoSubscribers?: () => Promise<void>;
   onRefreshLoyaltyAccounts?: () => Promise<void>;
+  onRefreshAbandonedCarts?: () => Promise<void>;
+  onRefreshGiftCards?: () => Promise<void>;
   onBillOrder?: (order: CatalogPickupOrder) => void;
   onOpenReceipt?: (receipt: ReceiptModalData) => void;
+  onOpenReturnModal?: (order: CatalogPickupOrder) => void;
   onOpenPublicPreview: (handle: string) => void;
   onOpenEditBrand?: () => void;
+  planFeatureAccess?: { tier?: SubscriptionPlanTier; canAccessFullFeatures: boolean };
+  onRequestUpgradePlan?: (ctx?: {
+    reasonKey: 'limit_rubros' | 'limit_products' | 'full_feature';
+    title?: string;
+    detail?: string;
+  }) => void;
   showToast: (msg: string) => void;
+}
+
+function toDatetimeLocalInput(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 
@@ -243,6 +284,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   stockAlerts = [],
   promoSubscribers = [],
   loyaltyAccounts = [],
+  abandonedCarts = [],
+  giftCards = [],
   activeUserName,
   onSaveSettings,
   onSaveMerchantPaymentConfig,
@@ -251,20 +294,29 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   onSaveStockAlerts,
   onSavePromoSubscribers,
   onSaveLoyaltyAccounts,
+  onSaveAbandonedCarts,
+  onSaveGiftCards,
   onRefreshOrders,
   onRefreshStockAlerts,
   onRefreshPromoSubscribers,
   onRefreshLoyaltyAccounts,
+  onRefreshAbandonedCarts,
+  onRefreshGiftCards,
   onBillOrder,
   onOpenReceipt,
+  onOpenReturnModal,
   onOpenPublicPreview,
   onOpenEditBrand,
+  planFeatureAccess,
+  onRequestUpgradePlan,
   showToast,
 }) => {
   const [subTab, setSubTab] = useState<
     | 'productos'
     | 'pedidos'
     | 'avisos_stock'
+    | 'carritos_abandonados'
+    | 'gift_cards'
     | 'club_promos'
     | 'clientes_web'
     | 'estadisticas'
@@ -449,6 +501,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [additionalImageUrlInput, setAdditionalImageUrlInput] = useState('');
   const [productWholesaleMinQty, setProductWholesaleMinQty] = useState('');
   const [productWholesalePrice, setProductWholesalePrice] = useState('');
+  const [productFlashSalePrice, setProductFlashSalePrice] = useState('');
+  const [productFlashSaleEndsAt, setProductFlashSaleEndsAt] = useState('');
+  const [productIsOutlet, setProductIsOutlet] = useState(false);
   const [productLowStockThreshold, setProductLowStockThreshold] = useState('');
   const [productLoyaltyPoints, setProductLoyaltyPoints] = useState('');
   const [productAvailable, setProductAvailable] = useState(true);
@@ -456,6 +511,22 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [isCompressingImage, setIsCompressingImage] = useState(false);
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<CatalogPickupOrder | null>(null);
   const [verifyingOrderId, setVerifyingOrderId] = useState<string | null>(null);
+
+  // Carritos Abandonados (#1) & Gift Cards QR (#3)
+  const [isRefreshingCarts, setIsRefreshingCarts] = useState(false);
+  const [cartFilterScope, setCartFilterScope] = useState<'pending' | 'all'>('pending');
+  const [cartIncentiveCouponCode, setCartIncentiveCouponCode] = useState('');
+  const [isRefreshingGiftCards, setIsRefreshingGiftCards] = useState(false);
+  const [gcSearchQuery, setGcSearchQuery] = useState('');
+  const [gcInitialAmount, setGcInitialAmount] = useState('');
+  const [gcCustomCode, setGcCustomCode] = useState('');
+  const [gcRecipientName, setGcRecipientName] = useState('');
+  const [gcRecipientPhone, setGcRecipientPhone] = useState('');
+  const [gcBuyerName, setGcBuyerName] = useState('');
+  const [gcBuyerDni, setGcBuyerDni] = useState('');
+  const [gcMessage, setGcMessage] = useState('');
+  const [gcExpiresAt, setGcExpiresAt] = useState('');
+  const [selectedGiftCardForQr, setSelectedGiftCardForQr] = useState<CatalogGiftCard | null>(null);
   const [newCouponCode, setNewCouponCode] = useState('');
   const [newCouponType, setNewCouponType] = useState<'percent' | 'fixed'>('percent');
   const [newCouponValue, setNewCouponValue] = useState('');
@@ -569,6 +640,27 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     () => normalizeFilterList(settings.customSubfilters),
     [settings.customSubfilters]
   );
+
+  const isBasicWebPlan = Boolean(
+    planFeatureAccess && planFeatureAccess.tier === 'web' && !planFeatureAccess.canAccessFullFeatures
+  );
+
+  const currentDistinctRubros = useMemo(
+    () => normalizeFilterList([...activeRubroFilters, ...savedCustomSubfilters]),
+    [activeRubroFilters, savedCustomSubfilters]
+  );
+
+  const requestPlanUpgrade = (
+    reasonKey: 'limit_rubros' | 'limit_products' | 'full_feature',
+    title?: string,
+    detail?: string
+  ) => {
+    if (onRequestUpgradePlan) {
+      onRequestUpgradePlan({ reasonKey, title, detail });
+    } else {
+      showToast(title || 'Esta capacidad requiere ampliar a Sección 3 · Plan Full.');
+    }
+  };
 
   const activeSubfilters = useMemo(
     () =>
@@ -790,6 +882,17 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const handleAddCustomSubfilter = (rawValue: string) => {
     const clean = rawValue.trim();
     if (!clean) return;
+    if (isBasicWebPlan) {
+      const nextCombined = normalizeFilterList([...currentDistinctRubros, clean]);
+      if (nextCombined.length > PLAN_WEB_MAX_RUBROS) {
+        requestPlanUpgrade(
+          'limit_rubros',
+          `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
+          `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en la tienda básica (actualmente tenés ${currentDistinctRubros.length}). Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+        );
+        return;
+      }
+    }
     const nextSubfilters = normalizeFilterList([...savedCustomSubfilters, clean]);
     const nextSettings: OnlineCatalogSettings = {
       ...draftSettings,
@@ -838,6 +941,17 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const handleAddModalSubfilter = () => {
     const clean = modalNewSubfilter.trim();
     if (!clean) return;
+    if (isBasicWebPlan) {
+      const nextCombined = normalizeFilterList([...currentDistinctRubros, clean]);
+      if (nextCombined.length > PLAN_WEB_MAX_RUBROS) {
+        requestPlanUpgrade(
+          'limit_rubros',
+          `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
+          `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros. Para agregar "${clean}", pasá a Sección 3 · Plan Full.`
+        );
+        return;
+      }
+    }
     setProductSubfilters((prev) => normalizeFilterList([...prev, clean]));
     if (!savedCustomSubfilters.some((sf) => sf.toLowerCase() === clean.toLowerCase())) {
       const nextSubfilters = normalizeFilterList([...savedCustomSubfilters, clean]);
@@ -856,6 +970,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   };
 
   const openNewProductModal = () => {
+    if (isBasicWebPlan && rubroProducts.length >= PLAN_WEB_MAX_PRODUCTS) {
+      requestPlanUpgrade(
+        'limit_products',
+        `Límite de ${PLAN_WEB_MAX_PRODUCTS} prendas / objetos alcanzado`,
+        `Ya cargaste ${rubroProducts.length} de ${PLAN_WEB_MAX_PRODUCTS} prendas u objetos permitidos en Sección 2 · Página Web Básica. Ampliá a Sección 3 · Plan Full para cargar productos ilimitados.`
+      );
+      return;
+    }
     setEditingProduct(null);
     setProductName('');
     setProductSku('');
@@ -876,6 +998,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setAdditionalImageUrlInput('');
     setProductWholesaleMinQty('');
     setProductWholesalePrice('');
+    setProductFlashSalePrice('');
+    setProductFlashSaleEndsAt('');
+    setProductIsOutlet(false);
     setProductLowStockThreshold('');
     setProductLoyaltyPoints('');
     setProductAvailable(true);
@@ -918,6 +1043,13 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         ? String(product.wholesalePrice)
         : ''
     );
+    setProductFlashSalePrice(
+      typeof product.flashSalePrice === 'number' && product.flashSalePrice >= 0
+        ? String(product.flashSalePrice)
+        : ''
+    );
+    setProductFlashSaleEndsAt(toDatetimeLocalInput(product.flashSaleEndsAt));
+    setProductIsOutlet(Boolean(product.isOutlet));
     setProductLowStockThreshold(
       typeof product.lowStockThreshold === 'number' ? String(product.lowStockThreshold) : ''
     );
@@ -991,6 +1123,15 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
   const handleSubmitProduct = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isBasicWebPlan && !editingProduct && rubroProducts.length >= PLAN_WEB_MAX_PRODUCTS) {
+      setIsProductModalOpen(false);
+      requestPlanUpgrade(
+        'limit_products',
+        `Límite de ${PLAN_WEB_MAX_PRODUCTS} prendas / objetos alcanzado`,
+        `Ya cargaste ${rubroProducts.length} de ${PLAN_WEB_MAX_PRODUCTS} prendas u objetos permitidos en Sección 2. Ampliá a Sección 3 · Plan Full para seguir agregando artículos.`
+      );
+      return;
+    }
     const cleanName = productName.trim();
     const numericPrice = Number(String(productPrice).replace(',', '.'));
     if (!cleanName) {
@@ -1050,6 +1191,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
     const cleanSubfilters = normalizeFilterList(productSubfilters);
     const cleanCategory = productCategory.trim() || activeRubroFilters[0] || 'General';
+    if (isBasicWebPlan) {
+      const projectedRubros = normalizeFilterList([
+        ...currentDistinctRubros,
+        cleanCategory,
+        ...cleanSubfilters,
+      ]);
+      if (projectedRubros.length > PLAN_WEB_MAX_RUBROS) {
+        requestPlanUpgrade(
+          'limit_rubros',
+          `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
+          `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/categorías. Para crear una nueva categoría o subfiltro fuera de tus ${PLAN_WEB_MAX_RUBROS} activos, ampliá a Sección 3 · Plan Full.`
+        );
+        return;
+      }
+    }
     const now = new Date().toISOString();
     const cleanSku = productSku.trim() || undefined;
     const cleanAdditionalImages = productAdditionalImages
@@ -1058,10 +1214,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       .slice(0, 3);
 
     const parsedWholesaleMinQty =
-      productWholesaleMinQty.trim() !== '' && Number(productWholesaleMinQty) > 1
+      !isBasicWebPlan && productWholesaleMinQty.trim() !== '' && Number(productWholesaleMinQty) > 1
         ? Math.floor(Number(productWholesaleMinQty))
         : undefined;
     const parsedWholesalePrice =
+      !isBasicWebPlan &&
       parsedWholesaleMinQty &&
       productWholesalePrice.trim() !== '' &&
       Number.isFinite(Number(productWholesalePrice.replace(',', '.'))) &&
@@ -1075,10 +1232,24 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         ? Math.floor(Number(productLowStockThreshold))
         : undefined;
     const parsedProductLoyaltyPoints =
+      !isBasicWebPlan &&
       productLoyaltyPoints.trim() !== '' &&
       Number.isFinite(Number(productLoyaltyPoints)) &&
       Number(productLoyaltyPoints) >= 0
         ? Math.floor(Number(productLoyaltyPoints))
+        : undefined;
+    const rawFlashPrice = productFlashSalePrice.trim().replace(',', '.');
+    const parsedFlashSalePrice =
+      !isBasicWebPlan &&
+      rawFlashPrice !== '' &&
+      Number.isFinite(Number(rawFlashPrice)) &&
+      Number(rawFlashPrice) >= 0 &&
+      Number(rawFlashPrice) < numericPrice
+        ? Number(rawFlashPrice)
+        : undefined;
+    const parsedFlashSaleEndsAt =
+      !isBasicWebPlan && parsedFlashSalePrice !== undefined && productFlashSaleEndsAt.trim()
+        ? new Date(productFlashSaleEndsAt.trim()).toISOString()
         : undefined;
 
     if (editingProduct) {
@@ -1097,6 +1268,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               name: cleanName,
               sku: cleanSku,
               price: numericPrice,
+              flashSalePrice: parsedFlashSalePrice,
+              flashSaleEndsAt: parsedFlashSaleEndsAt,
+              isOutlet: isBasicWebPlan ? false : productIsOutlet,
               wholesaleMinQty: parsedWholesalePrice ? parsedWholesaleMinQty : undefined,
               wholesalePrice: parsedWholesalePrice,
               lowStockThreshold: parsedLowStockThreshold,
@@ -1111,7 +1285,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               imageUrl: productImageUrl.trim() || undefined,
               additionalImageUrls: cleanAdditionalImages.length > 0 ? cleanAdditionalImages : undefined,
               available: productAvailable,
-              featured: productFeatured,
+              featured: isBasicWebPlan ? false : productFeatured,
               updatedAt: now,
             }
           : p
@@ -1130,6 +1304,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         name: cleanName,
         sku: cleanSku,
         price: numericPrice,
+        flashSalePrice: parsedFlashSalePrice,
+        flashSaleEndsAt: parsedFlashSaleEndsAt,
+        isOutlet: isBasicWebPlan ? false : productIsOutlet,
         wholesaleMinQty: parsedWholesalePrice ? parsedWholesaleMinQty : undefined,
         wholesalePrice: parsedWholesalePrice,
         lowStockThreshold: parsedLowStockThreshold,
@@ -1144,7 +1321,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         imageUrl: productImageUrl.trim() || undefined,
         additionalImageUrls: cleanAdditionalImages.length > 0 ? cleanAdditionalImages : undefined,
         available: productAvailable,
-        featured: productFeatured,
+        featured: isBasicWebPlan ? false : productFeatured,
         createdAt: now,
         updatedAt: now,
       };
@@ -1339,12 +1516,25 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       return;
     }
     const cleanRubroFilters = normalizeFilterList(draftSettings.rubroFilters);
+    const resolvedRubroFilters =
+      cleanRubroFilters.length > 0 ? cleanRubroFilters : rubroPreset.defaultFilters;
+    const cleanCustomSubfilters = normalizeFilterList(draftSettings.customSubfilters);
+    if (isBasicWebPlan) {
+      const combined = normalizeFilterList([...resolvedRubroFilters, ...cleanCustomSubfilters]);
+      if (combined.length > PLAN_WEB_MAX_RUBROS) {
+        requestPlanUpgrade(
+          'limit_rubros',
+          `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
+          `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Quitá alguno antes de guardar o pasá a Plan Full.`
+        );
+        return;
+      }
+    }
     const next: OnlineCatalogSettings = {
       ...draftSettings,
       catalogRubro: activeCatalogRubro,
-      rubroFilters:
-        cleanRubroFilters.length > 0 ? cleanRubroFilters : rubroPreset.defaultFilters,
-      customSubfilters: normalizeFilterList(draftSettings.customSubfilters),
+      rubroFilters: resolvedRubroFilters,
+      customSubfilters: cleanCustomSubfilters,
       allowPickup: draftSettings.allowPickup !== false,
       allowDelivery: draftSettings.allowDelivery !== false,
       storeName: draftSettings.storeName?.trim() || config.distributorName || 'Mi Catálogo',
@@ -1358,7 +1548,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         config.senderPhone ||
         config.distributorPhone ||
         '',
-      enableLoyaltyProgram: Boolean(draftSettings.enableLoyaltyProgram),
+      cashOrTransferDiscountPercent: isBasicWebPlan ? 0 : draftSettings.cashOrTransferDiscountPercent,
+      enablePromoClub: isBasicWebPlan ? false : draftSettings.enablePromoClub,
+      enableLoyaltyProgram: isBasicWebPlan ? false : Boolean(draftSettings.enableLoyaltyProgram),
       loyaltyPointsPerUnit: Math.max(
         0,
         Math.floor(Number(draftSettings.loyaltyPointsPerUnit) || 0)
@@ -1857,6 +2049,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
           (o) =>
             o.id !== order.id &&
             o.status !== 'cancelado' &&
+            o.status !== 'devuelto' &&
             (o.transferOperationId || o.transferReference)
         )
         .map((o) => ({
@@ -2307,6 +2500,29 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     // Persist newly discovered subfilters/categories cleanly if needed
     const nextFilters = normalizeFilterList(Array.from(discoveredFilters));
     const nextSubs = normalizeFilterList(Array.from(discoveredSubfilters));
+    if (isBasicWebPlan) {
+      if (rubroProducts.length + createdCount > PLAN_WEB_MAX_PRODUCTS) {
+        setIsCsvImportModalOpen(false);
+        requestPlanUpgrade(
+          'limit_products',
+          `La importación supera el límite de ${PLAN_WEB_MAX_PRODUCTS} prendas / objetos`,
+          `Tenés ${rubroProducts.length} artículos cargados y querés sumar ${createdCount} nuevos (total ${
+            rubroProducts.length + createdCount
+          }). El plan Sección 2 permite hasta ${PLAN_WEB_MAX_PRODUCTS}. Ampliá a Plan Full para importación ilimitada.`
+        );
+        return;
+      }
+      const nextCombinedRubros = normalizeFilterList([...nextFilters, ...nextSubs]);
+      if (nextCombinedRubros.length > PLAN_WEB_MAX_RUBROS) {
+        setIsCsvImportModalOpen(false);
+        requestPlanUpgrade(
+          'limit_rubros',
+          `La importación supera el límite de ${PLAN_WEB_MAX_RUBROS} rubros`,
+          `Los rubros/subfiltros del archivo sumarían ${nextCombinedRubros.length} categorías en total y la Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS}. Ampliá a Plan Full para rubros ilimitados.`
+        );
+        return;
+      }
+    }
     if (
       nextSubs.length !== savedCustomSubfilters.length ||
       nextFilters.length !== activeRubroFilters.length
@@ -2723,7 +2939,17 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setSubTab('avisos_stock')}
+              onClick={() => {
+                if (isBasicWebPlan) {
+                  requestPlanUpgrade(
+                    'full_feature',
+                    'Avisos de Stock y Seguimiento de Clientes · Exclusivo Plan Full',
+                    'En Sección 2 no está incluido el seguimiento de clientes ni captura de solicitudes de stock. Ampliá a Sección 3 · Plan Full para activarlo.'
+                  );
+                  return;
+                }
+                setSubTab('avisos_stock');
+              }}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'avisos_stock'
                   ? 'bg-white text-slate-900 shadow-xs'
@@ -2732,15 +2958,80 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             >
               <Bell className="w-3.5 h-3.5 text-amber-600" />
               <span>Avisos de Stock</span>
-              {pendingStockAlertsCount > 0 && (
+              {!isBasicWebPlan && pendingStockAlertsCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded bg-amber-600 text-white text-[10px] font-mono tabular-nums">
                   {pendingStockAlertsCount}
                 </span>
               )}
+              {isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
             </button>
             <button
               type="button"
-              onClick={() => setSubTab('club_promos')}
+              onClick={() => {
+                if (isBasicWebPlan) {
+                  requestPlanUpgrade(
+                    'full_feature',
+                    'Carritos Abandonados · Exclusivo Plan Full',
+                    'El seguimiento y recupero de carritos abandonados está disponible en Sección 3 · Plan Full.'
+                  );
+                  return;
+                }
+                setSubTab('carritos_abandonados');
+                void onRefreshAbandonedCarts?.();
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'carritos_abandonados'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ShoppingCart className="w-3.5 h-3.5 text-amber-600" />
+              <span>Carritos</span>
+              {!isBasicWebPlan &&
+                abandonedCarts.filter((c) => c.status === 'abandoned' || c.status === 'reminded').length > 0 && (
+                <span className="px-1.5 py-0.2 rounded bg-amber-600 text-white text-[10px] font-mono tabular-nums">
+                  {abandonedCarts.filter((c) => c.status === 'abandoned' || c.status === 'reminded').length}
+                </span>
+              )}
+              {isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (isBasicWebPlan) {
+                  requestPlanUpgrade(
+                    'full_feature',
+                    'Gift Cards QR · Exclusivo Plan Full',
+                    'La emisión y canje de Gift Cards Digitales con QR requiere Sección 3 · Plan Full.'
+                  );
+                  return;
+                }
+                setSubTab('gift_cards');
+                void onRefreshGiftCards?.();
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'gift_cards'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <QrCode className="w-3.5 h-3.5 text-indigo-700" />
+              <span>Gift Cards QR ({giftCards.filter((g) => g.status === 'active' && g.remainingBalance > 0).length})</span>
+              {isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (isBasicWebPlan) {
+                  requestPlanUpgrade(
+                    'full_feature',
+                    'SuperClub y Club de Promos · Exclusivo Plan Full',
+                    'En Sección 2 no está incluido el SuperClub ni campañas de descuentos/cupones. Pasá a Sección 3 · Plan Full para activarlo.'
+                  );
+                  return;
+                }
+                setSubTab('club_promos');
+              }}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'club_promos'
                   ? 'bg-white text-slate-900 shadow-xs'
@@ -2748,11 +3039,20 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               }`}
             >
               <Gift className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Club Promos ({promoSubscribers.length})</span>
+              <span>SuperClub ({promoSubscribers.length})</span>
+              {isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
             </button>
             <button
               type="button"
               onClick={() => {
+                if (isBasicWebPlan) {
+                  requestPlanUpgrade(
+                    'full_feature',
+                    'Seguimiento de Clientes Web y Puntos DNI · Exclusivo Plan Full',
+                    'El seguimiento de clientes web y el programa de puntos por DNI están disponibles en Sección 3 · Plan Full.'
+                  );
+                  return;
+                }
                 setSubTab('clientes_web');
                 void onRefreshOrders?.();
                 void onRefreshLoyaltyAccounts?.();
@@ -2765,12 +3065,15 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             >
               <UserCheck className="w-3.5 h-3.5 text-indigo-700" />
               <span>Clientes Web ({loyaltyAccounts.length})</span>
+              {isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
             </button>
             <button
               type="button"
               onClick={() => {
                 setSubTab('estadisticas');
-                void onRefreshLoyaltyAccounts?.();
+                if (!isBasicWebPlan) {
+                  void onRefreshLoyaltyAccounts?.();
+                }
               }}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'estadisticas'
@@ -2830,6 +3133,39 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </span>
           </div>
         </div>
+
+        {isBasicWebPlan && (
+          <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="text-xs font-bold text-[#0B1933] flex items-center gap-2 flex-wrap">
+                <span>Sección 2 · Página Web Básica (Pagos en tienda y manejo de stock)</span>
+                <span className="font-mono tabular-nums text-[11px] font-bold text-slate-700">
+                  · Rubros: {currentDistinctRubros.length}/{PLAN_WEB_MAX_RUBROS}
+                </span>
+                <span className="font-mono tabular-nums text-[11px] font-bold text-slate-700">
+                  · Prendas/Objetos: {rubroProducts.length}/{PLAN_WEB_MAX_PRODUCTS}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600">
+                Sin burbujas de ofertas, seguimiento de clientes, SuperClub ni descuentos. Si necesitás más de {PLAN_WEB_MAX_RUBROS} rubros, más de {PLAN_WEB_MAX_PRODUCTS} artículos o herramientas de fidelización, podés ampliar al Plan Full en un clic.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                requestPlanUpgrade(
+                  'full_feature',
+                  'Ampliar capacidad y funciones a Sección 3 · Plan Full',
+                  'Desbloqueá rubros y productos ilimitados, burbujas/banners de ofertas, seguimiento completo de clientes, SuperClub, Puntos por DNI y descuentos.'
+                )
+              }
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer shrink-0 whitespace-nowrap self-start lg:self-auto"
+            >
+              <Crown className="w-3.5 h-3.5 text-amber-300" />
+              <span>Aumentar a Plan Full</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* SUB-TAB 1: PRODUCTOS */}
@@ -3174,7 +3510,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
           )}
 
-          {restockedPendingAlerts.length > 0 && (
+          {!isBasicWebPlan && restockedPendingAlerts.length > 0 && (
             <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start gap-2.5">
                 <Bell className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
@@ -3292,10 +3628,26 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           <span className="text-[11px] font-medium">Sin foto cargada</span>
                         </div>
                       )}
-                      {product.featured && (
+                      {!isBasicWebPlan && product.featured && (
                         <span className="absolute top-2.5 left-2.5 px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 text-[10px] font-bold inline-flex items-center gap-1 shadow-xs">
                           <Star className="w-3 h-3 fill-current" />
                           <span>Destacado</span>
+                        </span>
+                      )}
+                      {!isBasicWebPlan && (isProductFlashSaleActive(product) || product.isOutlet) && (
+                        <span
+                          className={`absolute ${
+                            product.featured ? 'top-9' : 'top-2.5'
+                          } left-2.5 px-2 py-0.5 rounded-md ${
+                            isProductFlashSaleActive(product)
+                              ? 'bg-rose-600 text-white'
+                              : 'bg-amber-600 text-white'
+                          } text-[10px] font-bold inline-flex items-center gap-1 shadow-xs`}
+                        >
+                          <Flame className="w-3 h-3" />
+                          <span>
+                            {isProductFlashSaleActive(product) ? 'Oferta Relámpago' : 'Outlet'}
+                          </span>
                         </span>
                       )}
                       {galleryImages.length > 1 && (
@@ -3352,7 +3704,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         <h3 className="text-sm font-bold text-slate-900 leading-snug line-clamp-2">
                           {product.name}
                         </h3>
-                        {product.wholesaleMinQty && product.wholesalePrice ? (
+                        {!isBasicWebPlan && isProductFlashSaleActive(product) && (
+                          <div className="text-[11px] font-bold text-rose-700 font-mono tabular-nums flex items-center gap-1.5 flex-wrap">
+                            <span>
+                              Flash: {formatCurrency(product.flashSalePrice || 0, currency)}
+                            </span>
+                            {product.flashSaleEndsAt && (
+                              <span className="text-[10px] font-sans text-rose-600">
+                                (hasta {new Date(product.flashSaleEndsAt).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {!isBasicWebPlan && product.wholesaleMinQty && product.wholesalePrice ? (
                           <div className="text-[11px] font-semibold text-indigo-700 font-mono tabular-nums">
                             Mayorista x{product.wholesaleMinQty}+ u.: {formatCurrency(product.wholesalePrice, currency)} c/u
                           </div>
@@ -4024,8 +4388,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         )}
                         <div className="text-base font-bold font-mono tabular-nums text-slate-900">
                           Valor final:{' '}
-                          {formatCurrency(order.totalAmount, order.currencySymbol || currency)}
+                          {formatCurrency(
+                            order.status === 'devuelto'
+                              ? 0
+                              : Math.max(0, (Number(order.totalAmount) || 0) - (Number(order.returnedAmount) || 0)),
+                            order.currencySymbol || currency
+                          )}
                         </div>
+                        {Number(order.returnedAmount || 0) > 0 && (
+                          <div className="text-[11px] font-semibold text-rose-700 font-mono tabular-nums">
+                            Devolución: -{formatCurrency(order.returnedAmount || 0, order.currencySymbol || currency)}
+                            {Number(order.returnedPointsDeducted || 0) > 0
+                              ? ` · -${order.returnedPointsDeducted} pts`
+                              : ''}
+                          </div>
+                        )}
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <button
@@ -4040,6 +4417,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
                         {order.paymentStatus !== 'acreditado' &&
                           order.status !== 'cancelado' &&
+                          order.status !== 'devuelto' &&
                           (order.transferReceiptImageUrl ||
                             activePaymentKey === 'transferencia' ||
                             activePaymentKey === 'mercadopago_dinero_cuenta' ||
@@ -4055,19 +4433,35 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             </button>
                           )}
 
-                        {order.status !== 'retirado' && order.status !== 'cancelado' && (
-                          <button
-                            type="button"
-                            onClick={() => handleMarkOrderPaidPickedUp(order)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
-                            title="Confirmar como retirado/entregado y pagado para sumarlo al dinero generado en la web"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>{isDelivery ? 'Entregado (Pagado)' : 'Marcar Retirado (Pagado)'}</span>
-                          </button>
-                        )}
+                        {order.status !== 'retirado' &&
+                          order.status !== 'cancelado' &&
+                          order.status !== 'devuelto' && (
+                            <button
+                              type="button"
+                              onClick={() => handleMarkOrderPaidPickedUp(order)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
+                              title="Confirmar como retirado/entregado y pagado para sumarlo al dinero generado en la web"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>{isDelivery ? 'Entregado (Pagado)' : 'Marcar Retirado (Pagado)'}</span>
+                            </button>
+                          )}
 
-                        {order.status !== 'cancelado' && order.customerPhone && (
+                        {onOpenReturnModal &&
+                          order.status !== 'cancelado' &&
+                          order.status !== 'devuelto' && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenReturnModal(order)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer whitespace-nowrap"
+                              title="Gestionar cambio de talle o devolución (resta puntos al instante si corresponde y acredita saldo a favor)"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Cambio / Devolución</span>
+                            </button>
+                          )}
+
+                        {order.status !== 'cancelado' && order.status !== 'devuelto' && order.customerPhone && (
                           <>
                             <button
                               type="button"
@@ -4104,6 +4498,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         <select
                           aria-label="Forma de pago del pedido"
                           value={activePaymentKey}
+                          disabled={order.status === 'devuelto'}
                           onChange={(e) =>
                             handleUpdateOrderPaymentMethod(
                               order.id,
@@ -4112,7 +4507,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                               >
                             )
                           }
-                          className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer"
+                          className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer disabled:opacity-60"
                         >
                           <option value="acordar">Pago: A coordinar</option>
                           <option value="transferencia">Pago: Transferencia / Alias</option>
@@ -4127,12 +4522,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         <select
                           aria-label="Estado de despacho del pedido"
                           value={order.status}
-                          onChange={(e) =>
-                            handleUpdateOrderStatus(
-                              order.id,
-                              e.target.value as CatalogPickupOrder['status']
-                            )
-                          }
+                          onChange={(e) => {
+                            const nextSt = e.target.value as CatalogPickupOrder['status'];
+                            if (nextSt === 'devuelto' && onOpenReturnModal) {
+                              onOpenReturnModal(order);
+                              return;
+                            }
+                            handleUpdateOrderStatus(order.id, nextSt);
+                          }}
                           className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer"
                         >
                           <option value="pendiente_retiro">Pendiente de armado</option>
@@ -4141,6 +4538,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           </option>
                           <option value="en_camino">En camino (Envío)</option>
                           <option value="retirado">Retirado / Entregado (Pagado)</option>
+                          <option value="devuelto">Devuelto</option>
                           <option value="cancelado">Cancelado</option>
                         </select>
 
@@ -4213,7 +4611,27 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       )}
 
       {/* SUB-TAB 2B: AVISOS DE STOCK SOLICITADOS POR CLIENTES */}
-      {subTab === 'avisos_stock' && (
+      {subTab === 'avisos_stock' && isBasicWebPlan && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center space-y-3">
+          <Lock className="w-8 h-8 text-amber-600 mx-auto" />
+          <h3 className="text-sm font-bold text-slate-900">
+            Avisos de Stock y Seguimiento de Clientes · Exclusivo Sección 3 (Plan Full)
+          </h3>
+          <p className="text-xs text-slate-600 max-w-lg mx-auto">
+            Tu plan Sección 2 · Página Web Básica incluye manejo de stock interno y tienda online básica, sin captura ni seguimiento de clientes.
+          </p>
+          <button
+            type="button"
+            onClick={() => requestPlanUpgrade('full_feature', 'Avisos de Stock por WhatsApp')}
+            className="px-4 py-2 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <Crown className="w-3.5 h-3.5 text-amber-300" />
+            <span>Aumentar a Plan Full</span>
+          </button>
+        </div>
+      )}
+
+      {subTab === 'avisos_stock' && !isBasicWebPlan && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
@@ -4418,7 +4836,27 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       )}
 
       {/* SUB-TAB 2C: CLUB DE PROMOS Y DESCUENTOS (SUSCRIPTORES) */}
-      {subTab === 'club_promos' && (
+      {subTab === 'club_promos' && isBasicWebPlan && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center space-y-3">
+          <Lock className="w-8 h-8 text-amber-600 mx-auto" />
+          <h3 className="text-sm font-bold text-slate-900">
+            SuperClub y Club de Promos · Exclusivo Sección 3 (Plan Full)
+          </h3>
+          <p className="text-xs text-slate-600 max-w-lg mx-auto">
+            En Sección 2 la página web funciona sin SuperClub, suscripciones promocionales ni descuentos. Ampliá a Plan Full para habilitarlo.
+          </p>
+          <button
+            type="button"
+            onClick={() => requestPlanUpgrade('full_feature', 'SuperClub y Promociones')}
+            className="px-4 py-2 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <Crown className="w-3.5 h-3.5 text-amber-300" />
+            <span>Aumentar a Plan Full</span>
+          </button>
+        </div>
+      )}
+
+      {subTab === 'club_promos' && !isBasicWebPlan && (
         <div className="space-y-4">
           {/* Store Toggle Card: Habilitar / Deshabilitar Club de Promos y Descuentos */}
           <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -4857,16 +5295,674 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </button>
           </div>
 
-          <WebLoyaltyClientsPanel
-            loyaltyAccounts={loyaltyAccounts}
-            orders={orders}
-            products={products}
-            settings={settings}
-            currencySymbol={currency}
-            catalogPublicUrl={publicUrl}
-            onRefreshLoyaltyAccounts={onRefreshLoyaltyAccounts}
-            showToast={showToast}
-          />
+          {planFeatureAccess && !planFeatureAccess.canAccessFullFeatures && (
+            <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-amber-950 space-y-0.5">
+                <div className="font-bold flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-amber-700" />
+                  <span>Función exclusiva del Plan Full (Sección 3)</span>
+                </div>
+                <p className="text-amber-900/90">
+                  Tu cuenta está en <strong>Sección 2 · Con Página Web</strong>. Pasate a <strong>Sección 3 · Plan Full</strong> para operar Clientes Web por DNI, Gift Cards QR, Carritos Abandonados y Club Promos sin límites.
+                </p>
+              </div>
+              {onRequestUpgradePlan && (
+                <button
+                  type="button"
+                  onClick={() => requestPlanUpgrade('full_feature', 'Clientes Web por DNI')}
+                  className="px-3.5 py-2 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer shrink-0 whitespace-nowrap"
+                >
+                  Cambiar a Plan Full
+                </button>
+              )}
+            </div>
+          )}
+          {!isBasicWebPlan && (
+            <WebLoyaltyClientsPanel
+              loyaltyAccounts={loyaltyAccounts}
+              orders={orders}
+              products={products}
+              settings={settings}
+              currencySymbol={currency}
+              catalogPublicUrl={publicUrl}
+              onRefreshLoyaltyAccounts={onRefreshLoyaltyAccounts}
+              showToast={showToast}
+            />
+          )}
+        </div>
+      )}
+
+      {/* SUB-TAB: CARRITOS ABANDONADOS Y RECUPERO POR WHATSAPP (#1) */}
+      {subTab === 'carritos_abandonados' && (
+        <div className="space-y-4">
+          {planFeatureAccess && !planFeatureAccess.canAccessFullFeatures && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-amber-950 space-y-0.5">
+                <div className="font-bold flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-amber-700" />
+                  <span>Recupero de Carritos Abandonados — Exclusivo Plan Full (Sección 3)</span>
+                </div>
+                <p className="text-amber-900/90">
+                  Pasate a <strong>Sección 3 · Plan Full</strong> para activar el recupero automático de carritos abandonados por WhatsApp con link directo de recuperación.
+                </p>
+              </div>
+              {onRequestUpgradePlan && (
+                <button
+                  type="button"
+                  onClick={() => requestPlanUpgrade('full_feature', 'Carritos Abandonados')}
+                  className="px-3.5 py-2 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer shrink-0 whitespace-nowrap"
+                >
+                  Pasar a Plan Full
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <ShoppingCart className="w-4 h-4 text-amber-600" />
+                  <span>Carritos Abandonados para Recuperar por WhatsApp</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Cuando un comprador carga su WhatsApp o DNI en el carrito web sin finalizar el pedido, se guarda acá para enviarle un recordatorio con link de reanudación en 1 clic.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <select
+                  value={cartFilterScope}
+                  onChange={(e) => setCartFilterScope(e.target.value as 'pending' | 'all')}
+                  aria-label="Filtrar carritos abandonados"
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-800 cursor-pointer"
+                >
+                  <option value="pending">Pendientes y recordados</option>
+                  <option value="all">Todos ({abandonedCarts.length})</option>
+                </select>
+                {onRefreshAbandonedCarts && (
+                  <button
+                    type="button"
+                    disabled={isRefreshingCarts}
+                    onClick={async () => {
+                      setIsRefreshingCarts(true);
+                      try {
+                        await onRefreshAbandonedCarts();
+                      } finally {
+                        setIsRefreshingCarts(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingCarts ? 'animate-spin' : ''}`} />
+                    <span>Actualizar</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {Array.isArray(settings.coupons) && settings.coupons.filter((c) => c.active).length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                <span className="font-semibold text-slate-700">
+                  Cupón incentivo opcional para incluir en el WhatsApp:
+                </span>
+                <select
+                  value={cartIncentiveCouponCode}
+                  onChange={(e) => setCartIncentiveCouponCode(e.target.value)}
+                  className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900"
+                >
+                  <option value="">Sin cupón extra</option>
+                  {settings.coupons
+                    .filter((c) => c.active)
+                    .map((c) => (
+                      <option key={c.id} value={c.code}>
+                        {c.code} ({c.discountType === 'percent' ? `${c.value}% OFF` : formatCurrency(c.value, currency)})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+
+            {(() => {
+              const list = abandonedCarts.filter((c) =>
+                cartFilterScope === 'pending'
+                  ? c.status === 'abandoned' || c.status === 'reminded'
+                  : true
+              );
+              if (list.length === 0) {
+                return (
+                  <div className="border border-dashed border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500">
+                    No hay carritos abandonados en este filtro. Cada cliente que ingrese su WhatsApp o DNI en la web sin confirmar la compra aparecerá acá automáticamente.
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-3">
+                  {list.map((cart) => {
+                    const matchedCoupon = settings.coupons?.find(
+                      (cp) => cp.active && cp.code.toUpperCase() === cartIncentiveCouponCode.toUpperCase()
+                    );
+                    const couponLabel = matchedCoupon
+                      ? matchedCoupon.discountType === 'percent'
+                        ? `${matchedCoupon.value}% OFF`
+                        : `${formatCurrency(matchedCoupon.value, currency)} OFF`
+                      : undefined;
+                    const recoverLink = `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}recover_cart=${encodeURIComponent(cart.id)}`;
+
+                    const handleSendReminder = async () => {
+                      if (!cart.customerPhone?.trim()) {
+                        showToast('Este carrito no tiene número de WhatsApp cargado.');
+                        return;
+                      }
+                      const msg = generateAbandonedCartRecoveryWhatsAppMessage({
+                        customerName: cart.customerName,
+                        storeName: settings.storeName || config.distributorName,
+                        itemsSummary: cart.items.map(
+                          (it) =>
+                            `${it.quantity}× ${it.productName}${it.variantLabel ? ` (${it.variantLabel})` : ''}`
+                        ),
+                        totalAmount: cart.totalAmount,
+                        currencySymbol: cart.currencySymbol || currency,
+                        couponCode: matchedCoupon?.code,
+                        couponDiscountLabel: couponLabel,
+                        catalogUrl: recoverLink,
+                      });
+                      window.open(createWhatsAppUrl(cart.customerPhone, msg), '_blank', 'noopener,noreferrer');
+                      const updated: CatalogAbandonedCart = {
+                        ...cart,
+                        status: cart.status === 'recovered' ? 'recovered' : 'reminded',
+                        reminderSentAt: new Date().toISOString(),
+                        reminderCount: (cart.reminderCount || 0) + 1,
+                        updatedAt: new Date().toISOString(),
+                      };
+                      onSaveAbandonedCarts?.(abandonedCarts.map((c) => (c.id === cart.id ? updated : c)));
+                      void upsertPublicAbandonedCartToSupabase(updated);
+                      showToast(`Recordatorio por WhatsApp abierto para ${cart.customerName || cart.customerPhone}.`);
+                    };
+
+                    const handleMarkStatus = async (nextStatus: 'recovered' | 'discarded') => {
+                      const updated: CatalogAbandonedCart = {
+                        ...cart,
+                        status: nextStatus,
+                        updatedAt: new Date().toISOString(),
+                      };
+                      onSaveAbandonedCarts?.(abandonedCarts.map((c) => (c.id === cart.id ? updated : c)));
+                      await upsertPublicAbandonedCartToSupabase(updated);
+                      showToast(
+                        nextStatus === 'recovered'
+                          ? 'Carrito marcado como recuperado.'
+                          : 'Carrito descartado.'
+                      );
+                    };
+
+                    return (
+                      <div
+                        key={cart.id}
+                        className="border border-slate-200 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-50/50"
+                      >
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-bold text-slate-900">
+                              {cart.customerName || 'Visitante Web'}
+                            </span>
+                            {cart.customerPhone && (
+                              <span className="font-mono text-xs text-slate-600">
+                                {cart.customerPhone}
+                              </span>
+                            )}
+                            {cart.customerDni && (
+                              <span className="font-mono text-[11px] bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-slate-700">
+                                DNI {cart.customerDni}
+                              </span>
+                            )}
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                                cart.status === 'recovered'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : cart.status === 'reminded'
+                                  ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                  : cart.status === 'discarded'
+                                  ? 'bg-slate-100 text-slate-600 border-slate-200'
+                                  : 'bg-amber-50 text-amber-800 border-amber-200'
+                              }`}
+                            >
+                              {cart.status === 'recovered'
+                                ? 'Recuperado'
+                                : cart.status === 'reminded'
+                                ? `Recordado (${cart.reminderCount || 1}×)`
+                                : cart.status === 'discarded'
+                                ? 'Descartado'
+                                : 'Sin finalizar'}
+                            </span>
+                          </div>
+                          <div className="text-xs text-slate-600 space-y-0.5">
+                            {cart.items.map((it, idx) => (
+                              <div key={`${cart.id}-it-${idx}`}>
+                                • <strong>{it.quantity}×</strong> {it.productName}
+                                {it.variantLabel ? ` (${it.variantLabel})` : ''} —{' '}
+                                <span className="font-mono">{formatCurrency(it.subtotal, cart.currencySymbol || currency)}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            Actualizado: {new Date(cart.updatedAt || cart.createdAt).toLocaleString('es-AR')}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row lg:flex-col items-start sm:items-center lg:items-end gap-2 shrink-0">
+                          <div className="text-base font-bold font-mono tabular-nums text-slate-900">
+                            {formatCurrency(cart.totalAmount, cart.currencySymbol || currency)}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              disabled={!cart.customerPhone}
+                              onClick={() => void handleSendReminder()}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white cursor-pointer whitespace-nowrap"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              <span>Recuperar por WhatsApp</span>
+                            </button>
+                            {cart.status !== 'recovered' && (
+                              <button
+                                type="button"
+                                onClick={() => void handleMarkStatus('recovered')}
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 cursor-pointer"
+                              >
+                                Marcar recuperado
+                              </button>
+                            )}
+                            {cart.status !== 'discarded' && cart.status !== 'recovered' && (
+                              <button
+                                type="button"
+                                onClick={() => void handleMarkStatus('discarded')}
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 cursor-pointer"
+                              >
+                                Descartar
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB: GIFT CARDS Y VOUCHERS DIGITALES CON QR (#3) */}
+      {subTab === 'gift_cards' && (
+        <div className="space-y-4">
+          {planFeatureAccess && !planFeatureAccess.canAccessFullFeatures && (
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-amber-950 space-y-0.5">
+                <div className="font-bold flex items-center gap-1.5">
+                  <Lock className="w-4 h-4 text-amber-700" />
+                  <span>Gift Cards y Vouchers Digitales QR — Exclusivo Plan Full (Sección 3)</span>
+                </div>
+                <p className="text-amber-900/90">
+                  Pasate a <strong>Sección 3 · Plan Full</strong> para emitir tarjetas de regalo prepagas con código y QR canjeables en tu catálogo o en el local.
+                </p>
+              </div>
+              {onRequestUpgradePlan && (
+                <button
+                  type="button"
+                  onClick={() => requestPlanUpgrade('full_feature', 'Gift Cards Digitales con QR')}
+                  className="px-3.5 py-2 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer shrink-0 whitespace-nowrap"
+                >
+                  Pasar a Plan Full
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Create Gift Card Form */}
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const amt = Number(String(gcInitialAmount).replace(',', '.'));
+              if (!Number.isFinite(amt) || amt <= 0) {
+                showToast('Ingresá un monto válido mayor a 0 para la Gift Card.');
+                return;
+              }
+              const generated = `GC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+              const cleanCode = normalizeGiftCardCode(gcCustomCode || generated);
+              if (giftCards.some((g) => normalizeGiftCardCode(g.code) === cleanCode)) {
+                showToast(`Ya existe una Gift Card con el código ${cleanCode}.`);
+                return;
+              }
+              const nowIso = new Date().toISOString();
+              const tenantId = tenant?.id || config.tenantId || 'default-tenant';
+              const newCard: CatalogGiftCard = {
+                id: `gc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                tenantId,
+                code: cleanCode,
+                initialAmount: amt,
+                remainingBalance: amt,
+                currencySymbol: currency,
+                recipientName: gcRecipientName.trim() || undefined,
+                recipientPhone: gcRecipientPhone.trim() || undefined,
+                buyerName: gcBuyerName.trim() || undefined,
+                buyerDni: normalizeDni(gcBuyerDni) || undefined,
+                message: gcMessage.trim() || undefined,
+                expiresAt: gcExpiresAt || undefined,
+                status: 'active',
+                history: [
+                  {
+                    id: `gcm-${Date.now()}`,
+                    date: nowIso,
+                    type: 'issued',
+                    amountDelta: amt,
+                    note: `Emitida por ${activeUserName || 'Administración'}`,
+                  },
+                ],
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              };
+              const nextCards = [newCard, ...giftCards];
+              onSaveGiftCards?.(nextCards);
+              await upsertCatalogGiftCardToSupabase(newCard);
+              setGcInitialAmount('');
+              setGcCustomCode('');
+              setGcRecipientName('');
+              setGcRecipientPhone('');
+              setGcBuyerName('');
+              setGcBuyerDni('');
+              setGcMessage('');
+              setGcExpiresAt('');
+              setSelectedGiftCardForQr(newCard);
+              showToast(`Gift Card ${newCard.code} creada por ${formatCurrency(amt, currency)}.`);
+            }}
+            className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <QrCode className="w-4 h-4 text-indigo-700" />
+                  <span>Emitir Nueva Gift Card / Voucher Digital con QR</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Generá tarjetas de regalo prepagas con código único y QR para compartir por WhatsApp o imprimir en el local.
+                </p>
+              </div>
+              {onRefreshGiftCards && (
+                <button
+                  type="button"
+                  disabled={isRefreshingGiftCards}
+                  onClick={async () => {
+                    setIsRefreshingGiftCards(true);
+                    try {
+                      await onRefreshGiftCards();
+                    } finally {
+                      setIsRefreshingGiftCards(false);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingGiftCards ? 'animate-spin' : ''}`} />
+                  <span>Actualizar</span>
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Monto ({currency}) *</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  required
+                  value={gcInitialAmount}
+                  onChange={(e) => setGcInitialAmount(e.target.value)}
+                  placeholder="Ej. 25000"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Código (opcional)</label>
+                <input
+                  type="text"
+                  value={gcCustomCode}
+                  onChange={(e) => setGcCustomCode(e.target.value.toUpperCase())}
+                  placeholder="Auto: GC-XXXXXX"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono uppercase text-slate-900"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Para (Destinatario)</label>
+                <input
+                  type="text"
+                  value={gcRecipientName}
+                  onChange={(e) => setGcRecipientName(e.target.value)}
+                  placeholder="Nombre del agasajado"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">WhatsApp Destinatario</label>
+                <input
+                  type="text"
+                  value={gcRecipientPhone}
+                  onChange={(e) => setGcRecipientPhone(e.target.value)}
+                  placeholder="Ej. 1155551234"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Comprador (opcional)</label>
+                <input
+                  type="text"
+                  value={gcBuyerName}
+                  onChange={(e) => setGcBuyerName(e.target.value)}
+                  placeholder="Quién la regala"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">DNI Comprador (opcional)</label>
+                <input
+                  type="text"
+                  value={gcBuyerDni}
+                  onChange={(e) => setGcBuyerDni(e.target.value)}
+                  placeholder="Solo números"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Vencimiento (opcional)</label>
+                <input
+                  type="date"
+                  value={gcExpiresAt}
+                  onChange={(e) => setGcExpiresAt(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700">Dedicatoria / Mensaje</label>
+                <input
+                  type="text"
+                  value={gcMessage}
+                  onChange={(e) => setGcMessage(e.target.value)}
+                  placeholder="¡Feliz cumple! Elegí lo que quieras"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Generar Gift Card con Código y QR</span>
+              </button>
+            </div>
+          </form>
+
+          {/* Existing Gift Cards List */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h4 className="text-sm font-bold text-slate-900">
+                Gift Cards Emitidas ({giftCards.length})
+              </h4>
+              <input
+                type="search"
+                value={gcSearchQuery}
+                onChange={(e) => setGcSearchQuery(e.target.value)}
+                placeholder="Buscar código, destinatario o comprador..."
+                className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 sm:w-64"
+              />
+            </div>
+
+            {(() => {
+              const q = gcSearchQuery.trim().toLowerCase();
+              const filtered = giftCards.filter(
+                (g) =>
+                  !q ||
+                  g.code.toLowerCase().includes(q) ||
+                  (g.recipientName || '').toLowerCase().includes(q) ||
+                  (g.buyerName || '').toLowerCase().includes(q) ||
+                  (g.buyerDni || '').includes(q)
+              );
+              if (filtered.length === 0) {
+                return (
+                  <div className="border border-dashed border-slate-200 rounded-xl p-6 text-center text-xs text-slate-500">
+                    Todavía no emitiste Gift Cards digitales.
+                  </div>
+                );
+              }
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {filtered.map((card) => {
+                    const cardCatalogUrl = `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}gift_card=${encodeURIComponent(card.code)}`;
+                    const handleShareWa = () => {
+                      const msg = generateGiftCardWhatsAppMessage({
+                        code: card.code,
+                        amount: card.remainingBalance,
+                        currencySymbol: card.currencySymbol || currency,
+                        storeName: settings.storeName || config.distributorName,
+                        recipientName: card.recipientName,
+                        buyerName: card.buyerName,
+                        message: card.message,
+                        expiresAt: card.expiresAt,
+                        catalogUrl: cardCatalogUrl,
+                      });
+                      window.open(
+                        createWhatsAppUrl(card.recipientPhone || '', msg),
+                        '_blank',
+                        'noopener,noreferrer'
+                      );
+                    };
+
+                    const handleToggleCancel = async () => {
+                      const nextStatus: CatalogGiftCard['status'] =
+                        card.status === 'cancelled'
+                          ? card.remainingBalance > 0
+                            ? 'active'
+                            : 'redeemed'
+                          : 'cancelled';
+                      const updated: CatalogGiftCard = {
+                        ...card,
+                        status: nextStatus,
+                        updatedAt: new Date().toISOString(),
+                      };
+                      onSaveGiftCards?.(giftCards.map((g) => (g.id === card.id ? updated : g)));
+                      await upsertCatalogGiftCardToSupabase(updated);
+                      showToast(
+                        nextStatus === 'cancelled'
+                          ? `Gift Card ${card.code} anulada.`
+                          : `Gift Card ${card.code} reactivada.`
+                      );
+                    };
+
+                    return (
+                      <div
+                        key={card.id}
+                        className="border border-slate-200 rounded-xl p-4 flex items-start justify-between gap-3 bg-slate-50/50"
+                      >
+                        <div className="space-y-1.5 min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono font-black text-sm text-[#0B1933] bg-white border border-slate-200 px-2 py-0.5 rounded">
+                              {card.code}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                card.status === 'active'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : card.status === 'redeemed'
+                                  ? 'bg-slate-100 text-slate-600 border-slate-200'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}
+                            >
+                              {card.status === 'active'
+                                ? 'Activa'
+                                : card.status === 'redeemed'
+                                ? 'Saldo Agotado'
+                                : 'Anulada'}
+                            </span>
+                          </div>
+                          <div className="text-xs font-mono tabular-nums text-slate-800">
+                            Saldo disponible:{' '}
+                            <strong className="text-emerald-700">
+                              {formatCurrency(card.remainingBalance, card.currencySymbol || currency)}
+                            </strong>{' '}
+                            <span className="text-slate-500">
+                              / {formatCurrency(card.initialAmount, card.currencySymbol || currency)}
+                            </span>
+                          </div>
+                          {(card.recipientName || card.buyerName) && (
+                            <div className="text-[11px] text-slate-600">
+                              {card.recipientName ? `Para: ${card.recipientName}` : ''}
+                              {card.recipientName && card.buyerName ? ' · ' : ''}
+                              {card.buyerName ? `De: ${card.buyerName}` : ''}
+                            </div>
+                          )}
+                          {card.expiresAt && (
+                            <div className="text-[10px] font-mono text-slate-500">
+                              Vence: {card.expiresAt}
+                            </div>
+                          )}
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedGiftCardForQr(card)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer"
+                            >
+                              <QrCode className="w-3 h-3" />
+                              <span>Ver / Imprimir QR</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleShareWa}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              <span>Enviar WhatsApp</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleToggleCancel()}
+                              className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 cursor-pointer"
+                            >
+                              {card.status === 'cancelled' ? 'Reactivar' : 'Anular'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 bg-white p-1.5 rounded-lg border border-slate-200">
+                          <QrCodeSvg value={cardCatalogUrl} size={74} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
 
@@ -4893,13 +5989,18 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             const ts = new Date(o.createdAt).getTime();
             return Number.isFinite(ts) && ts >= cutoffMs;
           });
-          const activeOrders = ordersInPeriod.filter((o) => o.status !== 'cancelado');
+          const activeOrders = ordersInPeriod.filter(
+            (o) => o.status !== 'cancelado' && o.status !== 'devuelto'
+          );
           const cancelledCount = ordersInPeriod.length - activeOrders.length;
 
-          const netRevenue = activeOrders.reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+          const getNetOrderAmount = (o: CatalogPickupOrder) =>
+            Math.max(0, (Number(o.totalAmount) || 0) - (Number(o.returnedAmount) || 0));
+
+          const netRevenue = activeOrders.reduce((sum, o) => sum + getNetOrderAmount(o), 0);
           const collectedRevenue = activeOrders
             .filter((o) => o.paymentStatus === 'acreditado' || o.status === 'retirado')
-            .reduce((sum, o) => sum + (Number(o.totalAmount) || 0), 0);
+            .reduce((sum, o) => sum + getNetOrderAmount(o), 0);
           const totalUnitsSold = activeOrders.reduce(
             (sum, o) =>
               sum + o.items.reduce((s, it) => s + Math.max(0, Number(it.quantity) || 0), 0),
@@ -4911,6 +6012,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               sum +
               (Number(o.wholesaleSavings) || 0) +
               (Number(o.couponDiscountAmount) || 0) +
+              (Number(o.giftCardDiscountAmount) || 0) +
+              (Number(o.storeCreditUsedAmount) || 0) +
               (Number(o.paymentMethodDiscountAmount) || 0) +
               (Number(o.loyaltyDiscountAmount) || 0),
             0
@@ -5312,8 +6415,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 </div>
               </div>
 
-              {/* Priority Restock Demand from Stock Alerts */}
-              {topRestockDemand.length > 0 && (
+              {/* Priority Restock Demand from Stock Alerts (Full only) */}
+              {!isBasicWebPlan && topRestockDemand.length > 0 && (
                 <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div>
@@ -5365,7 +6468,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 </div>
               )}
 
-              {/* Customer DNI Loyalty Accounts Table */}
+              {/* Customer DNI Loyalty Accounts Table (Full only) */}
+              {!isBasicWebPlan && (
               <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
@@ -5434,6 +6538,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           <th className="py-2.5 px-3">DNI / Cliente</th>
                           <th className="py-2.5 px-3 text-right">Compras</th>
                           <th className="py-2.5 px-3 text-right">Puntos Disponibles</th>
+                          <th className="py-2.5 px-3 text-right">Saldo a Favor</th>
                           <th className="py-2.5 px-3">Nivel Alcanzado</th>
                           <th className="py-2.5 px-3 text-right">Ajuste Rápido</th>
                         </tr>
@@ -5465,6 +6570,15 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                                 <div className="text-[10px] font-mono tabular-nums text-slate-500">
                                   +{acc.totalPointsEarned} ganados · -{acc.totalPointsRedeemed} canjeados
                                 </div>
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums">
+                                {Number(acc.storeCreditBalance || 0) > 0 ? (
+                                  <span className="font-bold text-emerald-700">
+                                    {formatCurrency(acc.storeCreditBalance || 0, currency)}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
                               </td>
                               <td className="py-2.5 px-3 text-xs">
                                 {highestUnlocked ? (
@@ -5518,6 +6632,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   </div>
                 )}
               </div>
+              )}
             </div>
           );
         })()}
@@ -5773,6 +6888,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         e.preventDefault();
                         const clean = settingsFilterInput.trim();
                         if (!clean) return;
+                        if (isBasicWebPlan) {
+                          const combined = normalizeFilterList([
+                            ...(draftSettings.rubroFilters || []),
+                            ...(draftSettings.customSubfilters || []),
+                            clean,
+                          ]);
+                          if (combined.length > PLAN_WEB_MAX_RUBROS) {
+                            requestPlanUpgrade(
+                              'limit_rubros',
+                              `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
+                              `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+                            );
+                            return;
+                          }
+                        }
                         setDraftSettings((prev) => ({
                           ...prev,
                           rubroFilters: normalizeFilterList([...(prev.rubroFilters || []), clean]),
@@ -5788,6 +6918,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     onClick={() => {
                       const clean = settingsFilterInput.trim();
                       if (!clean) return;
+                      if (isBasicWebPlan) {
+                        const combined = normalizeFilterList([
+                          ...(draftSettings.rubroFilters || []),
+                          ...(draftSettings.customSubfilters || []),
+                          clean,
+                        ]);
+                        if (combined.length > PLAN_WEB_MAX_RUBROS) {
+                          requestPlanUpgrade(
+                            'limit_rubros',
+                            `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
+                            `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+                          );
+                          return;
+                        }
+                      }
                       setDraftSettings((prev) => ({
                         ...prev,
                         rubroFilters: normalizeFilterList([...(prev.rubroFilters || []), clean]),
@@ -5847,6 +6992,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         e.preventDefault();
                         const clean = settingsSubfilterInput.trim();
                         if (!clean) return;
+                        if (isBasicWebPlan) {
+                          const combined = normalizeFilterList([
+                            ...(draftSettings.rubroFilters || []),
+                            ...(draftSettings.customSubfilters || []),
+                            clean,
+                          ]);
+                          if (combined.length > PLAN_WEB_MAX_RUBROS) {
+                            requestPlanUpgrade(
+                              'limit_rubros',
+                              `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
+                              `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+                            );
+                            return;
+                          }
+                        }
                         setDraftSettings((prev) => ({
                           ...prev,
                           customSubfilters: normalizeFilterList([
@@ -5865,6 +7025,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     onClick={() => {
                       const clean = settingsSubfilterInput.trim();
                       if (!clean) return;
+                      if (isBasicWebPlan) {
+                        const combined = normalizeFilterList([
+                          ...(draftSettings.rubroFilters || []),
+                          ...(draftSettings.customSubfilters || []),
+                          clean,
+                        ]);
+                        if (combined.length > PLAN_WEB_MAX_RUBROS) {
+                          requestPlanUpgrade(
+                            'limit_rubros',
+                            `Límite de ${PLAN_WEB_MAX_RUBROS} rubros alcanzado`,
+                            `Tu plan Sección 2 permite hasta ${PLAN_WEB_MAX_RUBROS} rubros/subfiltros en total. Para agregar "${clean}", ampliá a Sección 3 · Plan Full.`
+                          );
+                          return;
+                        }
+                      }
                       setDraftSettings((prev) => ({
                         ...prev,
                         customSubfilters: normalizeFilterList([
@@ -6135,38 +7310,46 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 <div>
                   <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                     <Percent className="w-4 h-4 text-emerald-700" />
-                    <span>Promociones, Cupones, Descuento Efectivo/Transferencia y Alertas de Stock</span>
+                    <span>
+                      {isBasicWebPlan
+                        ? 'Alertas de Stock Mínimo (Sección 2 · Página Web Básica)'
+                        : 'Promociones, Cupones, Descuento Efectivo/Transferencia y Alertas de Stock'}
+                    </span>
                   </div>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    Ofrecé un beneficio por pagar en Efectivo/Transferencia, creá códigos de descuento y definí cuándo avisarte por stock bajo.
+                    {isBasicWebPlan
+                      ? 'Definí cuándo recibir alertas por stock bajo. Las herramientas de descuentos, burbujas de ofertas, SuperClub y Puntos por DNI corresponden a Sección 3 · Plan Full.'
+                      : 'Ofrecé un beneficio por pagar en Efectivo/Transferencia, creá códigos de descuento y definí cuándo avisarte por stock bajo.'}
                   </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-slate-700">
-                    Descuento pagando en Efectivo / Transferencia (%)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="90"
-                    step="1"
-                    value={draftSettings.cashOrTransferDiscountPercent ?? 0}
-                    onChange={(e) =>
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        cashOrTransferDiscountPercent: Math.max(
-                          0,
-                          Math.min(90, Number(e.target.value) || 0)
-                        ),
-                      }))
-                    }
-                    placeholder="0"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
-                  />
-                </div>
+                {!isBasicWebPlan && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-700">
+                      Descuento pagando en Efectivo / Transferencia (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="90"
+                      step="1"
+                      value={draftSettings.cashOrTransferDiscountPercent ?? 0}
+                      onChange={(e) =>
+                        setDraftSettings((prev) => ({
+                          ...prev,
+                          cashOrTransferDiscountPercent: Math.max(
+                            0,
+                            Math.min(90, Number(e.target.value) || 0)
+                          ),
+                        }))
+                      }
+                      placeholder="0"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-700">
@@ -6188,6 +7371,34 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   />
                 </div>
               </div>
+
+              {isBasicWebPlan ? (
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-0.5 text-xs text-amber-950">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <Lock className="w-4 h-4 text-amber-700 shrink-0" />
+                      <span>Ofertas, SuperClub, Descuentos y Puntos por DNI · Exclusivo Plan Full</span>
+                    </div>
+                    <p className="text-[11px] text-amber-900/90">
+                      Tu plan Sección 2 muestra la página web básica sin burbujas de ofertas, seguimiento de clientes, SuperClub ni cupones/descuentos. Ampliá a Sección 3 para desbloquearlo todo.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      requestPlanUpgrade(
+                        'full_feature',
+                        'Ofertas, Descuentos, SuperClub y Puntos por DNI'
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-xs font-bold cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    <Crown className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Aumentar a Plan Full</span>
+                  </button>
+                </div>
+              ) : (
+                <>
 
               {/* Coupon builder */}
               <div className="pt-2 border-t border-slate-200 space-y-2.5">
@@ -6978,6 +8189,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   </div>
                 )}
               </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -7442,7 +8655,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   />
                 </div>
 
-                {Boolean(settings.enableLoyaltyProgram || draftSettings.enableLoyaltyProgram) && (
+                {!isBasicWebPlan && Boolean(settings.enableLoyaltyProgram || draftSettings.enableLoyaltyProgram) && (
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
                       <Award className="w-3.5 h-3.5 text-emerald-700" />
@@ -7460,6 +8673,25 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   </div>
                 )}
 
+                {isBasicWebPlan ? (
+                  <div className="sm:col-span-2 p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3">
+                    <div className="text-[11px] text-slate-600">
+                      <strong className="text-slate-800">Ofertas Relámpago, Outlet, Precios Mayoristas y Puntos DNI</strong> requieren{' '}
+                      <strong>Sección 3 · Plan Full</strong>.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsProductModalOpen(false);
+                        requestPlanUpgrade('full_feature', 'Ofertas, Descuentos y Puntos por DNI');
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-[#0B1933] text-white text-[11px] font-bold cursor-pointer shrink-0 whitespace-nowrap"
+                    >
+                      Aumentar a Plan Full
+                    </button>
+                  </div>
+                ) : (
+                  <>
                 {/* Wholesale Tier (Precio Mayorista por Cantidad) */}
                 <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-xl bg-indigo-50/50 border border-indigo-200/80">
                   <div className="space-y-1">
@@ -7491,6 +8723,54 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* Oferta Relámpago / Outlet (#9) */}
+                <div className="sm:col-span-2 p-3 rounded-xl bg-rose-50/60 border border-rose-200/90 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="text-[11px] font-bold text-rose-900 flex items-center gap-1.5">
+                      <Flame className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Oferta Relámpago (Flash Sale) y Outlet</span>
+                    </div>
+                    <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-rose-900 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={productIsOutlet}
+                        onChange={(e) => setProductIsOutlet(e.target.checked)}
+                        className="rounded border-rose-300"
+                      />
+                      <span>Incluir en sección Outlet</span>
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700">
+                        Precio Oferta Relámpago ({currency})
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={productFlashSalePrice}
+                        onChange={(e) => setProductFlashSalePrice(e.target.value)}
+                        placeholder="Menor al precio base (opcional)"
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-semibold text-slate-700">
+                        Cuenta regresiva hasta (fecha y hora)
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={productFlashSaleEndsAt}
+                        onChange={(e) => setProductFlashSaleEndsAt(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+                  </>
+                )}
 
                 <div className="sm:col-span-2 space-y-1.5">
                   <label className="text-xs font-semibold text-slate-700">
@@ -7601,15 +8881,17 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <span>Disponible para pedir en el catálogo</span>
                 </label>
 
-                <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={productFeatured}
-                    onChange={(e) => setProductFeatured(e.target.checked)}
-                    className="rounded border-slate-300"
-                  />
-                  <span>Marcar como destacado</span>
-                </label>
+                {!isBasicWebPlan && (
+                  <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={productFeatured}
+                      onChange={(e) => setProductFeatured(e.target.checked)}
+                      className="rounded border-slate-300"
+                    />
+                    <span>Marcar como destacado</span>
+                  </label>
+                )}
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
@@ -7828,7 +9110,104 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         onSendProcessWhatsApp={handleSendOrderProcessWhatsApp}
         onWhatsAppCollect={handleWhatsAppCustomerCollectPayment}
         onVerifyTransferReceipt={handleVerifyOrderTransferReceipt}
+        onOpenReturnModal={onOpenReturnModal}
       />
+
+      {/* MODAL PREVIEW / IMPRESIÓN QR DE GIFT CARD (#3) */}
+      {selectedGiftCardForQr && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/65 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setSelectedGiftCardForQr(null)}
+        >
+          <div
+            className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3.5 bg-[#0B1933] text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-emerald-300" />
+                <span className="text-sm font-bold">Voucher Gift Card Digital</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedGiftCardForQr(null)}
+                className="p-1 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white cursor-pointer"
+                aria-label="Cerrar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 text-center space-y-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                {settings.storeName || config.distributorName || 'Nuestra Tienda'}
+              </div>
+              <div className="text-2xl font-black font-mono tabular-nums text-emerald-700">
+                {formatCurrency(
+                  selectedGiftCardForQr.remainingBalance,
+                  selectedGiftCardForQr.currencySymbol || currency
+                )}
+              </div>
+              <div className="inline-block p-3 bg-white border-2 border-[#0B1933] rounded-2xl">
+                <QrCodeSvg
+                  value={`${publicUrl}${publicUrl.includes('?') ? '&' : '?'}gift_card=${encodeURIComponent(selectedGiftCardForQr.code)}`}
+                  size={170}
+                />
+              </div>
+              <div className="font-mono text-base font-black tracking-wider text-[#0B1933] bg-slate-100 border border-slate-200 rounded-xl py-2 px-4 inline-block">
+                {selectedGiftCardForQr.code}
+              </div>
+              {(selectedGiftCardForQr.recipientName || selectedGiftCardForQr.message) && (
+                <div className="text-xs text-slate-600 space-y-1 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                  {selectedGiftCardForQr.recipientName && (
+                    <div>
+                      Para: <strong className="text-slate-900">{selectedGiftCardForQr.recipientName}</strong>
+                      {selectedGiftCardForQr.buyerName ? ` · De: ${selectedGiftCardForQr.buyerName}` : ''}
+                    </div>
+                  )}
+                  {selectedGiftCardForQr.message && (
+                    <div className="italic">"{selectedGiftCardForQr.message}"</div>
+                  )}
+                </div>
+              )}
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer"
+                >
+                  Imprimir Voucher
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cardUrl = `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}gift_card=${encodeURIComponent(selectedGiftCardForQr.code)}`;
+                    const msg = generateGiftCardWhatsAppMessage({
+                      code: selectedGiftCardForQr.code,
+                      amount: selectedGiftCardForQr.remainingBalance,
+                      currencySymbol: selectedGiftCardForQr.currencySymbol || currency,
+                      storeName: settings.storeName || config.distributorName,
+                      recipientName: selectedGiftCardForQr.recipientName,
+                      buyerName: selectedGiftCardForQr.buyerName,
+                      message: selectedGiftCardForQr.message,
+                      expiresAt: selectedGiftCardForQr.expiresAt,
+                      catalogUrl: cardUrl,
+                    });
+                    window.open(
+                      createWhatsAppUrl(selectedGiftCardForQr.recipientPhone || '', msg),
+                      '_blank',
+                      'noopener,noreferrer'
+                    );
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Enviar por WhatsApp</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

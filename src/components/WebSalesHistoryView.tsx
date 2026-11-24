@@ -14,6 +14,7 @@ import {
   TrendingUp,
   Eye,
   Image as ImageIcon,
+  RotateCcw,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
@@ -36,6 +37,7 @@ interface WebSalesHistoryViewProps {
   onOpenReceipt?: (receipt: ReceiptModalData) => void;
   onBillOrder?: (order: CatalogPickupOrder) => void;
   onMarkOrderAsRetirado?: (order: CatalogPickupOrder) => void;
+  onOpenReturnModal?: (order: CatalogPickupOrder) => void;
   onChangeOrderPaymentMethod?: (
     orderId: string,
     method: NonNullable<CatalogPickupOrder['confirmedPaymentMethod']>
@@ -44,7 +46,12 @@ interface WebSalesHistoryViewProps {
 }
 
 type PeriodPreset = 'all' | 'last_7d' | 'last_month' | 'specific_day';
-type StatusScope = 'valid' | 'retirado' | 'pendientes' | 'cancelado' | 'all';
+type StatusScope = 'valid' | 'retirado' | 'pendientes' | 'cancelado' | 'devuelto' | 'all';
+
+function getOrderNetTotal(order: CatalogPickupOrder): number {
+  if (order.status === 'cancelado' || order.status === 'devuelto') return 0;
+  return Math.max(0, (Number(order.totalAmount) || 0) - (Number(order.returnedAmount) || 0));
+}
 
 function toLocalDateKey(isoOrDate: string): string {
   if (!isoOrDate) return '';
@@ -114,6 +121,8 @@ function resolveStatusLabel(status: CatalogPickupOrder['status'], isDelivery: bo
       return isDelivery ? 'Listo p/ despacho' : 'Listo p/ retirar';
     case 'cancelado':
       return 'Cancelado';
+    case 'devuelto':
+      return 'Devuelto';
     default:
       return 'Pendiente';
   }
@@ -137,6 +146,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   onOpenReceipt,
   onBillOrder,
   onMarkOrderAsRetirado,
+  onOpenReturnModal,
   onChangeOrderPaymentMethod,
   showToast,
 }) => {
@@ -206,7 +216,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   const filteredOrders = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return periodOrders.filter((o) => {
-      if (statusScope === 'valid' && o.status === 'cancelado') return false;
+      if (statusScope === 'valid' && (o.status === 'cancelado' || o.status === 'devuelto')) return false;
       if (statusScope === 'retirado' && o.status !== 'retirado') return false;
       if (
         statusScope === 'pendientes' &&
@@ -217,6 +227,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
         return false;
       }
       if (statusScope === 'cancelado' && o.status !== 'cancelado') return false;
+      if (statusScope === 'devuelto' && o.status !== 'devuelto' && !o.returnStatus) return false;
 
       const mod = o.deliveryMethod || 'retiro';
       if (modalityFilter !== 'all' && mod !== modalityFilter) return false;
@@ -247,14 +258,16 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
   }, [periodOrders, statusScope, modalityFilter, searchTerm, productMap]);
 
   const metrics = useMemo(() => {
-    const activePeriodOrders = periodOrders.filter((o) => o.status !== 'cancelado');
+    const activePeriodOrders = periodOrders.filter(
+      (o) => o.status !== 'cancelado' && o.status !== 'devuelto'
+    );
     const deliveredOrders = activePeriodOrders.filter((o) => o.status === 'retirado');
     const pendingOrders = activePeriodOrders.filter((o) => o.status !== 'retirado');
     const cancelledOrders = periodOrders.filter((o) => o.status === 'cancelado');
 
-    // Solo los pedidos marcados como Retirado / Entregado cuentan como dinero generado en la web
-    const deliveredRevenue = deliveredOrders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
-    const pendingRevenue = pendingOrders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0);
+    // Solo los pedidos marcados como Retirado / Entregado cuentan como dinero generado neto en la web
+    const deliveredRevenue = deliveredOrders.reduce((acc, o) => acc + getOrderNetTotal(o), 0);
+    const pendingRevenue = pendingOrders.reduce((acc, o) => acc + getOrderNetTotal(o), 0);
     const avgTicket = deliveredOrders.length > 0 ? deliveredRevenue / deliveredOrders.length : 0;
 
     let totalUnits = 0;
@@ -275,7 +288,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
 
       if (o.status === 'retirado') {
         prevDay.count += 1;
-        prevDay.total += Number(o.totalAmount) || 0;
+        prevDay.total += getOrderNetTotal(o);
         if (o.deliveryMethod === 'envio') deliveryCount++;
         else pickupCount++;
 
@@ -605,11 +618,12 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
               onChange={(e) => setStatusScope(e.target.value as StatusScope)}
               className="px-2.5 py-1.5 rounded-lg border border-[#CBD5E1] dark:border-[#B6C2D2]/25 bg-slate-50 dark:bg-[#071021] text-xs font-semibold text-[#0B1933] dark:text-white cursor-pointer"
             >
-              <option value="valid">Ventas activas (sin canceladas)</option>
+              <option value="valid">Ventas activas (sin canceladas/devueltas)</option>
               <option value="retirado">Solo entregadas / retiradas</option>
               <option value="pendientes">Pendientes o en camino</option>
+              <option value="devuelto">Con cambios / devoluciones</option>
               <option value="cancelado">Solo canceladas</option>
-              <option value="all">Todas (incl. canceladas)</option>
+              <option value="all">Todas (incl. canceladas y devueltas)</option>
             </select>
 
             <select
@@ -771,10 +785,10 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
             Detalle Histórico de Pedidos Web ({filteredOrders.length})
           </h3>
           <span className="text-xs text-slate-500 dark:text-[#94A3B8] tabular-nums">
-            Total listado:{' '}
+            Total neto listado:{' '}
             <strong className="font-mono text-[#0B1933] dark:text-white">
               {formatCurrency(
-                filteredOrders.reduce((acc, o) => acc + (Number(o.totalAmount) || 0), 0),
+                filteredOrders.reduce((acc, o) => acc + getOrderNetTotal(o), 0),
                 currency
               )}
             </strong>
@@ -948,17 +962,27 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                           className={`text-xs font-semibold ${
                             order.status === 'retirado'
                               ? 'text-emerald-700 dark:text-emerald-400'
-                              : order.status === 'cancelado'
-                              ? 'text-rose-600 dark:text-rose-400 line-through'
+                              : order.status === 'cancelado' || order.status === 'devuelto'
+                              ? 'text-rose-600 dark:text-rose-400'
                               : 'text-amber-700 dark:text-amber-300'
                           }`}
                         >
                           {statusLabel}
                         </span>
+                        {order.returnStatus && order.returnStatus !== 'ninguna' && order.status !== 'devuelto' && (
+                          <div className="text-[10px] font-bold text-rose-700 dark:text-rose-300 mt-0.5">
+                            {order.returnStatus === 'cambio' ? 'Cambio registrado' : 'Devolución parcial'}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-4 align-top text-right font-mono tabular-nums font-bold text-[#0B1933] dark:text-white whitespace-nowrap">
-                        {formatCurrency(order.totalAmount, order.currencySymbol || currency)}
+                        <div>{formatCurrency(getOrderNetTotal(order), order.currencySymbol || currency)}</div>
+                        {Number(order.returnedAmount || 0) > 0 && order.status !== 'devuelto' && (
+                          <div className="text-[10px] font-normal text-rose-600 dark:text-rose-400">
+                            (-{formatCurrency(order.returnedAmount || 0, order.currencySymbol || currency)} dev.)
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-3 px-4 align-top text-right whitespace-nowrap">
@@ -974,7 +998,8 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                           </button>
                           {onMarkOrderAsRetirado &&
                             order.status !== 'retirado' &&
-                            order.status !== 'cancelado' && (
+                            order.status !== 'cancelado' &&
+                            order.status !== 'devuelto' && (
                               <button
                                 type="button"
                                 onClick={() => onMarkOrderAsRetirado(order)}
@@ -985,16 +1010,30 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
                                 <span>{isDelivery ? 'Entregado (Pagado)' : 'Retirado (Pagado)'}</span>
                               </button>
                             )}
-                          {onBillOrder && !order.linkedBoletaNumber && order.status !== 'cancelado' && (
+                          {onOpenReturnModal && order.status !== 'cancelado' && order.status !== 'devuelto' && (
                             <button
                               type="button"
-                              onClick={() => onBillOrder(order)}
-                              className="px-2.5 py-1 rounded-md text-[11px] font-semibold border border-[#CBD5E1] dark:border-[#B6C2D2]/25 text-[#0B1933] dark:text-white hover:bg-slate-50 dark:hover:bg-[#13264A] cursor-pointer"
+                              onClick={() => onOpenReturnModal(order)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
+                              title="Gestionar cambio o devolución y restar puntos de ser necesario"
                             >
-                              Facturar
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Cambio / Devol.</span>
                             </button>
                           )}
-                          {onOpenReceipt && order.status !== 'cancelado' && (
+                          {onBillOrder &&
+                            !order.linkedBoletaNumber &&
+                            order.status !== 'cancelado' &&
+                            order.status !== 'devuelto' && (
+                              <button
+                                type="button"
+                                onClick={() => onBillOrder(order)}
+                                className="px-2.5 py-1 rounded-md text-[11px] font-semibold border border-[#CBD5E1] dark:border-[#B6C2D2]/25 text-[#0B1933] dark:text-white hover:bg-slate-50 dark:hover:bg-[#13264A] cursor-pointer"
+                              >
+                                Facturar
+                              </button>
+                            )}
+                          {onOpenReceipt && order.status !== 'cancelado' && order.status !== 'devuelto' && (
                             <button
                               type="button"
                               onClick={() => handleOpenOrderReceipt(order)}
@@ -1026,6 +1065,7 @@ export const WebSalesHistoryView: React.FC<WebSalesHistoryViewProps> = ({
         onOpenReceipt={onOpenReceipt ? handleOpenOrderReceipt : undefined}
         onBillOrder={onBillOrder}
         onChangePaymentMethod={onChangeOrderPaymentMethod}
+        onOpenReturnModal={onOpenReturnModal}
       />
     </div>
   );

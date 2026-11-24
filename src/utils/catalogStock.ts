@@ -25,6 +25,53 @@ export function getVariantDisplayPrice(
   return product.price;
 }
 
+export function isProductFlashSaleActive(
+  product?: Pick<CatalogProduct, 'price' | 'flashSalePrice' | 'flashSaleEndsAt'> | null,
+  nowMs: number = Date.now()
+): boolean {
+  if (!product) return false;
+  if (
+    typeof product.flashSalePrice !== 'number' ||
+    !Number.isFinite(product.flashSalePrice) ||
+    product.flashSalePrice < 0 ||
+    product.flashSalePrice >= product.price
+  ) {
+    return false;
+  }
+  if (!product.flashSaleEndsAt || !product.flashSaleEndsAt.trim()) {
+    return true;
+  }
+  const endMs = new Date(product.flashSaleEndsAt).getTime();
+  return Number.isFinite(endMs) && endMs > nowMs;
+}
+
+export function getFlashEffectiveDisplayPrice(
+  product: Pick<CatalogProduct, 'price' | 'flashSalePrice' | 'flashSaleEndsAt'>,
+  variant?: Pick<CatalogProductVariant, 'price'> | null,
+  nowMs: number = Date.now()
+): {
+  regularUnitPrice: number;
+  displayUnitPrice: number;
+  isFlashSale: boolean;
+} {
+  const regularUnitPrice = getVariantDisplayPrice(product, variant);
+  if (isProductFlashSaleActive(product, nowMs)) {
+    const flash = product.flashSalePrice as number;
+    if (flash < regularUnitPrice) {
+      return {
+        regularUnitPrice,
+        displayUnitPrice: flash,
+        isFlashSale: true,
+      };
+    }
+  }
+  return {
+    regularUnitPrice,
+    displayUnitPrice: regularUnitPrice,
+    isFlashSale: false,
+  };
+}
+
 export function computeAggregateStockFromVariants(
   variants?: CatalogProductVariant[]
 ): number | undefined {
@@ -215,15 +262,23 @@ export function getProductLowStockStatus(
 }
 
 export function getWholesaleUnitPrice(
-  product: Pick<CatalogProduct, 'price' | 'wholesaleMinQty' | 'wholesalePrice'>,
+  product: Pick<
+    CatalogProduct,
+    'price' | 'flashSalePrice' | 'flashSaleEndsAt' | 'wholesaleMinQty' | 'wholesalePrice'
+  >,
   variant?: Pick<CatalogProductVariant, 'price'> | null,
-  totalProductQtyInCart: number = 1
+  totalProductQtyInCart: number = 1,
+  nowMs: number = Date.now()
 ): {
   regularUnitPrice: number;
   effectiveUnitPrice: number;
   appliedWholesale: boolean;
+  appliedFlashSale: boolean;
 } {
-  const regularUnitPrice = getVariantDisplayPrice(product, variant);
+  const flashInfo = getFlashEffectiveDisplayPrice(product, variant, nowMs);
+  const regularUnitPrice = flashInfo.regularUnitPrice;
+  const activeRetailPrice = flashInfo.displayUnitPrice;
+
   const minQty =
     typeof product.wholesaleMinQty === 'number' && product.wholesaleMinQty >= 2
       ? Math.floor(product.wholesaleMinQty)
@@ -232,7 +287,7 @@ export function getWholesaleUnitPrice(
     typeof product.wholesalePrice === 'number' &&
     Number.isFinite(product.wholesalePrice) &&
     product.wholesalePrice >= 0 &&
-    product.wholesalePrice < regularUnitPrice
+    product.wholesalePrice < activeRetailPrice
       ? product.wholesalePrice
       : null;
 
@@ -241,13 +296,15 @@ export function getWholesaleUnitPrice(
       regularUnitPrice,
       effectiveUnitPrice: wPrice,
       appliedWholesale: true,
+      appliedFlashSale: false,
     };
   }
 
   return {
     regularUnitPrice,
-    effectiveUnitPrice: regularUnitPrice,
+    effectiveUnitPrice: activeRetailPrice,
     appliedWholesale: false,
+    appliedFlashSale: flashInfo.isFlashSale,
   };
 }
 
@@ -490,3 +547,42 @@ export function isLoyaltyRedemptionEligible(params: {
   }
   return false;
 }
+
+export function computeReturnedPointsForOrderItems(params: {
+  returnedItems: Array<{ productId: string; productName: string; quantityReturned: number; subtotalReturned: number }>;
+  orderTotalAmount: number;
+  orderLoyaltyPointsEarned?: number;
+  products: CatalogProduct[];
+  storeDefaultPointsPerUnit?: number;
+}): number {
+  const earned = Math.max(0, Math.floor(Number(params.orderLoyaltyPointsEarned) || 0));
+  if (earned <= 0) return 0;
+
+  let byProductSum = 0;
+  for (const r of params.returnedItems) {
+    const qty = Math.max(0, Math.floor(Number(r.quantityReturned) || 0));
+    if (qty <= 0) continue;
+    const matched = params.products.find(
+      (p) =>
+        p.id === r.productId ||
+        p.name.trim().toLowerCase() === (r.productName || '').trim().toLowerCase()
+    );
+    const ptsUnit = getProductPointsPerUnit(matched, params.storeDefaultPointsPerUnit ?? 10);
+    byProductSum += ptsUnit * qty;
+  }
+
+  if (byProductSum > 0) {
+    return Math.min(earned, byProductSum);
+  }
+
+  const returnedAmount = params.returnedItems.reduce(
+    (sum, it) => sum + Math.max(0, Number(it.subtotalReturned) || 0),
+    0
+  );
+  if (params.orderTotalAmount > 0 && returnedAmount > 0) {
+    const ratio = Math.min(1, returnedAmount / params.orderTotalAmount);
+    return Math.min(earned, Math.round(earned * ratio));
+  }
+  return 0;
+}
+

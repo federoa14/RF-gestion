@@ -19,8 +19,11 @@ import {
   CatalogStockAlertRequest,
   CatalogPromoSubscriber,
   CatalogLoyaltyAccount,
+  CatalogAbandonedCart,
+  CatalogGiftCard,
 } from '../types';
 import { applyRubroProfileToConfig, getRubroProfile } from './businessMode';
+import { getCatalogRubroPreset } from './catalogRubros';
 import {
   DEFAULT_CONFIG,
   loadClients,
@@ -66,7 +69,12 @@ export const DEFAULT_PLATFORM_BILLING_CONFIG: PlatformBillingConfig = {
   cvu: '',
   accountHolderName: 'Federico Roa',
   bankOrWalletName: 'Mercado Pago',
-  defaultMonthlyFee: 25000,
+  defaultMonthlyFee: 28000,
+  planPrices: {
+    basico: 18000,
+    web: 28000,
+    full: 42000,
+  },
   annualDiscountPercent: 0,
   mpCheckoutLink: '',
   mpPublicKey: '',
@@ -193,6 +201,8 @@ export interface TenantData {
   catalogStockAlerts?: CatalogStockAlertRequest[];
   catalogPromoSubscribers?: CatalogPromoSubscriber[];
   catalogLoyaltyAccounts?: CatalogLoyaltyAccount[];
+  catalogAbandonedCarts?: CatalogAbandonedCart[];
+  catalogGiftCards?: CatalogGiftCard[];
 }
 
 // TENANTS STORAGE
@@ -222,9 +232,15 @@ export function loadPlatformBillingConfig(): PlatformBillingConfig {
   try {
     const raw = dbGetItem(STORAGE_KEYS.PLATFORM_BILLING);
     if (raw) {
+      const parsed = JSON.parse(raw);
       return {
         ...DEFAULT_PLATFORM_BILLING_CONFIG,
-        ...JSON.parse(raw),
+        ...parsed,
+        planPrices: {
+          basico: Number(parsed?.planPrices?.basico ?? DEFAULT_PLATFORM_BILLING_CONFIG.planPrices!.basico),
+          web: Number(parsed?.planPrices?.web ?? parsed?.defaultMonthlyFee ?? DEFAULT_PLATFORM_BILLING_CONFIG.planPrices!.web),
+          full: Number(parsed?.planPrices?.full ?? DEFAULT_PLATFORM_BILLING_CONFIG.planPrices!.full),
+        },
       };
     }
   } catch (e) {
@@ -654,6 +670,8 @@ export function loadTenantData(tenantId: string): TenantData {
       catalogStockAlerts: [],
       catalogPromoSubscribers: [],
       catalogLoyaltyAccounts: [],
+      catalogAbandonedCarts: [],
+      catalogGiftCards: [],
     };
   }
 
@@ -662,6 +680,8 @@ export function loadTenantData(tenantId: string): TenantData {
   if (!data.catalogStockAlerts) data.catalogStockAlerts = [];
   if (!data.catalogPromoSubscribers) data.catalogPromoSubscribers = [];
   if (!data.catalogLoyaltyAccounts) data.catalogLoyaltyAccounts = [];
+  if (!data.catalogAbandonedCarts) data.catalogAbandonedCarts = [];
+  if (!data.catalogGiftCards) data.catalogGiftCards = [];
   if (!data.catalogSettings) {
     const tenants = loadTenants();
     const currentTenant = tenants.find((t) => t.id === tenantId);
@@ -772,6 +792,9 @@ export interface SelfTrialRegistrationInput {
   businessCategory?: string;
   businessRubro?: BusinessRubro;
   optionalTenantCode?: string;
+  acceptedTerms?: boolean;
+  termsAcceptedAt?: string;
+  termsVersion?: string;
 }
 
 /**
@@ -788,10 +811,17 @@ export function registerSelfServiceTrialTenant(
   const cleanEmail = input.email.trim().toLowerCase();
   const cleanPhone = input.phone.trim();
 
-  if (!companyName || !ownerName || !cleanUsername || !cleanPassword || !cleanEmail || !cleanPhone) {
+  if (input.acceptedTerms !== true) {
     return {
       success: false,
-      error: 'Completá nombre de distribuidora, titular, teléfono, correo, usuario y contraseña.',
+      error: 'Debés leer y aceptar los Términos y Condiciones de Uso y Manejo para crear tu cuenta.',
+    };
+  }
+
+  if (!companyName || !ownerName || !cleanUsername || !cleanPassword) {
+    return {
+      success: false,
+      error: 'Completá nombre de la empresa, titular, usuario y contraseña.',
     };
   }
 
@@ -799,6 +829,13 @@ export function registerSelfServiceTrialTenant(
     return {
       success: false,
       error: 'La contraseña debe tener al menos 4 caracteres.',
+    };
+  }
+
+  if (cleanEmail && !cleanEmail.includes('@')) {
+    return {
+      success: false,
+      error: 'El correo electrónico ingresado no es válido.',
     };
   }
 
@@ -812,7 +849,7 @@ export function registerSelfServiceTrialTenant(
     };
   }
 
-  if (users.some((u) => u.email.toLowerCase() === cleanEmail)) {
+  if (cleanEmail && users.some((u) => u.email && u.email.toLowerCase() === cleanEmail)) {
     return {
       success: false,
       error: `El correo "${cleanEmail}" ya tiene una cuenta asociada. Probá iniciar sesión o recuperar tu clave.`,
@@ -889,6 +926,7 @@ export function registerSelfServiceTrialTenant(
     notes: `Registro autónomo (${profile.shortLabel}) con prueba gratuita de 30 días (vence el ${trialEndsStr}).`,
     config: newConfig,
     catalogEnabled: true,
+    catalogRubro: profile.id,
     subscription: {
       monthlyFee: billingCfg.defaultMonthlyFee || 25000,
       currency: '$',
@@ -899,6 +937,9 @@ export function registerSelfServiceTrialTenant(
       trialEndsAt: trialEndsStr,
       trialDays: 30,
       selfRegistered: true,
+      termsAccepted: true,
+      termsAcceptedAt: input.termsAcceptedAt || now.toISOString(),
+      termsVersion: input.termsVersion || '2026.1',
       paymentHistory: [],
     },
   };
@@ -955,6 +996,9 @@ export function registerSelfServiceTrialTenant(
     autoLogs: [],
     catalogSettings: {
       published: true,
+      catalogRubro: profile.id,
+      rubroFilters: getCatalogRubroPreset(profile.id).defaultFilters,
+      customSubfilters: [],
       storeName: companyName,
       tagline: 'Elegí tus productos, armá tu carrito y envianos tu pedido por WhatsApp.',
       whatsappPhone: cleanPhone,
@@ -974,6 +1018,8 @@ export function registerSelfServiceTrialTenant(
     catalogStockAlerts: [],
     catalogPromoSubscribers: [],
     catalogLoyaltyAccounts: [],
+    catalogAbandonedCarts: [],
+    catalogGiftCards: [],
   });
 
   saveTenants([...tenants, newTenant]);

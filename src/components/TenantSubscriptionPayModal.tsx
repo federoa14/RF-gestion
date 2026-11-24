@@ -18,8 +18,15 @@ import {
   Image as ImageIcon,
   FileCheck2,
   AlertTriangle,
+  Link2,
+  MessageCircle,
 } from 'lucide-react';
-import { Tenant, PlatformBillingConfig } from '../types';
+import {
+  Tenant,
+  PlatformBillingConfig,
+  TenantSubscriptionPayOrder,
+  SubscriptionPlanTier,
+} from '../types';
 import {
   getTenantSubscriptionStatus,
   getCurrentMonthInfo,
@@ -27,14 +34,24 @@ import {
   calculateAnnualFee,
   addMonthsToMonthKey,
   formatMonthKeyEs,
+  getSubscriptionPlanDefinitions,
+  getPlanDefinitionByTier,
+  resolveTenantPlanTier,
 } from '../utils/tenantSubscription';
 import {
   loadPlatformBillingConfig,
   fetchPlatformBillingConfigFromServer,
 } from '../utils/multiTenantStorage';
 import {
+  getPlanTransitionImpactSummary,
+  TERMS_VERSION,
+} from '../utils/termsAndConditions';
+import { TermsConditionsScrollBox } from './TermsConditionsModal';
+import {
   createMercadoPagoPreferenceViaEdgeFunction,
+  createTenantSubscriptionPayOrder,
   fetchVerifiedTenantPaymentStatusFromSupabase,
+  getTenantSubPayOrderFromCloud,
   verifyAndRecordTenantPaymentInSupabase,
 } from '../utils/supabaseServices';
 
@@ -43,10 +60,18 @@ interface TenantSubscriptionPayModalProps {
   onClose: () => void;
   tenant: Tenant;
   payerEmail?: string;
+  autoGenerateLinkOnOpen?: boolean;
+  initialPlanTier?: SubscriptionPlanTier;
+  onSelectPlanTier?: (
+    tier: SubscriptionPlanTier,
+    termsMeta?: { acceptedTermsAt: string; termsVersion: string }
+  ) => void;
   onPaymentApproved: (details: {
     monthKey: string;
     amount: number;
     planType?: 'monthly' | 'annual';
+    planTier?: SubscriptionPlanTier;
+    planTierLabel?: string;
     monthsCount?: number;
     paymentMethod: 'mercadopago' | 'transferencia';
     mpPaymentId?: string;
@@ -114,13 +139,25 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
   onClose,
   tenant,
   payerEmail,
+  autoGenerateLinkOnOpen = false,
+  initialPlanTier,
+  onSelectPlanTier,
   onPaymentApproved,
 }) => {
   const [billingConfig, setBillingConfig] = useState<PlatformBillingConfig>(loadPlatformBillingConfig);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('monthly');
+  const [selectedTier, setSelectedTier] = useState<SubscriptionPlanTier>(
+    () => initialPlanTier || resolveTenantPlanTier(tenant) || 'web'
+  );
   const [copiedAlias, setCopiedAlias] = useState(false);
   const [copiedCvu, setCopiedCvu] = useState(false);
+  const [copiedPayLink, setCopiedPayLink] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isGeneratingShareLink, setIsGeneratingShareLink] = useState(false);
+  const [generatedPayOrder, setGeneratedPayOrder] = useState<{
+    order: TenantSubscriptionPayOrder;
+    payUrl: string;
+  } | null>(null);
   const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
   const [step, setStep] = useState<'summary' | 'mp_checkout_waiting' | 'success'>('summary');
   const [checkoutInfo, setCheckoutInfo] = useState<{
@@ -135,29 +172,65 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
   const [receiptAnalysis, setReceiptAnalysis] = useState<ReceiptAnalysisResult | null>(null);
   const [verifiedSuccessMessage, setVerifiedSuccessMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [pendingSwitchTier, setPendingSwitchTier] = useState<SubscriptionPlanTier | null>(null);
+  const [switchTermsAccepted, setSwitchTermsAccepted] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      const nextTier: SubscriptionPlanTier =
+        initialPlanTier || resolveTenantPlanTier(tenant) || 'web';
       setStep('summary');
       setSelectedPlan('monthly');
+      setSelectedTier(nextTier);
+      setPendingSwitchTier(null);
+      setSwitchTermsAccepted(false);
       setErrorMsg(null);
       setCheckoutInfo(null);
+      setGeneratedPayOrder(null);
+      setCopiedPayLink(false);
       setOperationNumber('');
       setReceiptPreviewUrl(null);
       setReceiptAnalysis(null);
       setVerifiedSuccessMessage(null);
-      fetchPlatformBillingConfigFromServer().then(setBillingConfig);
+      fetchPlatformBillingConfigFromServer().then((freshCfg) => {
+        setBillingConfig(freshCfg);
+        if (autoGenerateLinkOnOpen) {
+          const mInfo = getCurrentMonthInfo();
+          const tierDef = getPlanDefinitionByTier(nextTier, freshCfg);
+          const fee = tierDef.monthlyPrice;
+          setIsGeneratingShareLink(true);
+          createTenantSubscriptionPayOrder({
+            tenant,
+            monthKey: mInfo.monthKey,
+            monthName: mInfo.monthName,
+            planType: 'monthly',
+            planTier: tierDef.tier,
+            planTierLabel: `${tierDef.sectionBadge} · ${tierDef.name}`,
+            monthsCount: 1,
+            amount: fee,
+            billingConfig: freshCfg,
+            payerEmail: payerEmail || tenant.email,
+            generatedBy: 'tenant',
+            notes: `${tierDef.sectionBadge}: ${tierDef.name}`,
+          })
+            .then((res) => setGeneratedPayOrder(res))
+            .catch(() => {})
+            .finally(() => setIsGeneratingShareLink(false));
+        }
+      });
     }
-  }, [isOpen]);
+  }, [isOpen, autoGenerateLinkOnOpen, initialPlanTier, tenant.id]);
 
   if (!isOpen) return null;
 
   const monthInfo = getCurrentMonthInfo();
   const evalStatus = getTenantSubscriptionStatus(tenant);
-  const sub = ensureTenantSubscription(tenant);
-  const monthlyFee = sub.monthlyFee || billingConfig.defaultMonthlyFee || 25000;
+  const planDefinitions = getSubscriptionPlanDefinitions(billingConfig);
+  const activeTierDef = getPlanDefinitionByTier(selectedTier, billingConfig);
+  const activeTierFullLabel = `${activeTierDef.sectionBadge} · ${activeTierDef.name}`;
+  const monthlyFee = activeTierDef.monthlyPrice;
   const annualDiscountPct = Math.max(0, Math.min(50, Number(billingConfig.annualDiscountPercent || 0)));
   const annualTotal = calculateAnnualFee(monthlyFee, annualDiscountPct);
   const annualSavings = Math.max(0, monthlyFee * 12 - annualTotal);
@@ -180,14 +253,35 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
     }
   };
 
-  // Poll automático cada 5s mientras espera confirmación del Webhook oficial de Mercado Pago
+  // Poll automático cada 5s mientras espera confirmación del Webhook oficial de Mercado Pago o de un link ?sub_pay=
   useEffect(() => {
-    if (!isOpen || step !== 'mp_checkout_waiting') return;
+    if (!isOpen || (step !== 'mp_checkout_waiting' && !generatedPayOrder)) return;
     let cancelled = false;
     const mInfo = getCurrentMonthInfo();
     const timer = setInterval(async () => {
       if (cancelled) return;
       try {
+        if (generatedPayOrder?.order.token) {
+          const remoteOrder = await getTenantSubPayOrderFromCloud(generatedPayOrder.order.token);
+          if (!cancelled && remoteOrder && remoteOrder.status === 'approved') {
+            setStep('success');
+            onPaymentApproved({
+              monthKey: remoteOrder.monthKey || mInfo.monthKey,
+              amount: remoteOrder.amount || amountToPay,
+              planType: remoteOrder.planType || selectedPlan,
+              planTier: remoteOrder.planTier || activeTierDef.tier,
+              planTierLabel: remoteOrder.planTierLabel || activeTierFullLabel,
+              monthsCount: remoteOrder.monthsCount || monthsCount,
+              paymentMethod: remoteOrder.paymentMethod || 'mercadopago',
+              mpPaymentId: remoteOrder.mpPaymentId,
+              mpPreferenceId: remoteOrder.mpPreferenceId,
+              receiptAlias: remoteOrder.alias || billingConfig.alias,
+              receiptImageUrl: remoteOrder.receiptImageUrl,
+              verificationNote: remoteOrder.verificationSummary,
+            });
+            return;
+          }
+        }
         const res = await fetchVerifiedTenantPaymentStatusFromSupabase(tenant.id, mInfo.monthKey);
         if (!cancelled && res.approved && res.payment) {
           setStep('success');
@@ -195,6 +289,8 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
             monthKey: mInfo.monthKey,
             amount: res.payment.amount || amountToPay,
             planType: res.payment.planType || selectedPlan,
+            planTier: res.payment.planTier || activeTierDef.tier,
+            planTierLabel: res.payment.planTierLabel || activeTierFullLabel,
             monthsCount: res.payment.monthsCount || monthsCount,
             paymentMethod: res.payment.paymentMethod || 'mercadopago',
             mpPaymentId: res.payment.mpPaymentId,
@@ -211,7 +307,40 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
       cancelled = true;
       clearInterval(timer);
     };
-  }, [isOpen, step, tenant.id]);
+  }, [isOpen, step, tenant.id, generatedPayOrder?.order.token]);
+
+  const handleGenerateShareablePayLink = async () => {
+    setIsGeneratingShareLink(true);
+    setErrorMsg(null);
+    try {
+      const freshBilling = await fetchPlatformBillingConfigFromServer();
+      setBillingConfig((prev) => ({ ...prev, ...freshBilling }));
+      const freshTierDef = getPlanDefinitionByTier(selectedTier, freshBilling);
+      const freshMonthlyFee = freshTierDef.monthlyPrice;
+      const freshDisc = Math.max(0, Math.min(50, Number(freshBilling.annualDiscountPercent || 0)));
+      const freshAmount =
+        selectedPlan === 'annual' ? calculateAnnualFee(freshMonthlyFee, freshDisc) : freshMonthlyFee;
+      const created = await createTenantSubscriptionPayOrder({
+        tenant,
+        monthKey: monthInfo.monthKey,
+        monthName: monthInfo.monthName,
+        planType: selectedPlan,
+        planTier: freshTierDef.tier,
+        planTierLabel: `${freshTierDef.sectionBadge} · ${freshTierDef.name}`,
+        monthsCount,
+        amount: freshAmount,
+        billingConfig: freshBilling,
+        payerEmail: payerEmail || tenant.email,
+        generatedBy: 'tenant',
+        notes: `${freshTierDef.sectionBadge}: ${freshTierDef.name}`,
+      });
+      setGeneratedPayOrder(created);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'No se pudo generar el link de pago.');
+    } finally {
+      setIsGeneratingShareLink(false);
+    }
+  };
 
   // Al hacer clic en "Pagar con Mercado Pago" -> Genera preferencia Checkout Pro vía Edge Function o deriva al link configurado
   const handleStartMercadoPagoCheckout = async () => {
@@ -222,6 +351,20 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
       const freshBilling = await fetchPlatformBillingConfigFromServer();
       setBillingConfig((prev) => ({ ...prev, ...freshBilling }));
 
+      const mpReturnUrl = (() => {
+        if (typeof window === 'undefined') return undefined;
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('planTier', activeTierDef.tier);
+          url.searchParams.set('tenantId', tenant.id);
+          url.searchParams.set('monthKey', monthInfo.monthKey);
+          url.searchParams.set('planType', selectedPlan);
+          return url.toString();
+        } catch {
+          return window.location.href;
+        }
+      })();
+
       const edgePref = await createMercadoPagoPreferenceViaEdgeFunction({
         scope: 'tenant_subscription',
         tenantId: tenant.id,
@@ -230,7 +373,7 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
         planType: selectedPlan,
         amount: amountToPay,
         payerEmail: payerEmail || tenant.email,
-        returnUrl: typeof window !== 'undefined' ? window.location.href : undefined,
+        returnUrl: mpReturnUrl,
       });
 
       if (edgePref.ok && edgePref.initPoint) {
@@ -280,6 +423,8 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
         monthKey: monthInfo.monthKey,
         amount: amountToPay,
         planType: selectedPlan,
+        planTier: activeTierDef.tier,
+        planTierLabel: activeTierFullLabel,
         monthsCount,
         paymentId: operationNumber.trim() || undefined,
         preferenceId: checkoutInfo?.preferenceId,
@@ -295,6 +440,8 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
           monthKey: monthInfo.monthKey,
           amount: data.payment.amount || amountToPay,
           planType: data.payment.planType || selectedPlan,
+          planTier: data.payment.planTier || activeTierDef.tier,
+          planTierLabel: data.payment.planTierLabel || activeTierFullLabel,
           monthsCount: data.payment.monthsCount || monthsCount,
           paymentMethod: data.payment.paymentMethod || method,
           mpPaymentId: data.payment.mpPaymentId,
@@ -326,13 +473,17 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
       }
 
       const opId = operationNumber.trim() || `COMP-${Date.now().toString().slice(-7)}`;
-      const summaryText = `Comprobante registrado (${selectedPlan === 'annual' ? 'Plan Anual 12 meses' : 'Abono mensual'}) • Op #${opId} • $ ${Number(amountToPay).toLocaleString('es-AR')}`;
+      const summaryText = `Comprobante registrado (${activeTierDef.sectionBadge} · ${
+        selectedPlan === 'annual' ? 'Plan Anual 12 meses' : 'Abono mensual'
+      }) • Op #${opId} • $ ${Number(amountToPay).toLocaleString('es-AR')}`;
 
       const data = await verifyAndRecordTenantPaymentInSupabase({
         tenantId: tenant.id,
         monthKey: monthInfo.monthKey,
         amount: amountToPay,
         planType: selectedPlan,
+        planTier: activeTierDef.tier,
+        planTierLabel: activeTierFullLabel,
         monthsCount,
         paymentId: opId,
         paymentMethod: 'transferencia',
@@ -353,7 +504,7 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
 
       if (data.approved && data.payment) {
         setVerifiedSuccessMessage(
-          `¡Comprobante guardado en Supabase! ${
+          `¡Comprobante guardado en Supabase! ${activeTierFullLabel} · ${
             selectedPlan === 'annual' ? 'Plan Anual (12 meses)' : 'Abono mensual'
           } de $ ${Number(data.payment.amount || amountToPay).toLocaleString('es-AR')} acreditado.`
         );
@@ -362,6 +513,8 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
           monthKey: monthInfo.monthKey,
           amount: data.payment.amount || amountToPay,
           planType: data.payment.planType || selectedPlan,
+          planTier: data.payment.planTier || activeTierDef.tier,
+          planTierLabel: data.payment.planTierLabel || activeTierFullLabel,
           monthsCount: data.payment.monthsCount || monthsCount,
           paymentMethod: data.payment.paymentMethod || 'mercadopago',
           mpPaymentId: data.payment.mpPaymentId,
@@ -562,7 +715,7 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-auto animate-in fade-in zoom-in-95">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-3xl max-w-3xl w-full p-6 shadow-2xl space-y-4 my-auto animate-in fade-in zoom-in-95">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
           <div className="flex items-center gap-3">
@@ -611,9 +764,13 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
                 <p className="font-black text-sm">{evalStatus.statusLabel}</p>
                 <p className="leading-relaxed opacity-90">
                   {evalStatus.isPaidForCurrentMonth
-                    ? `Tu suscripción correspondiente a ${monthInfo.monthName} ya figura como PAGADA. ¡Gracias por operar con nosotros!`
+                    ? `Tu suscripción correspondiente a ${monthInfo.monthName} ya figura como PAGADA (${activeTierFullLabel}). ¡Gracias por operar con nosotros!`
+                    : evalStatus.status === 'trial_expired'
+                    ? 'Tus 30 días de prueba gratuita finalizaron. Elegí una de las 3 tipologías abajo y generá el pago al instante para activar tu cuenta.'
+                    : evalStatus.status === 'trial_active'
+                    ? `Tu cuenta está en prueba gratis (quedan ${evalStatus.trialDaysRemaining} día(s) hasta el ${evalStatus.trialEndsAt}). Elegí tu plan y podés abonar desde ahora.`
                     : evalStatus.isPaused
-                    ? 'Tu cuenta está pausada por falta de pago. Aboná ahora con Mercado Pago o subí tu comprobante para reactivar el sistema al instante.'
+                    ? 'Tu cuenta está pausada. Elegí tu plan abajo y aboná con Mercado Pago o subí tu comprobante para reactivar el sistema al instante.'
                     : evalStatus.isOverdue
                     ? `Tu boleta mensual venció el ${dueDateLabel}. Efectuá el pago ahora para evitar que el sistema pause la cuenta.`
                     : `Tu abono de ${monthInfo.monthName} está próximo a vencerse (vence el ${dueDateLabel}). Podés adelantarlo o pagarlo ahora mismo.`}
@@ -621,18 +778,217 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
               </div>
             </div>
 
+            {/* 3 TIPOLOGÍAS DE SERVICIO (SECCIÓN 1, SECCIÓN 2, SECCIÓN 3) */}
+            {!evalStatus.isPaidForCurrentMonth && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    1. Elegí tu Plan / Tipología de Servicio:
+                  </span>
+                  <span className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">
+                    Seleccionado: {activeTierDef.sectionBadge} · {activeTierDef.shortName}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                  {planDefinitions.map((def) => {
+                    const isTierSelected = selectedTier === def.tier;
+                    const tierAnnual = calculateAnnualFee(def.monthlyPrice, annualDiscountPct);
+                    return (
+                      <button
+                        key={def.tier}
+                        type="button"
+                        onClick={() => {
+                          if (def.tier === selectedTier) {
+                            setPendingSwitchTier(null);
+                            return;
+                          }
+                          setPendingSwitchTier(def.tier);
+                          setSwitchTermsAccepted(false);
+                        }}
+                        className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                          isTierSelected
+                            ? def.tier === 'full'
+                              ? 'bg-[#0B1933] text-white border-amber-400 ring-2 ring-amber-400/35 shadow-md'
+                              : 'bg-[#0B1933] text-white border-[#009EE3] ring-2 ring-[#009EE3]/30 shadow-md'
+                            : pendingSwitchTier === def.tier
+                            ? 'bg-sky-50 dark:bg-sky-950/30 text-slate-900 dark:text-white border-sky-500 ring-2 ring-sky-500/30'
+                            : 'bg-slate-50 dark:bg-slate-800/50 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:border-slate-400'
+                        }`}
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
+                                def.tier === 'full'
+                                  ? 'bg-amber-400 text-[#091428]'
+                                  : def.tier === 'web'
+                                  ? 'bg-sky-500 text-white'
+                                  : isTierSelected
+                                  ? 'bg-white/15 text-white'
+                                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                              }`}
+                            >
+                              {def.sectionBadge}
+                            </span>
+                            {isTierSelected && (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                            )}
+                          </div>
+                          <div className="text-xs font-black leading-snug">{def.name}</div>
+                          <div className="text-lg font-mono font-black tabular-nums">
+                            $ {def.monthlyPrice.toLocaleString('es-AR')}
+                            <span className={`text-[10px] font-normal ml-1 ${isTierSelected ? 'text-slate-300' : 'text-slate-500'}`}>
+                              /mes
+                            </span>
+                          </div>
+                          {annualDiscountPct > 0 && (
+                            <div className={`text-[10px] font-mono ${isTierSelected ? 'text-emerald-300' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                              Anual (-{annualDiscountPct}%): $ {tierAnnual.toLocaleString('es-AR')}
+                            </div>
+                          )}
+                          <p className={`text-[11px] leading-snug ${isTierSelected ? 'text-slate-300' : 'text-slate-500 dark:text-slate-400'}`}>
+                            {def.tagline}
+                          </p>
+                        </div>
+
+                        <div className={`pt-2 border-t space-y-1 text-[10.5px] ${isTierSelected ? 'border-white/15' : 'border-slate-200 dark:border-slate-700'}`}>
+                          {def.includedFeatures.map((feat) => (
+                            <div key={feat} className="flex items-start gap-1.5">
+                              <Check className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+                              <span className="leading-tight">{feat}</span>
+                            </div>
+                          ))}
+                          {def.excludedFeatures.map((feat) => (
+                            <div
+                              key={feat}
+                              className={`flex items-start gap-1.5 ${
+                                isTierSelected ? 'text-slate-400' : 'text-slate-400 dark:text-slate-500'
+                              }`}
+                            >
+                              <X className="w-3 h-3 text-rose-400 shrink-0 mt-0.5" />
+                              <span className="leading-tight">{feat}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Confirmación obligatoria de Términos y Condiciones al cambiar a otra Sección */}
+                {pendingSwitchTier && pendingSwitchTier !== selectedTier && (() => {
+                  const targetDef = getPlanDefinitionByTier(pendingSwitchTier, billingConfig);
+                  const impact = getPlanTransitionImpactSummary(selectedTier, pendingSwitchTier);
+                  return (
+                    <div className="mt-2 p-4 rounded-2xl border-2 border-[#0B1933] dark:border-sky-400/50 bg-slate-50 dark:bg-slate-800/80 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                                impact.direction === 'downgrade'
+                                  ? 'bg-amber-200 text-amber-950'
+                                  : 'bg-emerald-200 text-emerald-950'
+                              }`}
+                            >
+                              {impact.badgeLabel}
+                            </span>
+                            <span className="text-xs font-bold text-slate-900 dark:text-white">
+                              {impact.headline}
+                            </span>
+                          </div>
+                          <ul className="mt-1.5 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                            {impact.bullets.map((b, i) => (
+                              <li key={i} className="flex items-start gap-1.5">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                                <span>{b}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingSwitchTier(null);
+                            setSwitchTermsAccepted(false);
+                          }}
+                          className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer shrink-0"
+                          aria-label="Cancelar cambio de sección"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <TermsConditionsScrollBox variant="light" maxHeightClass="max-h-40" />
+
+                      <label className="flex items-start gap-2.5 p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={switchTermsAccepted}
+                          onChange={(e) => setSwitchTermsAccepted(e.target.checked)}
+                          className="mt-0.5 rounded border-slate-300 text-[#0B1933]"
+                        />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 leading-snug">
+                          Acepto los Términos y Condiciones de Uso y Manejo (v{TERMS_VERSION}) para cambiar a{' '}
+                          <strong>
+                            {targetDef.sectionBadge} · {targetDef.shortName}
+                          </strong>{' '}
+                          (${targetDef.monthlyPrice.toLocaleString('es-AR')}/mes).
+                        </span>
+                      </label>
+
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingSwitchTier(null);
+                            setSwitchTermsAccepted(false);
+                          }}
+                          className="px-3.5 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-700 cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!switchTermsAccepted}
+                          onClick={() => {
+                            const next = pendingSwitchTier;
+                            setSelectedTier(next);
+                            setGeneratedPayOrder(null);
+                            onSelectPlanTier?.(next, {
+                              acceptedTermsAt: new Date().toISOString(),
+                              termsVersion: TERMS_VERSION,
+                            });
+                            setPendingSwitchTier(null);
+                            setSwitchTermsAccepted(false);
+                          }}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-45 disabled:cursor-not-allowed text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Aceptar Términos y Cambiar a {targetDef.sectionBadge}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {/* Segmented Modalidad Selector: 1 Mes (Mes a Mes) vs Todo el Año (12 Meses) */}
             {!evalStatus.isPaidForCurrentMonth && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Elegí cómo abonar tu cuenta de gestión:
+                    2. Elegí la frecuencia de pago para {activeTierDef.sectionBadge}:
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelectedPlan('monthly')}
+                    onClick={() => {
+                      setSelectedPlan('monthly');
+                      setGeneratedPayOrder(null);
+                    }}
                     className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                       selectedPlan === 'monthly'
                         ? 'bg-[#0B1933] text-white border-[#009EE3] shadow-sm'
@@ -650,7 +1006,10 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
 
                   <button
                     type="button"
-                    onClick={() => setSelectedPlan('annual')}
+                    onClick={() => {
+                      setSelectedPlan('annual');
+                      setGeneratedPayOrder(null);
+                    }}
                     className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
                       selectedPlan === 'annual'
                         ? 'bg-[#0B1933] text-white border-emerald-500 shadow-sm'
@@ -680,9 +1039,10 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
             <div className="bg-slate-50 dark:bg-slate-800/70 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 tabular-nums">
               <div>
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block">
+                  {activeTierFullLabel} ·{' '}
                   {selectedPlan === 'annual'
-                    ? `Abono Anual · 12 Meses (${tenant.name})`
-                    : `Importe Mensual · 1 Mes (${tenant.name})`}
+                    ? `Abono Anual 12M (${tenant.name})`
+                    : `Abono Mensual (${tenant.name})`}
                 </span>
                 <span className="text-2xl sm:text-3xl font-black font-mono text-slate-900 dark:text-white">
                   $ {amountToPay.toLocaleString('es-AR')}
@@ -698,16 +1058,19 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
                   </span>
                 </span>
               </div>
-              <div className="text-right">
+              <div className="text-right flex flex-col items-end gap-1">
                 <span className="px-2.5 py-1 rounded-lg bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 text-[11px] font-bold border border-sky-200 dark:border-sky-800">
+                  {activeTierDef.sectionBadge} · {activeTierDef.shortName}
+                </span>
+                <span className="text-[10px] font-semibold text-slate-500">
                   {selectedPlan === 'annual' ? 'Plan 12 Meses' : 'Mes a Mes'}
                 </span>
               </div>
             </div>
 
-            {/* Primary Direct Mercado Pago Button */}
+            {/* Primary Direct Mercado Pago Button + Generar Link de Pago Compartible */}
             {!evalStatus.isPaidForCurrentMonth && (
-              <div className="space-y-1.5">
+              <div className="space-y-2.5">
                 <button
                   type="button"
                   disabled={isProcessing || isVerifyingReceipt}
@@ -729,6 +1092,80 @@ export const TenantSubscriptionPayModal: React.FC<TenantSubscriptionPayModalProp
                     </>
                   )}
                 </button>
+
+                <button
+                  type="button"
+                  disabled={isGeneratingShareLink || isProcessing || isVerifyingReceipt}
+                  onClick={handleGenerateShareablePayLink}
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-bold border border-slate-700 flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
+                >
+                  {isGeneratingShareLink ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Generando link de pago...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="w-3.5 h-3.5 text-sky-400" />
+                      <span>
+                        Generar Link de Pago ({selectedPlan === 'annual' ? 'Plan Anual' : '1 Mes'}) para Pagar o Enviar por WhatsApp
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                {generatedPayOrder && (
+                  <div className="p-3.5 rounded-2xl bg-sky-50 dark:bg-sky-950/35 border border-sky-300 dark:border-sky-800 space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-black text-sky-900 dark:text-sky-200 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        <span>
+                          Link de Pago Generado ({generatedPayOrder.order.planType === 'annual' ? '12 Meses' : '1 Mes'} · $ {generatedPayOrder.order.amount.toLocaleString('es-AR')})
+                        </span>
+                      </span>
+                    </div>
+                    <div className="bg-white dark:bg-slate-950 px-2.5 py-2 rounded-xl border border-sky-200 dark:border-slate-700 font-mono text-[11px] text-slate-700 dark:text-sky-300 break-all select-all">
+                      {generatedPayOrder.payUrl}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(generatedPayOrder.payUrl);
+                          setCopiedPayLink(true);
+                          setTimeout(() => setCopiedPayLink(false), 2000);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        {copiedPayLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{copiedPayLink ? '¡Link Copiado!' : 'Copiar Link'}</span>
+                      </button>
+
+                      <a
+                        href={generatedPayOrder.payUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold flex items-center gap-1"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Abrir Pago</span>
+                      </a>
+
+                      <a
+                        href={`https://wa.me/?text=${encodeURIComponent(
+                          `Hola! Te comparto el enlace de pago de ${tenant.name} (${tenant.tenantCode}) para activar el sistema:\n• Tipología: ${generatedPayOrder.order.planTierLabel || activeTierFullLabel}\n• Modalidad: ${generatedPayOrder.order.planType === 'annual' ? 'Anual 12 Meses' : `Mensual (${generatedPayOrder.order.monthName})`}\n• Importe: $ ${generatedPayOrder.order.amount.toLocaleString('es-AR')}\n• Link directo de pago: ${generatedPayOrder.payUrl}`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        <span>Enviar por WhatsApp</span>
+                      </a>
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-[11px] text-center text-slate-400 flex items-center justify-center gap-1">
                   <Lock className="w-3 h-3" />
                   <span>Te deriva directo a Mercado Pago o podés transferir al CVU/Alias del Gestor General y subir el comprobante abajo.</span>

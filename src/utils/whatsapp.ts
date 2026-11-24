@@ -1247,9 +1247,131 @@ export function generateCatalogBirthdayPromoWhatsAppMessage(params: {
   );
 }
 
+export function generateAbandonedCartRecoveryWhatsAppMessage(params: {
+  customerName?: string;
+  storeName?: string;
+  itemsSummary: string[];
+  totalAmount: number;
+  currencySymbol?: string;
+  couponCode?: string;
+  couponDiscountLabel?: string;
+  catalogUrl?: string;
+}): string {
+  const shopName = storeNameOrFallback(params.storeName);
+  const sym = params.currencySymbol || '$';
+  const greeting = params.customerName?.trim() ? `*${params.customerName.trim()}*` : 'hola';
+  const itemsBlock = params.itemsSummary.map((line) => `• ${line}`).join('\n');
+  const couponLine = params.couponCode?.trim()
+    ? `\n\n🎁 *Te regalamos el cupón:* \`${params.couponCode.trim().toUpperCase()}\`${
+        params.couponDiscountLabel ? ` (${params.couponDiscountLabel})` : ''
+      } para que lo uses hoy.`
+    : '';
+  const linkLine = params.catalogUrl
+    ? `\n\n🛍️ Retomá tu carrito en 1 clic acá:\n🔗 ${params.catalogUrl}`
+    : '';
+
+  return (
+    `🛒 *¡GUARDAMOS TU CARRITO PARA VOS!*\n` +
+    `🏪 *${shopName}*\n\n` +
+    `Hola ${greeting}, vimos que dejaste seleccionados estos productos en nuestro catálogo web:\n` +
+    `${itemsBlock}\n\n` +
+    `💰 *Total estimado:* ${formatCurrency(params.totalAmount, sym)}${couponLine}${linkLine}\n\n` +
+    `¿Querés que te lo reservemos o te ayudamos con el talle / medio de pago?`
+  );
+}
+
+export function generateGiftCardWhatsAppMessage(params: {
+  code: string;
+  amount: number;
+  currencySymbol?: string;
+  storeName?: string;
+  recipientName?: string;
+  buyerName?: string;
+  message?: string;
+  expiresAt?: string;
+  catalogUrl?: string;
+}): string {
+  const shopName = storeNameOrFallback(params.storeName);
+  const sym = params.currencySymbol || '$';
+  const toLine = params.recipientName?.trim()
+    ? `Hola *${params.recipientName.trim()}*, `
+    : '¡Hola! ';
+  const fromLine = params.buyerName?.trim()
+    ? `*${params.buyerName.trim()}* te envió una `
+    : 'Recibiste una ';
+  const customNote = params.message?.trim() ? `\n💌 _"${params.message.trim()}"_` : '';
+  const expLine = params.expiresAt
+    ? `\n📅 *Válida hasta:* ${formatDateEs(params.expiresAt)}`
+    : '';
+  const linkLine = params.catalogUrl
+    ? `\n\n🛍️ Usala ingresando tu código en el carrito web:\n🔗 ${params.catalogUrl}`
+    : '';
+
+  return (
+    `🎁 *GIFT CARD DIGITAL — ${shopName}*\n\n` +
+    `${toLine}${fromLine}*Gift Card Digital* para elegir lo que más te guste:${customNote}\n\n` +
+    `🎟️ *Código de canje:* \`${params.code}\`\n` +
+    `💵 *Saldo disponible:* *${formatCurrency(params.amount, sym)}*${expLine}${linkLine}\n\n` +
+    `¡Disfrutá tu regalo!`
+  );
+}
+
+export function generateOrderReturnConfirmationWhatsAppMessage(params: {
+  orderNumber: string;
+  customerName: string;
+  storeName?: string;
+  currencySymbol?: string;
+  returnTypeLabel: string;
+  returnedItemsSummary: string[];
+  replacementSummary?: string;
+  returnedAmount: number;
+  refundResolutionLabel: string;
+  creditIssuedAmount?: number;
+  newStoreCreditBalance?: number;
+  pointsDeducted?: number;
+  newPointsBalance?: number;
+}): string {
+  const shopName = storeNameOrFallback(params.storeName);
+  const sym = params.currencySymbol || '$';
+  const itemsBlock = params.returnedItemsSummary.map((l) => `• ${l}`).join('\n');
+  const replacementBlock = params.replacementSummary
+    ? `\n🔄 *Prenda entregada en cambio:* ${params.replacementSummary}`
+    : '';
+  const creditBlock =
+    params.creditIssuedAmount && params.creditIssuedAmount > 0
+      ? `\n💳 *Saldo a favor acreditado en tu DNI:* *${formatCurrency(
+          params.creditIssuedAmount,
+          sym
+        )}*${
+          typeof params.newStoreCreditBalance === 'number'
+            ? ` (Disponible actual: ${formatCurrency(params.newStoreCreditBalance, sym)})`
+            : ''
+        }`
+      : '';
+  const pointsBlock =
+    params.pointsDeducted && params.pointsDeducted > 0
+      ? `\n⭐ *Ajuste Club de Puntos:* -${params.pointsDeducted} pts por devolución${
+          typeof params.newPointsBalance === 'number'
+            ? ` (Saldo actual: ${params.newPointsBalance} pts)`
+            : ''
+        }`
+      : '';
+
+  return (
+    `🔄 *COMPROBANTE DE ${params.returnTypeLabel.toUpperCase()} — #${params.orderNumber}*\n` +
+    `🏪 *${shopName}*\n\n` +
+    `Hola *${params.customerName}*, dejamos registrada tu gestión:\n\n` +
+    `${itemsBlock}${replacementBlock}\n\n` +
+    `💰 *Monto gestionado:* *${formatCurrency(params.returnedAmount, sym)}*\n` +
+    `📌 *Resolución:* ${params.refundResolutionLabel}${creditBlock}${pointsBlock}\n\n` +
+    `¡Gracias por comunicarte con nosotros!`
+  );
+}
+
 function storeNameOrFallback(name?: string): string {
   const clean = (name || '').trim();
   return clean || 'Nuestra Tienda';
 }
+
 
 

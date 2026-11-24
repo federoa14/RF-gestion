@@ -335,6 +335,39 @@ export interface ClientPaymentOrder {
   createdAt: string;
 }
 
+export type SubscriptionPlanTier = 'basico' | 'web' | 'full';
+
+export interface TenantSubscriptionPayOrder {
+  token: string;
+  tenantId: string;
+  tenantCode: string;
+  tenantName: string;
+  monthKey: string;
+  monthName: string;
+  planType: 'monthly' | 'annual';
+  planTier?: SubscriptionPlanTier;
+  planTierLabel?: string;
+  monthsCount: number;
+  amount: number;
+  currencySymbol: string;
+  alias?: string;
+  cvu?: string;
+  holderName?: string;
+  bankName?: string;
+  mpCheckoutLink?: string;
+  mpInitPoint?: string;
+  mpPreferenceId?: string;
+  status: 'pending' | 'approved';
+  paymentMethod?: 'mercadopago' | 'transferencia';
+  mpPaymentId?: string;
+  paidAt?: string;
+  verificationSummary?: string;
+  receiptImageUrl?: string;
+  generatedBy?: 'tenant' | 'superadmin';
+  notes?: string;
+  createdAt: string;
+}
+
 export interface TenantMonthlyPayment {
   id: string;
   monthKey: string; // Formato "YYYY-MM", ej. "2026-11"
@@ -343,6 +376,8 @@ export interface TenantMonthlyPayment {
   amountPaid: number; // Monto cobrado
   status: 'paid' | 'pending' | 'extended';
   planType?: 'monthly' | 'annual'; // 'monthly' = 1 mes, 'annual' = abono anual (12 meses)
+  planTier?: SubscriptionPlanTier; // Tipología abonada: 'basico' | 'web' | 'full'
+  planTierLabel?: string;
   coveredMonthsCount?: number; // 1 o 12
   paymentMethod?: 'mercadopago' | 'transferencia' | 'manual';
   mpPaymentId?: string; // ID de pago aprobado en Mercado Pago
@@ -355,12 +390,19 @@ export interface TenantMonthlyPayment {
   markedBy?: string; // Nombre del superadmin o sistema automático
 }
 
+export interface PlatformPlanPrices {
+  basico: number;
+  web: number;
+  full: number;
+}
+
 export interface PlatformBillingConfig {
   alias: string; // Alias donde se recibe el dinero (ej. "mi.alias.mp")
   cvu?: string; // CVU o CBU del gestor general / dueño del sistema
   accountHolderName: string; // Nombre del titular de la cuenta receptora
   bankOrWalletName?: string; // Billetera o banco (ej. "Mercado Pago")
   defaultMonthlyFee: number; // Cuota mensual sugerida por defecto
+  planPrices?: PlatformPlanPrices; // Escala de precios para las 3 tipologías de servicio
   annualDiscountPercent?: number; // Descuento opcional al pagar el año completo (0 a 40%)
   mpCheckoutLink?: string; // Link fijo de Mercado Pago opcional (si no se usa Access Token)
   mpPublicKey?: string; // Public Key opcional de Mercado Pago
@@ -396,9 +438,32 @@ export interface PlatformAnnouncement {
   authorName?: string;
 }
 
+export interface TenantPlanChangeRecord {
+  id: string;
+  fromTier?: SubscriptionPlanTier;
+  toTier: SubscriptionPlanTier;
+  fromLabel: string;
+  toLabel: string;
+  previousMonthlyFee: number;
+  newMonthlyFee: number;
+  changedAt: string;
+  changedBy: 'tenant_self_upgrade' | 'superadmin';
+  triggerReason: string;
+  acceptedTerms: boolean;
+  acceptedTermsAt: string;
+  termsVersion?: string;
+}
+
 export interface TenantSubscription {
   monthlyFee: number; // Monto mensual fijado (ej. 25000)
   currency: string; // "$"
+  planTier?: SubscriptionPlanTier; // Sección 1 ('basico'), Sección 2 ('web'), Sección 3 ('full')
+  planSelectedAt?: string;
+  lastPlanChange?: TenantPlanChangeRecord;
+  planChangeHistory?: TenantPlanChangeRecord[];
+  termsAccepted?: boolean;
+  termsAcceptedAt?: string;
+  termsVersion?: string;
   paymentWindowStartDay: number; // 1 (día 1 de cada mes)
   paymentWindowEndDay: number; // 5 (día 5 de cada mes)
   lastPaidMonth?: string; // "YYYY-MM"
@@ -582,6 +647,16 @@ export interface CatalogLoyaltyMovement {
   note?: string;
 }
 
+export interface CatalogStoreCreditMovement {
+  id: string;
+  date: string;
+  type: 'credited_return' | 'redeemed_purchase' | 'manual_adjustment';
+  amountDelta: number;
+  orderId?: string;
+  orderNumber?: string;
+  note?: string;
+}
+
 export interface CatalogLoyaltyAccount {
   id: string;
   tenantId: string;
@@ -591,6 +666,9 @@ export interface CatalogLoyaltyAccount {
   pointsBalance: number;
   totalPointsEarned: number;
   totalPointsRedeemed: number;
+  storeCreditBalance?: number;
+  storeCreditHistory?: CatalogStoreCreditMovement[];
+  favoriteProductIds?: string[];
   ordersCount: number;
   lastOrderAt?: string;
   history?: CatalogLoyaltyMovement[];
@@ -619,6 +697,9 @@ export interface CatalogProduct {
   name: string;
   description: string;
   price: number;
+  flashSalePrice?: number;
+  flashSaleEndsAt?: string; // ISO datetime string
+  isOutlet?: boolean;
   category: string;
   rubro?: BusinessRubro; // Rubro exclusivo del producto (sincronizado con catalogRubro)
   subfilters?: string[]; // Subfiltros asignados al producto (ej. Remeras, Jeans, Invierno)
@@ -636,6 +717,121 @@ export interface CatalogProduct {
   variants?: CatalogProductVariant[]; // Variantes (Talle / Color / Medida) con stock propio
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CatalogAbandonedCartItem {
+  productId: string;
+  productName: string;
+  sku?: string;
+  variantId?: string;
+  variantLabel?: string;
+  imageUrl?: string;
+  unitLabel?: string;
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+}
+
+export interface CatalogAbandonedCart {
+  id: string;
+  tenantId: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerDni?: string;
+  items: CatalogAbandonedCartItem[];
+  totalAmount: number;
+  currencySymbol: string;
+  status: 'abandoned' | 'reminded' | 'recovered' | 'discarded';
+  reminderSentAt?: string;
+  reminderCount?: number;
+  recoveredOrderId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CatalogGiftCardMovement {
+  id: string;
+  date: string;
+  type: 'issued' | 'redeemed' | 'refunded' | 'adjusted';
+  amountDelta: number;
+  orderId?: string;
+  orderNumber?: string;
+  note?: string;
+}
+
+export interface CatalogGiftCard {
+  id: string;
+  tenantId: string;
+  code: string;
+  initialAmount: number;
+  remainingBalance: number;
+  currencySymbol: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  buyerName?: string;
+  buyerDni?: string;
+  message?: string;
+  expiresAt?: string; // YYYY-MM-DD
+  status: 'active' | 'redeemed' | 'cancelled';
+  history?: CatalogGiftCardMovement[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type CatalogOrderReturnType = 'devolucion_total' | 'devolucion_parcial' | 'cambio';
+
+export type CatalogOrderReturnReason =
+  | 'cambio_talle'
+  | 'cambio_modelo'
+  | 'defecto_falla'
+  | 'arrepentimiento_cliente'
+  | 'error_envio'
+  | 'otro';
+
+export type CatalogOrderRefundResolution =
+  | 'saldo_favor_dni'
+  | 'reintegro_dinero'
+  | 'cambio_mano_a_mano';
+
+export interface CatalogOrderReturnItem {
+  productId: string;
+  productName: string;
+  sku?: string;
+  variantId?: string;
+  variantLabel?: string;
+  unitPrice: number;
+  quantityReturned: number;
+  subtotalReturned: number;
+}
+
+export interface CatalogOrderReturnReplacementItem {
+  productId: string;
+  productName: string;
+  sku?: string;
+  variantId?: string;
+  variantLabel?: string;
+  unitPrice: number;
+  quantity: number;
+  subtotal: number;
+}
+
+export interface CatalogOrderReturnRecord {
+  id: string;
+  date: string;
+  type: CatalogOrderReturnType;
+  reason: CatalogOrderReturnReason;
+  returnedItems: CatalogOrderReturnItem[];
+  replacementItem?: CatalogOrderReturnReplacementItem;
+  returnedAmount: number;
+  differenceAmount?: number;
+  refundResolution: CatalogOrderRefundResolution;
+  refundMethod?: 'efectivo' | 'transferencia' | 'mercadopago';
+  creditIssuedAmount: number;
+  pointsDeducted: number;
+  redeemedPointsRestored?: number;
+  stockRestored: boolean;
+  notes?: string;
+  recordedBy: string;
 }
 
 export interface CatalogStockAlertRequest {
@@ -750,6 +946,9 @@ export interface CatalogPickupOrder {
   wholesaleSavings?: number;
   couponCode?: string;
   couponDiscountAmount?: number;
+  giftCardCode?: string;
+  giftCardDiscountAmount?: number;
+  storeCreditUsedAmount?: number;
   paymentMethodDiscountPercent?: number;
   paymentMethodDiscountAmount?: number;
   loyaltyDiscountPercent?: number;
@@ -759,7 +958,18 @@ export interface CatalogPickupOrder {
   loyaltyPointsSettled?: boolean;
   totalAmount: number;
   currencySymbol: string;
-  status: 'pendiente_retiro' | 'listo_para_retirar' | 'en_camino' | 'retirado' | 'cancelado';
+  status:
+    | 'pendiente_retiro'
+    | 'listo_para_retirar'
+    | 'en_camino'
+    | 'retirado'
+    | 'cancelado'
+    | 'devuelto';
+  returnStatus?: 'ninguna' | 'devolucion_parcial' | 'devolucion_total' | 'cambio';
+  returnedAmount?: number;
+  returnedPointsDeducted?: number;
+  creditBalanceIssued?: number;
+  returnRecords?: CatalogOrderReturnRecord[];
   stockDeducted?: boolean;
   stockRestoredAt?: string;
   linkedBoletaId?: string;
@@ -776,6 +986,8 @@ export interface PublishedPublicCatalog {
   slug?: string;
   enabledBySuperAdmin: boolean;
   published: boolean;
+  planTier?: SubscriptionPlanTier;
+  canAccessFullFeatures?: boolean;
   catalogRubro?: BusinessRubro;
   rubroFilters?: string[];
   customSubfilters?: string[];

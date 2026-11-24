@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   RefreshCw,
+  RotateCcw,
 } from 'lucide-react';
 import {
   CatalogPickupOrder,
@@ -53,6 +54,7 @@ interface WebOrderDetailModalProps {
   ) => void;
   onWhatsAppCollect?: (order: CatalogPickupOrder) => void;
   onVerifyTransferReceipt?: (order: CatalogPickupOrder) => Promise<void> | void;
+  onOpenReturnModal?: (order: CatalogPickupOrder) => void;
 }
 
 function resolvePaymentLabel(
@@ -85,6 +87,8 @@ function resolveStatusText(status: CatalogPickupOrder['status'], isDelivery: boo
       return isDelivery ? 'Listo para despachar' : 'Listo para retirar';
     case 'cancelado':
       return 'Cancelado';
+    case 'devuelto':
+      return 'Devuelto';
     default:
       return 'Pendiente de armado';
   }
@@ -115,6 +119,7 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
   onSendProcessWhatsApp,
   onWhatsAppCollect,
   onVerifyTransferReceipt,
+  onOpenReturnModal,
 }) => {
   const [checkedItemIndices, setCheckedItemIndices] = useState<Record<number, boolean>>({});
   const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
@@ -223,7 +228,7 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                 className={`font-sans font-semibold ${
                   order.status === 'retirado'
                     ? 'text-emerald-700 dark:text-emerald-400'
-                    : order.status === 'cancelado'
+                    : order.status === 'cancelado' || order.status === 'devuelto'
                     ? 'text-rose-600 dark:text-rose-400'
                     : 'text-amber-700 dark:text-amber-300'
                 }`}
@@ -336,7 +341,8 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
 
                 {onConfirmPayment &&
                   order.paymentStatus !== 'acreditado' &&
-                  order.status !== 'cancelado' && (
+                  order.status !== 'cancelado' &&
+                  order.status !== 'devuelto' && (
                     <button
                       type="button"
                       onClick={() => onConfirmPayment(order)}
@@ -347,7 +353,7 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                   )}
               </div>
 
-              {onChangePaymentMethod && order.status !== 'cancelado' && (
+              {onChangePaymentMethod && order.status !== 'cancelado' && order.status !== 'devuelto' && (
                 <div>
                   <select
                     aria-label="Modificar forma de pago"
@@ -448,6 +454,7 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
 
                   {onVerifyTransferReceipt &&
                     order.status !== 'cancelado' &&
+                    order.status !== 'devuelto' &&
                     order.transferVerificationStatus !== 'verificado_auto' && (
                       <button
                         type="button"
@@ -507,8 +514,80 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
             </div>
           )}
 
+          {/* Return / Exchange History Card */}
+          {((order.returnRecords && order.returnRecords.length > 0) ||
+            (order.returnedAmount && order.returnedAmount > 0) ||
+            order.status === 'devuelto') && (
+            <div className="p-3.5 rounded-xl bg-rose-50/85 dark:bg-rose-950/25 border border-rose-200 dark:border-rose-500/30 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Historial de Cambios / Devoluciones</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono tabular-nums">
+                  {Number(order.returnedAmount || 0) > 0 && (
+                    <span className="font-bold text-rose-700 dark:text-rose-300">
+                      Devuelto: -{formatCurrency(order.returnedAmount || 0, currency)}
+                    </span>
+                  )}
+                  {Number(order.returnedPointsDeducted || 0) > 0 && (
+                    <span className="px-2 py-0.5 rounded bg-rose-100 dark:bg-rose-900/40 font-bold text-rose-800 dark:text-rose-200">
+                      -{order.returnedPointsDeducted} pts restados
+                    </span>
+                  )}
+                  {Number(order.creditBalanceIssued || 0) > 0 && (
+                    <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/40 font-bold text-emerald-800 dark:text-emerald-200">
+                      Saldo a favor: {formatCurrency(order.creditBalanceIssued || 0, currency)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {order.returnRecords && order.returnRecords.length > 0 && (
+                <div className="space-y-1.5">
+                  {order.returnRecords.map((rec) => (
+                    <div
+                      key={rec.id}
+                      className="text-xs bg-white/80 dark:bg-[#0B1933]/70 border border-rose-200/70 dark:border-rose-500/20 rounded-lg px-2.5 py-2 space-y-0.5"
+                    >
+                      <div className="flex items-center justify-between gap-2 font-semibold text-[#0B1933] dark:text-white">
+                        <span>
+                          {rec.type === 'cambio'
+                            ? 'Cambio de prenda / producto'
+                            : rec.type === 'devolucion_parcial'
+                            ? 'Devolución parcial'
+                            : 'Devolución total'}{' '}
+                          ({rec.reason.replace(/_/g, ' ')})
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-[#94A3B8]">
+                          {formatDateTimeEs(rec.date)} · {rec.recordedBy}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-600 dark:text-[#CBD5E1]">
+                        Devuelto:{' '}
+                        {rec.returnedItems
+                          .map(
+                            (ri) =>
+                              `${ri.quantityReturned}× ${ri.productName}${ri.variantLabel ? ` (${ri.variantLabel})` : ''}`
+                          )
+                          .join(', ')}
+                        {rec.replacementItem
+                          ? ` → Cambio por: ${rec.replacementItem.quantity}× ${rec.replacementItem.productName}${rec.replacementItem.variantLabel ? ` (${rec.replacementItem.variantLabel})` : ''}`
+                          : ''}
+                      </div>
+                      {rec.notes && (
+                        <div className="text-[11px] italic text-slate-500 dark:text-[#94A3B8]">
+                          Nota: {rec.notes}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Customer Process WhatsApp Stage Notifications */}
-          {order.customerPhone && order.status !== 'cancelado' && (
+          {order.customerPhone && order.status !== 'cancelado' && order.status !== 'devuelto' && (
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#071021] border border-slate-200 dark:border-[#B6C2D2]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div className="space-y-0.5">
                 <div className="text-xs font-bold text-[#0B1933] dark:text-white flex items-center gap-1.5">
@@ -692,35 +771,47 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
         {/* Footer Summary + Actions */}
         <div className="px-5 py-4 border-t border-slate-200 dark:border-[#B6C2D2]/20 bg-slate-50 dark:bg-[#071021] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-0.5">
-            {(Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) ||
-              Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) ||
-              Boolean(order.loyaltyDiscountAmount && order.loyaltyDiscountAmount > 0) ||
-              Boolean(order.paymentMethodDiscountAmount && order.paymentMethodDiscountAmount > 0)) && (
-              <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium space-y-0.5">
-                {Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) && (
-                  <div>
-                    Ahorro precio mayorista: -{formatCurrency(order.wholesaleSavings || 0, currency)}
-                  </div>
-                )}
-                {Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) && (
-                  <div>
-                    Cupón {order.couponCode || ''}: -{formatCurrency(order.couponDiscountAmount || 0, currency)}
-                  </div>
-                )}
-                {Boolean(order.loyaltyDiscountAmount && order.loyaltyDiscountAmount > 0) && (
-                  <div>
-                    Canje Puntos DNI ({order.loyaltyDiscountPercent || 0}%): -
-                    {formatCurrency(order.loyaltyDiscountAmount || 0, currency)}
-                  </div>
-                )}
-                {Boolean(order.paymentMethodDiscountAmount && order.paymentMethodDiscountAmount > 0) && (
-                  <div>
-                    Bonificación Efectivo/Transf. ({order.paymentMethodDiscountPercent || 0}%): -
-                    {formatCurrency(order.paymentMethodDiscountAmount || 0, currency)}
-                  </div>
-                )}
-              </div>
-            )}
+              {(Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) ||
+                Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) ||
+                Boolean(order.giftCardDiscountAmount && order.giftCardDiscountAmount > 0) ||
+                Boolean(order.storeCreditUsedAmount && order.storeCreditUsedAmount > 0) ||
+                Boolean(order.loyaltyDiscountAmount && order.loyaltyDiscountAmount > 0) ||
+                Boolean(order.paymentMethodDiscountAmount && order.paymentMethodDiscountAmount > 0)) && (
+                <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium space-y-0.5">
+                  {Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) && (
+                    <div>
+                      Ahorro precio mayorista: -{formatCurrency(order.wholesaleSavings || 0, currency)}
+                    </div>
+                  )}
+                  {Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) && (
+                    <div>
+                      Cupón {order.couponCode || ''}: -{formatCurrency(order.couponDiscountAmount || 0, currency)}
+                    </div>
+                  )}
+                  {Boolean(order.giftCardDiscountAmount && order.giftCardDiscountAmount > 0) && (
+                    <div>
+                      Gift Card {order.giftCardCode || ''}: -{formatCurrency(order.giftCardDiscountAmount || 0, currency)}
+                    </div>
+                  )}
+                  {Boolean(order.storeCreditUsedAmount && order.storeCreditUsedAmount > 0) && (
+                    <div>
+                      Saldo a favor DNI aplicado: -{formatCurrency(order.storeCreditUsedAmount || 0, currency)}
+                    </div>
+                  )}
+                  {Boolean(order.loyaltyDiscountAmount && order.loyaltyDiscountAmount > 0) && (
+                    <div>
+                      Canje Puntos DNI ({order.loyaltyDiscountPercent || 0}%): -
+                      {formatCurrency(order.loyaltyDiscountAmount || 0, currency)}
+                    </div>
+                  )}
+                  {Boolean(order.paymentMethodDiscountAmount && order.paymentMethodDiscountAmount > 0) && (
+                    <div>
+                      Bonificación Efectivo/Transf. ({order.paymentMethodDiscountPercent || 0}%): -
+                      {formatCurrency(order.paymentMethodDiscountAmount || 0, currency)}
+                    </div>
+                  )}
+                </div>
+              )}
             <div className="text-[11px] font-semibold text-slate-500 dark:text-[#94A3B8]">
               Valor final del pedido ({totalUnits} u.)
             </div>
@@ -730,29 +821,47 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2 justify-end">
-            {onMarkAsRetirado && order.status !== 'retirado' && order.status !== 'cancelado' && (
+            {onMarkAsRetirado &&
+              order.status !== 'retirado' &&
+              order.status !== 'cancelado' &&
+              order.status !== 'devuelto' && (
+                <button
+                  type="button"
+                  onClick={() => onMarkAsRetirado(order)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>{isDelivery ? 'Entregado (Pagado)' : 'Marcar Retirado (Pagado)'}</span>
+                </button>
+              )}
+
+            {onOpenReturnModal && order.status !== 'cancelado' && order.status !== 'devuelto' && (
               <button
                 type="button"
-                onClick={() => onMarkAsRetirado(order)}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
+                onClick={() => onOpenReturnModal(order)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer whitespace-nowrap"
+                title="Registrar cambio de talle, devolución total/parcial, restar puntos y acreditar saldo a favor"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>{isDelivery ? 'Entregado (Pagado)' : 'Marcar Retirado (Pagado)'}</span>
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Cambio / Devolución</span>
               </button>
             )}
 
-            {onBillOrder && !order.linkedBoletaNumber && order.status !== 'cancelado' && (
-              <button
-                type="button"
-                onClick={() => onBillOrder(order)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#CBD5E1] dark:border-[#B6C2D2]/25 bg-white dark:bg-[#0B1933] text-[#0B1933] dark:text-white hover:bg-slate-100 dark:hover:bg-[#13264A] cursor-pointer whitespace-nowrap"
-              >
-                <Receipt className="w-3.5 h-3.5" />
-                <span>Facturar</span>
-              </button>
-            )}
+            {onBillOrder &&
+              !order.linkedBoletaNumber &&
+              order.status !== 'cancelado' &&
+              order.status !== 'devuelto' && (
+                <button
+                  type="button"
+                  onClick={() => onBillOrder(order)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#CBD5E1] dark:border-[#B6C2D2]/25 bg-white dark:bg-[#0B1933] text-[#0B1933] dark:text-white hover:bg-slate-100 dark:hover:bg-[#13264A] cursor-pointer whitespace-nowrap"
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>Facturar</span>
+                </button>
+              )}
 
-            {onOpenReceipt && order.status !== 'cancelado' && (
+            {onOpenReceipt && order.status !== 'cancelado' && order.status !== 'devuelto' && (
               <button
                 type="button"
                 onClick={() => onOpenReceipt(order)}

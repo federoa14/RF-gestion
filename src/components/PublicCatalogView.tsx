@@ -37,9 +37,15 @@ import {
   ArrowRight,
   Award,
   UserCheck,
+  Heart,
+  Flame,
+  History,
+  Ticket,
 } from 'lucide-react';
 import {
+  CatalogAbandonedCart,
   CatalogCoupon,
+  CatalogGiftCard,
   CatalogLoyaltyAccount,
   CatalogLoyaltyTier,
   CatalogOrderStageNotification,
@@ -54,15 +60,20 @@ import {
 } from '../types';
 import {
   createCatalogOrderMercadoPagoPreference,
+  fetchPublicAbandonedCartByIdFromSupabase,
   fetchPublicCatalogFromSupabase,
   fetchPublicCatalogLoyaltyAccountFromSupabase,
   fetchPublicCatalogOrderFromSupabase,
+  fetchPublicCatalogOrdersByDniFromSupabase,
+  fetchPublicGiftCardByCodeFromSupabase,
   notifyCatalogOrderCustomerStageViaServer,
   submitCatalogPromoSubscriberToSupabase,
   submitCatalogStockAlertToSupabase,
   submitPublicCatalogOrderToSupabase,
   syncCatalogOrderToSupabase,
+  upsertCatalogGiftCardToSupabase,
   upsertCatalogLoyaltyAccountToSupabase,
+  upsertPublicAbandonedCartToSupabase,
   verifyCatalogOrderMercadoPagoPayment,
   verifyCatalogTransferReceiptViaServer,
 } from '../utils/supabaseServices';
@@ -71,6 +82,7 @@ import { getCatalogRubroPreset, normalizeFilterList } from '../utils/catalogRubr
 import {
   applyOrderStockDeltaToProducts,
   getEligibleLoyaltyTiers,
+  getFlashEffectiveDisplayPrice,
   getProductGalleryImages,
   getProductPointsPerUnit,
   getVariantDisplayPrice,
@@ -78,6 +90,7 @@ import {
   getWholesaleUnitPrice,
   hasProductVariants,
   isLoyaltyRedemptionEligible,
+  isProductFlashSaleActive,
   isProductFullyOutOfStock,
   isValidDni,
   normalizeDni,
@@ -291,6 +304,48 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const [selectedRedeemTier, setSelectedRedeemTier] = useState<CatalogLoyaltyTier | null>(null);
   const [bannerImageErrorIds, setBannerImageErrorIds] = useState<Record<string, boolean>>({});
 
+  // #9 Flash Sale countdown clock (ticks 1s only if any active product has a timed flash offer)
+  const [flashClockMs, setFlashClockMs] = useState<number>(() => Date.now());
+
+  // #6 Favorites & 1-Click Reorder by DNI
+  const [favoriteProductIds, setFavoriteProductIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem(`public_catalog_favs_${catalogHandle}`);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [dniPastOrders, setDniPastOrders] = useState<CatalogPickupOrder[]>([]);
+  const [showDniReorderPanel, setShowDniReorderPanel] = useState(false);
+  const [reorderFeedback, setReorderFeedback] = useState<string | null>(null);
+
+  // #3 Gift Card redemption + #10 Store Credit balance by DNI
+  const [giftCardCodeInput, setGiftCardCodeInput] = useState('');
+  const [appliedGiftCard, setAppliedGiftCard] = useState<CatalogGiftCard | null>(null);
+  const [giftCardFeedback, setGiftCardFeedback] = useState<string | null>(null);
+  const [giftCardLoading, setGiftCardLoading] = useState(false);
+  const [useStoreCreditBalance, setUseStoreCreditBalance] = useState(true);
+
+  // #1 Abandoned Cart session tracking ID
+  const [abandonedCartId, setAbandonedCartId] = useState<string>(() => {
+    if (typeof window === 'undefined') return `cart-${Date.now()}`;
+    try {
+      const existing = window.sessionStorage.getItem(`public_abandoned_cart_id_${catalogHandle}`);
+      if (existing) return existing;
+      const fresh = `cart-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      window.sessionStorage.setItem(`public_abandoned_cart_id_${catalogHandle}`, fresh);
+      return fresh;
+    } catch {
+      return `cart-${Date.now()}`;
+    }
+  });
+  const [abandonedCartCreatedAt, setAbandonedCartCreatedAt] = useState<string>(() =>
+    new Date().toISOString()
+  );
+
   const buildOrderWhatsAppLinks = (
     order: CatalogPickupOrder,
     cat: PublishedPublicCatalog
@@ -354,8 +409,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         `• Bonificación Efectivo/Transf. (${order.paymentMethodDiscountPercent || 0}%): -${formatCurrency(order.paymentMethodDiscountAmount, currencySym)}`
       );
     }
+    if (order.giftCardDiscountAmount && order.giftCardDiscountAmount > 0) {
+      discountLines.push(
+        `• Gift Card ${order.giftCardCode || ''}: -${formatCurrency(order.giftCardDiscountAmount, currencySym)}`
+      );
+    }
+    if (order.storeCreditUsedAmount && order.storeCreditUsedAmount > 0) {
+      discountLines.push(
+        `• Saldo a favor DNI utilizado: -${formatCurrency(order.storeCreditUsedAmount, currencySym)}`
+      );
+    }
     const discountBlock =
-      discountLines.length > 0 ? `\n🏷️ *Descuentos aplicados:*\n${discountLines.join('\n')}\n` : '';
+      discountLines.length > 0 ? `\n🏷️ *Descuentos / Saldos aplicados:*\n${discountLines.join('\n')}\n` : '';
 
     const loyaltyLine = order.customerDni
       ? `🪪 *DNI Puntos:* ${order.customerDni}${
@@ -504,6 +569,53 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               )}`;
               window.history.replaceState({}, '', cleanUrl);
             }
+
+            // #1 Verificar si abrió un link de recupero de carrito (?recover_cart=...) solo si tiene funciones Full
+            const resFullWeb =
+              res.canAccessFullFeatures !== false && res.planTier !== 'web';
+            const recoverCartId = (params.get('recover_cart') || '').trim();
+            if (resFullWeb && recoverCartId) {
+              const recovered = await fetchPublicAbandonedCartByIdFromSupabase(
+                recoverCartId,
+                res.tenantId
+              );
+              if (active && recovered && Array.isArray(recovered.items) && recovered.items.length > 0) {
+                const nextCart: Record<string, CartEntry> = {};
+                for (const item of recovered.items) {
+                  const liveProd = (res.products || []).find(
+                    (p) => p.available && p.id === item.productId
+                  );
+                  if (!liveProd) continue;
+                  const liveVar = item.variantId
+                    ? liveProd.variants?.find((v) => v.id === item.variantId)
+                    : undefined;
+                  const maxStock = liveVar
+                    ? getVariantStock(liveVar)
+                    : typeof liveProd.stockQuantity === 'number'
+                    ? Math.max(0, Math.floor(liveProd.stockQuantity))
+                    : null;
+                  if (maxStock !== null && maxStock <= 0) continue;
+                  const qty =
+                    maxStock !== null
+                      ? Math.min(maxStock, Math.max(1, item.quantity))
+                      : Math.max(1, item.quantity);
+                  const key = `${liveProd.id}::${liveVar?.id || 'base'}`;
+                  nextCart[key] = {
+                    key,
+                    product: liveProd,
+                    variant: liveVar,
+                    quantity: qty,
+                  };
+                }
+                if (Object.keys(nextCart).length > 0) {
+                  setCart(nextCart);
+                  if (recovered.customerName) setCustomerName(recovered.customerName);
+                  if (recovered.customerPhone) setCustomerPhone(recovered.customerPhone);
+                  if (recovered.customerDni) setLoyaltyDniInput(normalizeDni(recovered.customerDni));
+                  setIsCartOpen(true);
+                }
+              }
+            }
           }
         }
       })
@@ -514,6 +626,24 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       active = false;
     };
   }, [catalogHandle]);
+
+  const isFullWebFeatures =
+    catalog?.canAccessFullFeatures !== false && catalog?.planTier !== 'web';
+
+  // #9 Tick Flash Sale clock every 1s only if there are active timed flash offers (Plan Full)
+  useEffect(() => {
+    if (!isFullWebFeatures) return;
+    const hasTimedFlash = (catalog?.products || []).some(
+      (p) =>
+        p.available &&
+        typeof p.flashSalePrice === 'number' &&
+        p.flashSalePrice < p.price &&
+        Boolean(p.flashSaleEndsAt)
+    );
+    if (!hasTimedFlash) return;
+    const id = window.setInterval(() => setFlashClockMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [catalog?.products, isFullWebFeatures]);
 
   const handleLookupLoyaltyDni = async (rawDni?: string, silent = false) => {
     if (!catalog?.enableLoyaltyProgram) return;
@@ -532,12 +662,24 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     setLoyaltyLoading(true);
     if (!silent) setLoyaltyFeedback(null);
     try {
-      const existing = await fetchPublicCatalogLoyaltyAccountFromSupabase(
-        catalog.tenantId,
-        cleanDni
-      );
+      const [existing, pastOrders] = await Promise.all([
+        fetchPublicCatalogLoyaltyAccountFromSupabase(catalog.tenantId, cleanDni),
+        fetchPublicCatalogOrdersByDniFromSupabase(catalog.tenantId, cleanDni),
+      ]);
       setActiveLoyaltyDni(cleanDni);
       setLoyaltyAccount(existing);
+      setDniPastOrders(pastOrders);
+      if (existing?.favoriteProductIds && existing.favoriteProductIds.length > 0) {
+        setFavoriteProductIds((prev) => {
+          const merged = Array.from(new Set([...prev, ...(existing.favoriteProductIds || [])]));
+          try {
+            window.localStorage.setItem(`public_catalog_favs_${catalogHandle}`, JSON.stringify(merged));
+          } catch {
+            // ignore
+          }
+          return merged;
+        });
+      }
       if (existing?.customerName && !customerName.trim()) {
         setCustomerName(existing.customerName);
       }
@@ -555,11 +697,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
           existing.pointsBalance,
           catalog.loyaltyTiers
         );
+        const creditPart =
+          (existing.storeCreditBalance || 0) > 0
+            ? ` · Saldo a favor disponible: ${formatCurrency(
+                existing.storeCreditBalance || 0,
+                catalog.currencySymbol || '$'
+              )}`
+            : '';
         if (!silent) {
           setLoyaltyFeedback(
             highestUnlocked
-              ? `DNI ${cleanDni} activo: tenés ${existing.pointsBalance} pts (podés canjear hasta ${highestUnlocked.discountPercent}% OFF al cerrar tu compra).`
-              : `DNI ${cleanDni} activo: tenés ${existing.pointsBalance} pts acumulados.`
+              ? `DNI ${cleanDni} activo: tenés ${existing.pointsBalance} pts (podés canjear hasta ${highestUnlocked.discountPercent}% OFF al cerrar tu compra)${creditPart}.`
+              : `DNI ${cleanDni} activo: tenés ${existing.pointsBalance} pts acumulados${creditPart}.`
           );
         }
       } else {
@@ -576,12 +725,13 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   };
 
   useEffect(() => {
-    if (!catalog?.enableLoyaltyProgram || !catalog?.tenantId) return;
+    if (!isFullWebFeatures || !catalog?.enableLoyaltyProgram || !catalog?.tenantId) return;
     const clean = normalizeDni(loyaltyDniInput);
     if (!isValidDni(clean)) {
       if (!clean && activeLoyaltyDni) {
         setActiveLoyaltyDni('');
         setLoyaltyAccount(null);
+        setDniPastOrders([]);
         setSelectedRedeemTier(null);
         setLoyaltyFeedback(null);
       }
@@ -593,7 +743,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     }, 450);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loyaltyDniInput, catalog?.tenantId, catalog?.enableLoyaltyProgram]);
+  }, [loyaltyDniInput, catalog?.tenantId, catalog?.enableLoyaltyProgram, isFullWebFeatures]);
 
   const rubroPreset = useMemo(
     () => (catalog?.catalogRubro ? getCatalogRubroPreset(catalog.catalogRubro) : null),
@@ -608,6 +758,22 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     );
   }, [catalog]);
 
+  const activeFlashProducts = useMemo(
+    () =>
+      isFullWebFeatures
+        ? activeProducts.filter((p) => isProductFlashSaleActive(p, flashClockMs))
+        : [],
+    [activeProducts, flashClockMs, isFullWebFeatures]
+  );
+
+  const hasOutletOrFlash = useMemo(
+    () =>
+      isFullWebFeatures
+        ? activeProducts.some((p) => p.isOutlet || isProductFlashSaleActive(p, flashClockMs))
+        : false,
+    [activeProducts, flashClockMs, isFullWebFeatures]
+  );
+
   const categories = useMemo(() => {
     const primaryFilters = normalizeFilterList(
       catalog?.rubroFilters && catalog.rubroFilters.length > 0
@@ -618,8 +784,21 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     activeProducts.forEach((p) => {
       if (p.category?.trim()) set.add(p.category.trim());
     });
+    if (isFullWebFeatures && hasOutletOrFlash) {
+      set.add('Ofertas Relámpago');
+    }
+    if (isFullWebFeatures && favoriteProductIds.length > 0) {
+      set.add('Mis Favoritos');
+    }
     return Array.from(set);
-  }, [activeProducts, catalog?.rubroFilters, rubroPreset]);
+  }, [
+    activeProducts,
+    catalog?.rubroFilters,
+    rubroPreset,
+    hasOutletOrFlash,
+    favoriteProductIds.length,
+    isFullWebFeatures,
+  ]);
 
   const availableSubfilters = useMemo(() => {
     return normalizeFilterList([
@@ -640,7 +819,13 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
     return activeProducts
       .filter((p) => {
-        if (selectedCategory !== 'Todas' && p.category !== selectedCategory) return false;
+        if (isFullWebFeatures && selectedCategory === 'Ofertas Relámpago') {
+          if (!p.isOutlet && !isProductFlashSaleActive(p, flashClockMs)) return false;
+        } else if (isFullWebFeatures && selectedCategory === 'Mis Favoritos') {
+          if (!favoriteProductIds.includes(p.id)) return false;
+        } else if (selectedCategory !== 'Todas' && p.category !== selectedCategory) {
+          return false;
+        }
         if (
           selectedSubfilter !== 'Todos' &&
           !(p.subfilters || []).some(
@@ -655,8 +840,22 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         );
         return tokens.every((token) => searchable.includes(token));
       })
-      .sort((a, b) => Number(Boolean(b.featured)) - Number(Boolean(a.featured)));
-  }, [activeProducts, searchTerm, selectedCategory, selectedSubfilter]);
+      .sort((a, b) =>
+        isFullWebFeatures
+          ? Number(isProductFlashSaleActive(b, flashClockMs)) -
+              Number(isProductFlashSaleActive(a, flashClockMs)) ||
+            Number(Boolean(b.featured)) - Number(Boolean(a.featured))
+          : 0
+      );
+  }, [
+    activeProducts,
+    searchTerm,
+    selectedCategory,
+    selectedSubfilter,
+    flashClockMs,
+    favoriteProductIds,
+    isFullWebFeatures,
+  ]);
 
   const resolveActiveVariantForProduct = (product: CatalogProduct): CatalogProductVariant | undefined => {
     if (!hasProductVariants(product)) return undefined;
@@ -694,14 +893,14 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
   // Loyalty points that current cart items will earn
   const cartEarnedPoints = useMemo(() => {
-    if (!catalog?.enableLoyaltyProgram) return 0;
+    if (!isFullWebFeatures || !catalog?.enableLoyaltyProgram) return 0;
     const defaultPts =
       typeof catalog.loyaltyPointsPerUnit === 'number' ? catalog.loyaltyPointsPerUnit : 10;
     return cartItems.reduce((sum, entry) => {
       const liveP = catalog.products.find((p) => p.id === entry.product.id) || entry.product;
       return sum + getProductPointsPerUnit(liveP, defaultPts) * entry.quantity;
     }, 0);
-  }, [cartItems, catalog]);
+  }, [cartItems, catalog, isFullWebFeatures]);
 
   const isRedeemPaymentEligible = useMemo(
     () =>
@@ -725,21 +924,21 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         : undefined;
       const totalQtyForProduct = productQuantitiesInCart[entry.product.id] || entry.quantity;
       const regPrice = getVariantDisplayPrice(liveP, liveVar);
-      const { effectiveUnitPrice: effPrice } = getWholesaleUnitPrice(
-        liveP,
-        liveVar,
-        totalQtyForProduct
-      );
+      const effPrice = isFullWebFeatures
+        ? getWholesaleUnitPrice(liveP, liveVar, totalQtyForProduct, flashClockMs).effectiveUnitPrice
+        : regPrice;
 
       regularSubtotal += regPrice * entry.quantity;
       wholesaleSubtotal += effPrice * entry.quantity;
     }
 
-    const wholesaleSavings = Math.max(0, Math.round((regularSubtotal - wholesaleSubtotal) * 100) / 100);
+    const wholesaleSavings = isFullWebFeatures
+      ? Math.max(0, Math.round((regularSubtotal - wholesaleSubtotal) * 100) / 100)
+      : 0;
 
     let couponDiscount = 0;
     let couponInvalidReason: string | null = null;
-    if (appliedCoupon) {
+    if (isFullWebFeatures && appliedCoupon) {
       if (appliedCoupon.minPurchase && wholesaleSubtotal < appliedCoupon.minPurchase) {
         couponInvalidReason = `Requiere compra mínima de ${formatCurrency(
           appliedCoupon.minPurchase,
@@ -757,6 +956,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     // Apply DNI Loyalty Tier discount if active, payment/delivery eligible, and customer has enough points
     const currentPointsBalance = loyaltyAccount?.pointsBalance || 0;
     const eligibleRedeemTier =
+      isFullWebFeatures &&
       catalog?.enableLoyaltyProgram &&
       activeLoyaltyDni &&
       isRedeemPaymentEligible &&
@@ -773,13 +973,38 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
     const afterLoyalty = Math.max(0, afterCoupon - loyaltyDiscountAmount);
     const cashTransferPct =
-      selectedPayGroup === 'transferencia' || selectedPayGroup === 'efectivo'
+      isFullWebFeatures &&
+      (selectedPayGroup === 'transferencia' || selectedPayGroup === 'efectivo')
         ? Math.max(0, Math.min(90, Number(catalog?.cashOrTransferDiscountPercent) || 0))
         : 0;
     const paymentMethodDiscountAmount =
       cashTransferPct > 0 ? Math.round(((afterLoyalty * cashTransferPct) / 100) * 100) / 100 : 0;
 
-    const finalTotal = Math.max(0, Math.round((afterLoyalty - paymentMethodDiscountAmount) * 100) / 100);
+    const afterPayDiscount = Math.max(0, afterLoyalty - paymentMethodDiscountAmount);
+
+    // #3 Apply Gift Card balance
+    const activeGiftCardBal =
+      isFullWebFeatures && appliedGiftCard && appliedGiftCard.status === 'active'
+        ? Math.max(0, Number(appliedGiftCard.remainingBalance) || 0)
+        : 0;
+    const giftCardDiscountAmount =
+      activeGiftCardBal > 0
+        ? Math.round(Math.min(afterPayDiscount, activeGiftCardBal) * 100) / 100
+        : 0;
+
+    const afterGiftCard = Math.max(0, afterPayDiscount - giftCardDiscountAmount);
+
+    // #10 Apply DNI Store Credit balance
+    const availableStoreCredit =
+      isFullWebFeatures && useStoreCreditBalance && activeLoyaltyDni
+        ? Math.max(0, Number(loyaltyAccount?.storeCreditBalance) || 0)
+        : 0;
+    const storeCreditUsedAmount =
+      availableStoreCredit > 0
+        ? Math.round(Math.min(afterGiftCard, availableStoreCredit) * 100) / 100
+        : 0;
+
+    const finalTotal = Math.max(0, Math.round((afterGiftCard - storeCreditUsedAmount) * 100) / 100);
 
     return {
       regularSubtotal,
@@ -792,6 +1017,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       redeemedPointsCost,
       paymentMethodDiscountPercent: cashTransferPct,
       paymentMethodDiscountAmount,
+      giftCardDiscountAmount,
+      storeCreditUsedAmount,
       finalTotal,
     };
   }, [
@@ -804,9 +1031,228 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     activeLoyaltyDni,
     isRedeemPaymentEligible,
     selectedRedeemTier,
+    appliedGiftCard,
+    useStoreCreditBalance,
+    flashClockMs,
+    isFullWebFeatures,
   ]);
 
   const totalCartAmount = cartPricingBreakdown.finalTotal;
+
+  // #6 Toggle favorite & sync to DNI account if active
+  const toggleFavoriteProduct = (productId: string) => {
+    setFavoriteProductIds((prev) => {
+      const exists = prev.includes(productId);
+      const next = exists ? prev.filter((id) => id !== productId) : [productId, ...prev];
+      try {
+        window.localStorage.setItem(`public_catalog_favs_${catalogHandle}`, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      if (catalog?.tenantId && activeLoyaltyDni && loyaltyAccount) {
+        const updatedAcc: CatalogLoyaltyAccount = {
+          ...loyaltyAccount,
+          favoriteProductIds: next,
+          updatedAt: new Date().toISOString(),
+        };
+        setLoyaltyAccount(updatedAcc);
+        void upsertCatalogLoyaltyAccountToSupabase(updatedAcc);
+      }
+      return next;
+    });
+  };
+
+  // #6 1-Click Reorder past order by DNI
+  const handleReorderPastOrder = (pastOrder: CatalogPickupOrder) => {
+    if (!catalog) return;
+    let addedCount = 0;
+    let skippedCount = 0;
+    const nextCart: Record<string, CartEntry> = { ...cart };
+
+    for (const item of pastOrder.items || []) {
+      const liveProd = catalog.products.find(
+        (p) =>
+          p.available &&
+          (p.id === item.productId ||
+            p.name.trim().toLowerCase() === (item.productName || '').trim().toLowerCase())
+      );
+      if (!liveProd) {
+        skippedCount += 1;
+        continue;
+      }
+      const liveVar = item.variantId
+        ? liveProd.variants?.find((v) => v.id === item.variantId)
+        : item.variantLabel
+        ? liveProd.variants?.find(
+            (v) => v.label.trim().toLowerCase() === item.variantLabel?.trim().toLowerCase()
+          )
+        : undefined;
+      const maxStock = liveVar
+        ? getVariantStock(liveVar)
+        : typeof liveProd.stockQuantity === 'number'
+        ? Math.max(0, Math.floor(liveProd.stockQuantity))
+        : null;
+      if (maxStock !== null && maxStock <= 0) {
+        skippedCount += 1;
+        continue;
+      }
+      const key = makeCartKey(liveProd.id, liveVar?.id);
+      const currentQty = nextCart[key]?.quantity || 0;
+      const targetQty = currentQty + Math.max(1, item.quantity);
+      const clampedQty = maxStock !== null ? Math.min(maxStock, targetQty) : targetQty;
+      if (clampedQty <= currentQty) {
+        skippedCount += 1;
+        continue;
+      }
+      nextCart[key] = {
+        key,
+        product: liveProd,
+        variant: liveVar,
+        quantity: clampedQty,
+      };
+      addedCount += 1;
+    }
+
+    if (addedCount > 0) {
+      setCart(nextCart);
+      setIsCartOpen(true);
+      setReorderFeedback(
+        skippedCount > 0
+          ? `Agregamos ${addedCount} artículo(s) del pedido #${pastOrder.orderNumber} (${skippedCount} sin stock actualmente).`
+          : `¡Listo! Reagregamos todo el pedido #${pastOrder.orderNumber} a tu carrito.`
+      );
+    } else {
+      setReorderFeedback(
+        `Los productos del pedido #${pastOrder.orderNumber} se encuentran momentáneamente sin stock.`
+      );
+    }
+  };
+
+  // #3 Apply Gift Card Code
+  const handleApplyGiftCardCode = async () => {
+    if (!catalog) return;
+    const cleanCode = giftCardCodeInput.trim().toUpperCase().replace(/\s+/g, '');
+    setGiftCardFeedback(null);
+    if (!cleanCode) {
+      setAppliedGiftCard(null);
+      return;
+    }
+    setGiftCardLoading(true);
+    try {
+      const card = await fetchPublicGiftCardByCodeFromSupabase(catalog.tenantId, cleanCode);
+      if (!card) {
+        setAppliedGiftCard(null);
+        setGiftCardFeedback(`No encontramos ninguna Gift Card con el código "${cleanCode}".`);
+        return;
+      }
+      if (card.status === 'cancelled') {
+        setAppliedGiftCard(null);
+        setGiftCardFeedback(`La Gift Card ${card.code} fue anulada.`);
+        return;
+      }
+      const todayStr = new Date().toISOString().split('T')[0];
+      if (card.expiresAt && card.expiresAt < todayStr) {
+        setAppliedGiftCard(null);
+        setGiftCardFeedback(`La Gift Card ${card.code} venció el ${card.expiresAt}.`);
+        return;
+      }
+      if (card.remainingBalance <= 0 || card.status === 'redeemed') {
+        setAppliedGiftCard(null);
+        setGiftCardFeedback(`La Gift Card ${card.code} ya no tiene saldo disponible.`);
+        return;
+      }
+      setAppliedGiftCard(card);
+      setGiftCardCodeInput(card.code);
+      setGiftCardFeedback(
+        `¡Gift Card ${card.code} aplicada! Saldo disponible: ${formatCurrency(
+          card.remainingBalance,
+          catalog.currencySymbol || '$'
+        )}.`
+      );
+    } finally {
+      setGiftCardLoading(false);
+    }
+  };
+
+  // #1 Auto Abandoned Cart capture whenever user has items + any contact info (phone/name/DNI) — solo Plan Full
+  useEffect(() => {
+    if (!isFullWebFeatures || !catalog?.tenantId || submittedOrder || cartItems.length === 0) return;
+    const contactPhone = (
+      customerPhone ||
+      loyaltyAccount?.customerPhone ||
+      promoSubPhone ||
+      ''
+    ).trim();
+    const contactName = (
+      customerName ||
+      loyaltyAccount?.customerName ||
+      promoSubName ||
+      ''
+    ).trim();
+    const contactDni = normalizeDni(activeLoyaltyDni || loyaltyDniInput);
+    if (contactPhone.length < 6 && !(contactName.length >= 2 && contactDni.length >= 6)) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const nowIso = new Date().toISOString();
+      const cartRecord: CatalogAbandonedCart = {
+        id: abandonedCartId,
+        tenantId: catalog.tenantId,
+        customerName: contactName || undefined,
+        customerPhone: contactPhone || undefined,
+        customerDni: contactDni.length >= 6 ? contactDni : undefined,
+        items: cartItems.map((entry) => {
+          const liveP = catalog.products.find((p) => p.id === entry.product.id) || entry.product;
+          const liveVar = entry.variant
+            ? liveP.variants?.find((v) => v.id === entry.variant?.id) || entry.variant
+            : undefined;
+          const { effectiveUnitPrice } = getWholesaleUnitPrice(
+            liveP,
+            liveVar,
+            productQuantitiesInCart[entry.product.id] || entry.quantity,
+            flashClockMs
+          );
+          return {
+            productId: entry.product.id,
+            productName: entry.product.name,
+            sku: entry.variant?.sku || entry.product.sku,
+            variantId: entry.variant?.id,
+            variantLabel: entry.variant?.label,
+            unitLabel: entry.product.unitLabel,
+            unitPrice: effectiveUnitPrice,
+            quantity: entry.quantity,
+            subtotal: Math.round(effectiveUnitPrice * entry.quantity * 100) / 100,
+          };
+        }),
+        totalAmount: totalCartAmount,
+        currencySymbol: catalog.currencySymbol || '$',
+        status: 'abandoned',
+        createdAt: abandonedCartCreatedAt,
+        updatedAt: nowIso,
+      };
+      void upsertPublicAbandonedCartToSupabase(cartRecord);
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    isFullWebFeatures,
+    catalog?.tenantId,
+    submittedOrder,
+    cartItems,
+    totalCartAmount,
+    customerPhone,
+    customerName,
+    loyaltyAccount,
+    activeLoyaltyDni,
+    loyaltyDniInput,
+    promoSubPhone,
+    promoSubName,
+    abandonedCartId,
+    abandonedCartCreatedAt,
+    productQuantitiesInCart,
+    flashClockMs,
+  ]);
 
   const addToCart = (product: CatalogProduct, variant?: CatalogProductVariant) => {
     const trackedStock = variant
@@ -1153,10 +1599,16 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       setFormError('Ingresá la dirección completa donde querés recibir el envío.');
       return;
     }
-    const cleanLoyaltyDniInput = catalog.enableLoyaltyProgram
-      ? normalizeDni(loyaltyDniInput)
-      : '';
-    if (catalog.enableLoyaltyProgram && loyaltyDniInput.trim() && !isValidDni(cleanLoyaltyDniInput)) {
+    const cleanLoyaltyDniInput =
+      isFullWebFeatures && catalog.enableLoyaltyProgram
+        ? normalizeDni(loyaltyDniInput)
+        : '';
+    if (
+      isFullWebFeatures &&
+      catalog.enableLoyaltyProgram &&
+      loyaltyDniInput.trim() &&
+      !isValidDni(cleanLoyaltyDniInput)
+    ) {
       setFormError('El DNI para el Programa de Puntos debe tener entre 6 y 11 números.');
       return;
     }
@@ -1234,11 +1686,10 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
             : undefined;
           const totalQtyForProd = productQuantitiesInCart[entry.product.id] || entry.quantity;
           const regularUnitPrice = getVariantDisplayPrice(liveP, liveVar);
-          const { effectiveUnitPrice, appliedWholesale } = getWholesaleUnitPrice(
-            liveP,
-            liveVar,
-            totalQtyForProd
-          );
+          const resolvedPricing = isFullWebFeatures
+            ? getWholesaleUnitPrice(liveP, liveVar, totalQtyForProd, flashClockMs)
+            : { effectiveUnitPrice: regularUnitPrice, appliedWholesale: false };
+          const { effectiveUnitPrice, appliedWholesale } = resolvedPricing;
           return {
             productId: entry.product.id,
             productName: entry.product.name,
@@ -1273,7 +1724,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       let finalLoyaltyRedeemed: number | undefined = undefined;
       let nextUpdatedLoyaltyAccount: CatalogLoyaltyAccount | null = null;
 
-      if (catalog.enableLoyaltyProgram && isValidDni(cleanLoyaltyDniInput)) {
+      if (isFullWebFeatures && catalog.enableLoyaltyProgram && isValidDni(cleanLoyaltyDniInput)) {
         finalLoyaltyDni = cleanLoyaltyDniInput;
         const latestAcc =
           (await fetchPublicCatalogLoyaltyAccountFromSupabase(
@@ -1337,6 +1788,29 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
           });
         }
 
+        // #10 Deduct Store Credit used in this purchase
+        const currentStoreCredit = Math.max(0, Number(latestAcc?.storeCreditBalance) || 0);
+        const usedStoreCredit = Math.min(
+          currentStoreCredit,
+          Math.max(0, cartPricingBreakdown.storeCreditUsedAmount || 0)
+        );
+        const nextStoreCreditBal = Math.max(
+          0,
+          Math.round((currentStoreCredit - usedStoreCredit) * 100) / 100
+        );
+        const newStoreCreditHistory = [...(latestAcc?.storeCreditHistory || [])];
+        if (usedStoreCredit > 0) {
+          newStoreCreditHistory.unshift({
+            id: `sc-red-${Date.now()}`,
+            date: nowIso,
+            type: 'redeemed_purchase',
+            amountDelta: -usedStoreCredit,
+            orderId,
+            orderNumber,
+            note: `Aplicado en pedido #${orderNumber}`,
+          });
+        }
+
         nextUpdatedLoyaltyAccount = {
           id: latestAcc?.id || `lyl-${catalog.tenantId}-${cleanLoyaltyDniInput}`,
           tenantId: catalog.tenantId,
@@ -1346,12 +1820,61 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
           pointsBalance: nextBalance,
           totalPointsEarned: (latestAcc?.totalPointsEarned || 0) + earnedPts,
           totalPointsRedeemed: (latestAcc?.totalPointsRedeemed || 0) + redeemedPts,
+          storeCreditBalance: nextStoreCreditBal,
+          storeCreditHistory: newStoreCreditHistory.slice(0, 40),
+          favoriteProductIds: Array.from(
+            new Set([...(latestAcc?.favoriteProductIds || []), ...favoriteProductIds])
+          ),
           ordersCount: (latestAcc?.ordersCount || 0) + 1,
           lastOrderAt: nowIso,
           history: newMovements.slice(0, 40),
           createdAt: latestAcc?.createdAt || nowIso,
           updatedAt: nowIso,
         };
+      }
+
+      // #3 Re-validate and prepare Gift Card balance update if used
+      let usedGiftCardCode: string | undefined;
+      let usedGiftCardAmount: number | undefined;
+      let nextUpdatedGiftCard: CatalogGiftCard | null = null;
+      if (
+        isFullWebFeatures &&
+        appliedGiftCard &&
+        cartPricingBreakdown.giftCardDiscountAmount > 0
+      ) {
+        const freshCard =
+          (await fetchPublicGiftCardByCodeFromSupabase(catalog.tenantId, appliedGiftCard.code)) ||
+          appliedGiftCard;
+        const usable = Math.min(
+          Math.max(0, freshCard.remainingBalance),
+          cartPricingBreakdown.giftCardDiscountAmount
+        );
+        if (usable > 0 && freshCard.status === 'active') {
+          usedGiftCardCode = freshCard.code;
+          usedGiftCardAmount = Math.round(usable * 100) / 100;
+          const nextRemaining = Math.max(
+            0,
+            Math.round((freshCard.remainingBalance - usedGiftCardAmount) * 100) / 100
+          );
+          nextUpdatedGiftCard = {
+            ...freshCard,
+            remainingBalance: nextRemaining,
+            status: nextRemaining <= 0 ? 'redeemed' : 'active',
+            history: [
+              {
+                id: `gcm-${Date.now()}`,
+                date: nowIso,
+                type: 'redeemed',
+                amountDelta: -usedGiftCardAmount,
+                orderId,
+                orderNumber,
+                note: `Canjeado en pedido #${orderNumber}`,
+              },
+              ...(freshCard.history || []),
+            ],
+            updatedAt: nowIso,
+          };
+        }
       }
 
       let order: CatalogPickupOrder = {
@@ -1391,12 +1914,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
             ? cartPricingBreakdown.wholesaleSavings
             : undefined,
         couponCode:
-          appliedCoupon && cartPricingBreakdown.couponDiscount > 0
+          isFullWebFeatures && appliedCoupon && cartPricingBreakdown.couponDiscount > 0
             ? appliedCoupon.code
             : undefined,
         couponDiscountAmount:
-          cartPricingBreakdown.couponDiscount > 0
+          isFullWebFeatures && cartPricingBreakdown.couponDiscount > 0
             ? cartPricingBreakdown.couponDiscount
+            : undefined,
+        giftCardCode: usedGiftCardCode,
+        giftCardDiscountAmount: usedGiftCardAmount,
+        storeCreditUsedAmount:
+          cartPricingBreakdown.storeCreditUsedAmount > 0
+            ? cartPricingBreakdown.storeCreditUsedAmount
             : undefined,
         loyaltyDiscountPercent: finalLoyaltyDiscountPercent,
         loyaltyDiscountAmount: finalLoyaltyDiscountAmount,
@@ -1420,10 +1949,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
       await submitPublicCatalogOrderToSupabase(order);
 
+      if (nextUpdatedGiftCard) {
+        await upsertCatalogGiftCardToSupabase(nextUpdatedGiftCard);
+        setAppliedGiftCard(null);
+        setGiftCardCodeInput('');
+        setGiftCardFeedback(null);
+      }
+
       if (nextUpdatedLoyaltyAccount) {
         await upsertCatalogLoyaltyAccountToSupabase(nextUpdatedLoyaltyAccount);
         setActiveLoyaltyDni(nextUpdatedLoyaltyAccount.dni);
         setLoyaltyAccount(nextUpdatedLoyaltyAccount);
+        setDniPastOrders((prev) => [order, ...prev].slice(0, 8));
         setSelectedRedeemTier(null);
         try {
           window.sessionStorage.setItem(
@@ -1435,7 +1972,33 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         }
       }
 
-      if (catalog.enablePromoClub !== false && optInPromoClub) {
+      // #1 Mark abandoned cart session as recovered and rotate session ID (solo Plan Full)
+      if (isFullWebFeatures) {
+        void upsertPublicAbandonedCartToSupabase({
+          id: abandonedCartId,
+          tenantId: catalog.tenantId,
+          customerName: customerName.trim(),
+          customerPhone: customerPhone.trim(),
+          customerDni: finalLoyaltyDni,
+          items: itemsPayload,
+          totalAmount: totalCartAmount,
+          currencySymbol: currencySym,
+          status: 'recovered',
+          recoveredOrderId: orderId,
+          createdAt: abandonedCartCreatedAt,
+          updatedAt: nowIso,
+        });
+        const nextFreshCartId = `cart-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        setAbandonedCartId(nextFreshCartId);
+        setAbandonedCartCreatedAt(nowIso);
+        try {
+          window.sessionStorage.setItem(`public_abandoned_cart_id_${catalogHandle}`, nextFreshCartId);
+        } catch {
+          // ignore
+        }
+      }
+
+      if (isFullWebFeatures && catalog.enablePromoClub !== false && optInPromoClub) {
         const promoSub: CatalogPromoSubscriber = {
           id: `prm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           tenantId: catalog.tenantId,
@@ -1769,7 +2332,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       {/* Main Catalog Area */}
       <main className="max-w-6xl mx-auto w-full px-4 sm:px-6 pb-8 pt-4 flex-1 space-y-5">
         {/* Top DNI Loyalty Program Bar (non-sticky so mobile chrome stays minimal, visible immediately upon opening catalog) */}
-        {catalog.enableLoyaltyProgram &&
+        {isFullWebFeatures &&
+          catalog.enableLoyaltyProgram &&
           (() => {
             const orderedTiers = normalizeLoyaltyTiers(catalog.loyaltyTiers);
             const currentBal = loyaltyAccount?.pointsBalance || 0;
@@ -1888,6 +2452,75 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                 {loyaltyFeedback && (
                   <div className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5">
                     {loyaltyFeedback}
+                  </div>
+                )}
+
+                {/* #10 Store Credit Balance + #6 1-Click Reorder Panel when DNI is active */}
+                {activeLoyaltyDni && ((loyaltyAccount?.storeCreditBalance || 0) > 0 || dniPastOrders.length > 0) && (
+                  <div className="pt-2.5 border-t border-slate-100 space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        {(loyaltyAccount?.storeCreditBalance || 0) > 0 && (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold font-mono tabular-nums">
+                            <Wallet className="w-3.5 h-3.5" />
+                            <span>
+                              Saldo a favor disponible: {formatCurrency(loyaltyAccount?.storeCreditBalance || 0, currency)}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+
+                      {dniPastOrders.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowDniReorderPanel((v) => !v)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-[#0B1933] text-xs font-bold cursor-pointer transition-colors"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                          <span>
+                            {showDniReorderPanel
+                              ? 'Ocultar mis compras'
+                              : `Tus últimas compras (${dniPastOrders.length}) · Recompra en 1 clic`}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+
+                    {reorderFeedback && (
+                      <div className="text-[11px] font-semibold text-[#0B1933] bg-sky-50 border border-sky-200 rounded-xl px-3 py-1.5">
+                        {reorderFeedback}
+                      </div>
+                    )}
+
+                    {showDniReorderPanel && dniPastOrders.length > 0 && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                        {dniPastOrders.slice(0, 4).map((past) => (
+                          <div
+                            key={past.id}
+                            className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3"
+                          >
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="text-xs font-bold text-slate-900 font-mono tabular-nums">
+                                #{past.orderNumber} · {formatCurrency(past.totalAmount, past.currencySymbol || currency)}
+                              </div>
+                              <div className="text-[11px] text-slate-500 truncate">
+                                {(past.items || []).map((it) => `${it.quantity}× ${it.productName}`).join(', ')}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {new Date(past.createdAt).toLocaleDateString('es-AR')}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleReorderPastOrder(past)}
+                              className="px-3 py-1.5 rounded-lg bg-[#0B1933] hover:bg-[#13264A] text-white text-[11px] font-bold cursor-pointer shrink-0 whitespace-nowrap"
+                            >
+                              Volver a pedir
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </section>
@@ -2010,9 +2643,10 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
           )}
         </div>
 
-        {/* Storefront Promotional Banners */}
-        {(() => {
-          const activeBanners = (catalog.promoBanners || []).filter((b) => b.active !== false);
+        {/* Storefront Promotional Banners (solo Plan Full) */}
+        {isFullWebFeatures &&
+          (() => {
+            const activeBanners = (catalog.promoBanners || []).filter((b) => b.active !== false);
           if (activeBanners.length === 0) return null;
 
           const themeClassMap: Record<CatalogPromoBanner['theme'], string> = {
@@ -2173,6 +2807,89 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
           );
         })()}
 
+        {/* #9 Flash Sale / Outlet Showcase Strip (solo Plan Full) */}
+        {isFullWebFeatures &&
+          activeFlashProducts.length > 0 &&
+          selectedCategory === 'Todas' &&
+          !searchTerm.trim() && (
+            <section
+              aria-label="Ofertas Relámpago por tiempo limitado"
+              className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-lg bg-[#0B1933] text-amber-300 flex items-center justify-center shrink-0">
+                    <Flame className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Ofertas Relámpago por tiempo limitado
+                    </h3>
+                    <p className="text-[11px] text-slate-500">
+                      Precios promocionales activos hasta agotar el reloj de cuenta regresiva
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('Ofertas Relámpago')}
+                  className="text-xs font-bold text-[#0B1933] hover:underline inline-flex items-center gap-1 cursor-pointer self-start sm:self-auto"
+                >
+                  <span>Ver todas ({activeFlashProducts.length})</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {activeFlashProducts.slice(0, 3).map((fp) => {
+                  const endMs = fp.flashSaleEndsAt ? new Date(fp.flashSaleEndsAt).getTime() : 0;
+                  const diffSec = Math.max(0, Math.floor((endMs - flashClockMs) / 1000));
+                  const hrs = Math.floor(diffSec / 3600);
+                  const mins = Math.floor((diffSec % 3600) / 60);
+                  const secs = diffSec % 60;
+                  const countdownStr =
+                    endMs > 0
+                      ? `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+                      : 'Activa';
+                  const fpVar = resolveActiveVariantForProduct(fp);
+                  const fpPrice = getFlashEffectiveDisplayPrice(fp, fpVar, flashClockMs);
+                  const fpOut = isProductFullyOutOfStock(fp);
+
+                  return (
+                    <div
+                      key={fp.id}
+                      className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono tabular-nums font-bold text-amber-800">
+                          <Clock className="w-3 h-3 shrink-0" />
+                          <span>Termina en {countdownStr}</span>
+                        </div>
+                        <div className="text-xs font-bold text-slate-900 truncate">{fp.name}</div>
+                        <div className="flex items-baseline gap-1.5 font-mono tabular-nums">
+                          <span className="text-sm font-bold text-[#0B1933]">
+                            {formatCurrency(fpPrice.displayUnitPrice, currency)}
+                          </span>
+                          <span className="text-[11px] line-through text-slate-400">
+                            {formatCurrency(fpPrice.regularUnitPrice, currency)}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={fpOut}
+                        onClick={() => addToCart(fp, fpVar)}
+                        className="px-3 py-2 rounded-lg bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-40 text-white text-[11px] font-bold cursor-pointer shrink-0"
+                      >
+                        {fpOut ? 'Agotado' : 'Agregar'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
         {/* Product Grid */}
         {filteredProducts.length === 0 ? (
           <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3">
@@ -2223,11 +2940,17 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               const isCardFullyOutOfStock = isProductFullyOutOfStock(product);
               const regularActivePrice = getVariantDisplayPrice(product, activeVariant);
               const qtyInCartForProduct = productQuantitiesInCart[product.id] || 0;
-              const { effectiveUnitPrice: activePrice } = getWholesaleUnitPrice(
-                product,
-                activeVariant,
-                qtyInCartForProduct
-              );
+              const { effectiveUnitPrice: activePrice, appliedFlashSale } = isFullWebFeatures
+                ? getWholesaleUnitPrice(product, activeVariant, qtyInCartForProduct, flashClockMs)
+                : { effectiveUnitPrice: regularActivePrice, appliedFlashSale: false };
+              const isFavorited = isFullWebFeatures && favoriteProductIds.includes(product.id);
+              const flashEndsMs = product.flashSaleEndsAt
+                ? new Date(product.flashSaleEndsAt).getTime()
+                : 0;
+              const flashRemainingSec =
+                appliedFlashSale && flashEndsMs > flashClockMs
+                  ? Math.max(0, Math.floor((flashEndsMs - flashClockMs) / 1000))
+                  : 0;
               const activeSku = (activeVariant?.sku || product.sku || '').trim();
               const isAtMaxStock = stockCount !== null && Boolean(inCart) && inCart.quantity >= stockCount;
               const galleryImages = getProductGalleryImages(product);
@@ -2330,11 +3053,44 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       </>
                     )}
 
-                    {product.featured && !isCardFullyOutOfStock && (
+                    {isFullWebFeatures && product.featured && !appliedFlashSale && !isCardFullyOutOfStock && (
                       <span className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 text-[10px] font-bold inline-flex items-center gap-1 shadow-xs">
                         <Star className="w-3 h-3 fill-current" />
                         <span>Destacado</span>
                       </span>
+                    )}
+                    {isFullWebFeatures && appliedFlashSale && !isCardFullyOutOfStock && (
+                      <span className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-[#0B1933] text-amber-300 text-[10px] font-bold font-mono tabular-nums inline-flex items-center gap-1 shadow-xs">
+                        <Flame className="w-3 h-3" />
+                        <span>
+                          {flashRemainingSec > 0
+                            ? `Oferta ${String(Math.floor(flashRemainingSec / 3600)).padStart(2, '0')}:${String(Math.floor((flashRemainingSec % 3600) / 60)).padStart(2, '0')}:${String(flashRemainingSec % 60).padStart(2, '0')}`
+                            : 'Oferta Relámpago'}
+                        </span>
+                      </span>
+                    )}
+                    {isFullWebFeatures && !appliedFlashSale && product.isOutlet && !isCardFullyOutOfStock && (
+                      <span className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-slate-900/90 text-white text-[10px] font-bold">
+                        Outlet
+                      </span>
+                    )}
+                    {isFullWebFeatures && !isCardFullyOutOfStock && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavoriteProduct(product.id);
+                        }}
+                        aria-label={isFavorited ? 'Quitar de favoritos' : 'Guardar en favoritos'}
+                        title={isFavorited ? 'Quitar de favoritos' : 'Guardar en favoritos'}
+                        className={`absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center shadow-xs transition-colors cursor-pointer ${
+                          isFavorited
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-white/90 hover:bg-white text-slate-600 hover:text-rose-600'
+                        }`}
+                      >
+                        <Heart className={`w-4 h-4 ${isFavorited ? 'fill-current' : ''}`} />
+                      </button>
                     )}
                     {isCardFullyOutOfStock && (
                       <span className="absolute top-3 right-3 px-2.5 py-1 rounded-md bg-slate-950/90 text-white text-[11px] font-bold tracking-wide shadow-xs">
@@ -2349,7 +3105,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                         <span className="truncate">
                           {product.category || 'General'} · {product.unitLabel || 'Unidad'}
                           {activeSku ? ` · Cód: ${activeSku}` : ''}
-                          {catalog.enableLoyaltyProgram
+                          {isFullWebFeatures && catalog.enableLoyaltyProgram
                             ? ` · +${getProductPointsPerUnit(
                                 product,
                                 typeof catalog.loyaltyPointsPerUnit === 'number'
@@ -2373,7 +3129,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       <h3 className="text-base font-bold text-slate-900 leading-snug">
                         {product.name}
                       </h3>
-                      {product.wholesaleMinQty && product.wholesalePrice ? (
+                      {isFullWebFeatures && product.wholesaleMinQty && product.wholesalePrice ? (
                         <div className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200/80 rounded-lg px-2 py-1 inline-flex items-center gap-1 font-mono tabular-nums">
                           <span>
                             Mayorista x{product.wholesaleMinQty}+ u.:{' '}
@@ -2422,7 +3178,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                   }
                                   title={
                                     vOut
-                                      ? `${v.label} — Sin stock (tocá para anotarte al aviso)`
+                                      ? isFullWebFeatures
+                                        ? `${v.label} — Sin stock (tocá para anotarte al aviso)`
+                                        : `${v.label} — Sin stock`
                                       : vStock !== null
                                       ? `${v.label} — ${vStock} disponible(s)`
                                       : v.label
@@ -2463,14 +3221,20 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       </div>
 
                       {isSelectedOutOfStock ? (
-                        <button
-                          type="button"
-                          onClick={() => openStockAlertModal(product, activeVariant)}
-                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white transition-colors cursor-pointer whitespace-nowrap"
-                        >
-                          <Bell className="w-3.5 h-3.5 text-amber-300" />
-                          <span>Avisar cuando haya stock</span>
-                        </button>
+                        isFullWebFeatures ? (
+                          <button
+                            type="button"
+                            onClick={() => openStockAlertModal(product, activeVariant)}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            <Bell className="w-3.5 h-3.5 text-amber-300" />
+                            <span>Avisar cuando haya stock</span>
+                          </button>
+                        ) : (
+                          <span className="inline-flex items-center px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-500 border border-slate-200 whitespace-nowrap">
+                            Sin stock
+                          </span>
+                        )
                       ) : inCart ? (
                         <div className="flex items-center gap-2">
                           <div className="inline-flex items-center gap-1 bg-slate-100 border border-slate-200 rounded-xl p-1">
@@ -2525,8 +3289,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
             })}
           </div>
         )}
-        {/* In-Page Club de Promos y Descuentos Section */}
-        {catalog.enablePromoClub !== false && (
+        {/* In-Page Club de Promos y Descuentos Section (solo Plan Full) */}
+        {isFullWebFeatures && catalog.enablePromoClub !== false && (
           <section className="mt-8 bg-[#0B1933] text-white rounded-2xl p-6 sm:p-8 shadow-sm">
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
               <div className="lg:col-span-5 space-y-2.5">
@@ -3081,7 +3845,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       const {
                         effectiveUnitPrice: itemPrice,
                         appliedWholesale: isWholesaleApplied,
-                      } = getWholesaleUnitPrice(liveP, liveVar, prodTotalQty);
+                      } = getWholesaleUnitPrice(liveP, liveVar, prodTotalQty, flashClockMs);
                       const reachedMax = maxStock !== null && quantity >= maxStock;
 
                       return (
@@ -3154,8 +3918,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                     })}
                   </div>
 
-                  {/* Coupon Code Input */}
-                  {(catalog.coupons || []).some((c) => c.active !== false) && (
+                  {/* Coupon Code Input (solo Plan Full) */}
+                  {isFullWebFeatures && (catalog.coupons || []).some((c) => c.active !== false) && (
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
                       <div className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
                         <Tag className="w-3.5 h-3.5 text-emerald-700" />
@@ -3205,8 +3969,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                     </div>
                   )}
 
-                  {/* DNI Loyalty Redemption Panel in Checkout */}
-                  {catalog.enableLoyaltyProgram &&
+                  {/* DNI Loyalty Redemption Panel in Checkout (solo Plan Full) */}
+                  {isFullWebFeatures &&
+                    catalog.enableLoyaltyProgram &&
                     (() => {
                       const { orderedTiers, unlockedTiers } = getEligibleLoyaltyTiers(
                         loyaltyAccount?.pointsBalance || 0,
@@ -3382,13 +4147,87 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       );
                     })()}
 
+                  {/* #3 Gift Card / Voucher Digital Redemption (solo Plan Full) */}
+                  {isFullWebFeatures && (
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                      <div className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
+                        <Ticket className="w-3.5 h-3.5 text-[#0B1933]" />
+                        <span>¿Tenés una Gift Card o Voucher Digital?</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={giftCardCodeInput}
+                          onChange={(e) => setGiftCardCodeInput(e.target.value.toUpperCase())}
+                          placeholder="Código de Gift Card (ej. GC-A8F2)"
+                          className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 uppercase"
+                        />
+                        <button
+                          type="button"
+                          disabled={giftCardLoading}
+                          onClick={() => void handleApplyGiftCardCode()}
+                          className="px-3 py-1.5 rounded-lg bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-60 text-white text-xs font-bold cursor-pointer"
+                        >
+                          {giftCardLoading ? 'Validando...' : 'Aplicar'}
+                        </button>
+                        {appliedGiftCard && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAppliedGiftCard(null);
+                              setGiftCardCodeInput('');
+                              setGiftCardFeedback(null);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 cursor-pointer"
+                            title="Quitar Gift Card"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      {giftCardFeedback && (
+                        <div
+                          className={`text-[11px] font-semibold ${
+                            appliedGiftCard ? 'text-emerald-700' : 'text-rose-600'
+                          }`}
+                        >
+                          {giftCardFeedback}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* #10 Store Credit Balance Toggle in Checkout (solo Plan Full) */}
+                  {isFullWebFeatures &&
+                    activeLoyaltyDni &&
+                    (loyaltyAccount?.storeCreditBalance || 0) > 0 && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between gap-3">
+                      <label className="flex items-center gap-2 text-xs text-emerald-950 font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useStoreCreditBalance}
+                          onChange={(e) => setUseStoreCreditBalance(e.target.checked)}
+                          className="rounded border-emerald-400"
+                        />
+                        <span>
+                          Usar mi Saldo a Favor ({formatCurrency(loyaltyAccount?.storeCreditBalance || 0, currency)})
+                        </span>
+                      </label>
+                      <span className="text-xs font-mono tabular-nums font-bold text-emerald-800">
+                        -{formatCurrency(cartPricingBreakdown.storeCreditUsedAmount, currency)}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Subtotal & Savings Breakdown Box */}
                   <div className="p-3.5 rounded-xl bg-slate-100 space-y-1.5">
                     {(cartPricingBreakdown.wholesaleSavings > 0 ||
                       cartPricingBreakdown.couponDiscount > 0 ||
                       cartPricingBreakdown.loyaltyDiscountAmount > 0 ||
                       Boolean(selectedRedeemTier && !isRedeemPaymentEligible) ||
-                      cartPricingBreakdown.paymentMethodDiscountAmount > 0) && (
+                      cartPricingBreakdown.paymentMethodDiscountAmount > 0 ||
+                      cartPricingBreakdown.giftCardDiscountAmount > 0 ||
+                      cartPricingBreakdown.storeCreditUsedAmount > 0) && (
                       <div className="space-y-1 pb-1.5 border-b border-slate-200 text-xs">
                         <div className="flex items-center justify-between text-slate-600 font-mono tabular-nums">
                           <span>Subtotal de lista</span>
@@ -3396,7 +4235,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                         </div>
                         {cartPricingBreakdown.wholesaleSavings > 0 && (
                           <div className="flex items-center justify-between text-indigo-700 font-semibold font-mono tabular-nums">
-                            <span>Ahorro precio mayorista</span>
+                            <span>Ahorro precio mayorista / oferta</span>
                             <span>
                               -{formatCurrency(cartPricingBreakdown.wholesaleSavings, currency)}
                             </span>
@@ -3439,6 +4278,22 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                 cartPricingBreakdown.paymentMethodDiscountAmount,
                                 currency
                               )}
+                            </span>
+                          </div>
+                        )}
+                        {cartPricingBreakdown.giftCardDiscountAmount > 0 && appliedGiftCard && (
+                          <div className="flex items-center justify-between text-emerald-700 font-semibold font-mono tabular-nums">
+                            <span>Gift Card {appliedGiftCard.code}</span>
+                            <span>
+                              -{formatCurrency(cartPricingBreakdown.giftCardDiscountAmount, currency)}
+                            </span>
+                          </div>
+                        )}
+                        {cartPricingBreakdown.storeCreditUsedAmount > 0 && (
+                          <div className="flex items-center justify-between text-emerald-700 font-semibold font-mono tabular-nums">
+                            <span>Saldo a favor DNI</span>
+                            <span>
+                              -{formatCurrency(cartPricingBreakdown.storeCreditUsedAmount, currency)}
                             </span>
                           </div>
                         )}
@@ -4060,7 +4915,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       </div>
                     </div>
 
-                    {catalog.enablePromoClub !== false && (
+                    {isFullWebFeatures && catalog.enablePromoClub !== false && (
                       <label className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 text-xs text-slate-800 cursor-pointer">
                         <input
                           type="checkbox"
@@ -4124,8 +4979,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Avisar cuando haya stock (Nombre + Teléfono) */}
-      {stockAlertProduct && (
+      {/* Modal: Avisar cuando haya stock (Nombre + Teléfono) — solo Plan Full */}
+      {isFullWebFeatures && stockAlertProduct && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
