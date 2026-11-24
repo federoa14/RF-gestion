@@ -95,7 +95,9 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   const activeAdmin =
     admins.find((a) => a.id === currentConfig.activeAdminId) ||
     admins.find((a) => a.isGeneralAdmin || a.role === 'dueño') ||
-    admins[0];
+    admins[0] ||
+    // Comercio sin administradores cargados (por ejemplo, migrado): no romper la pantalla
+    ({ id: '', name: currentConfig.distributorName || 'Administrador', role: 'dueño', phone: '', email: '', receiveAdminAlerts: true } as Administrator);
 
   const handleOpenNewAdmin = () => {
     setEditingAdmin({
@@ -1270,7 +1272,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-                Para que la base de datos interna del dispositivo (IndexedDB) no acumule espacio ni sature memoria:
+                La depuración corre sola todas las noches en el servidor (no hace falta abrir la app):
                 <strong> Las boletas impagas NO se borran nunca</strong> (aunque tengan 45 o 60 días de atraso, asegurando el cobro en la calle).
                 El plazo de 30 días corre <strong>exclusivamente desde el momento en que se marcan como pagadas</strong>, momento a partir del cual se depuran del historial.
               </p>
@@ -1306,7 +1308,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         </div>
       </div>
 
-      {/* Base de Datos Interna del Dispositivo (IndexedDB) y Copia de Seguridad Local */}
+      {/* Datos en la nube (Supabase) y copia de seguridad descargable */}
       <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/25 rounded-2xl p-5 shadow-2xs space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3 min-w-0 flex-1 basis-72">
@@ -1316,14 +1318,14 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-[#0B1933] dark:text-white">
-                  Base de Datos Interna Local ({internalDbStatus?.engine || 'IndexedDB'})
+                  Datos en la nube (Supabase)
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                  100% EN TU DISPOSITIVO · SIN NUBE
+                  COMPARTIDOS ENTRE TODOS TUS DISPOSITIVOS
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-[#CBD5E1] max-w-2xl">
-                Tu usuario, empresa, clientes, boletas y rendiciones se guardan en una base interna dentro de este navegador/dispositivo. Podés descargar un archivo de respaldo para guardarlo en tu PC o pasarlo a otro equipo.
+                Clientes, boletas, rendiciones y catálogo se guardan en la nube: el dueño y los vendedores ven lo mismo desde cualquier dispositivo. Igual podés descargar un respaldo para guardarlo en tu PC. Al restaurar un respaldo solo se agrega lo que falta: no se pisa nada.
               </p>
               {internalDbStatus && (
                 <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] font-mono tabular-nums text-slate-500 dark:text-[#94A3B8]">
@@ -1394,7 +1396,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 if (res.success) {
                   setBackupFeedback({
                     type: 'ok',
-                    text: `Base interna restaurada (${res.importedCount} registros, ${res.tenantsCount} empresa(s)). Recargando...`,
+                    text: `Respaldo importado: se agregaron ${res.importedCount} registro(s) que faltaban. Recargando...`,
                   });
                   setTimeout(() => window.location.reload(), 900);
                 } else {

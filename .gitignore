@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Reporte con contraseñas temporales de la migración
+usuarios-migrados.csv

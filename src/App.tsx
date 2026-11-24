@@ -80,7 +80,10 @@ import {
   saveRendiciones,
   resetOperationalData,
 } from './utils/storage';
-import { purgeExpiredBoletas, ensureClientCreditHistory, getDaysElapsed } from './utils/retentionPurge';
+import { ensureClientCreditHistory, getDaysElapsed } from './utils/retentionPurge';
+import { getSupabaseClient } from './utils/supabaseClient';
+import { describeCloudError, flushSupabaseSync } from './utils/supabaseSync';
+import { CloudSyncStatusBanner } from './components/CloudSyncStatusBanner';
 import { calculateAlertStatus, formatCurrency, addDaysToDate, formatDateEs, getBoletaBalance } from './utils/alerts';
 import { getAlertThresholds } from './utils/alertThresholds';
 import { createWhatsAppUrl, generateUserSignedReminder } from './utils/whatsapp';
@@ -184,6 +187,7 @@ const LazyViewFallback = () => (
 );
 import {
   getCurrentSessionUser,
+  logoutUser,
   setCurrentSessionUser,
   loadTenants,
   saveTenants,
@@ -1142,6 +1146,7 @@ export default function App() {
     setCurrentUser(null);
     setCurrentSessionUser(null);
     setSelectedTenant(null);
+    void logoutUser();
     showToast('Sesión cerrada correctamente.');
   };
 
@@ -2774,24 +2779,26 @@ export default function App() {
     showToast(`¡Boleta #${target.boletaNumber} cobrada y archivada en el historial!`);
   };
 
-  // Depuración manual / periódica de 30 días
-  const handleExecuteRetentionPurge = () => {
-    const purgeResult = purgeExpiredBoletas(boletas, paidBoletas, clients, 30);
-    if (purgeResult.totalPurged > 0) {
-      handleSaveBoletas(purgeResult.survivingBoletas);
-      handleSavePaidBoletas(purgeResult.survivingPaidBoletas);
-      handleSaveClients(purgeResult.updatedClients);
-      const updatedConfig = {
-        ...config,
-        totalPurgedBoletasCount: (config.totalPurgedBoletasCount || 0) + purgeResult.totalPurged,
-        lastRetentionPurgeDate: new Date().toISOString().split('T')[0],
-      };
-      handleSaveConfig(updatedConfig);
+  // Depuración de 30 días: corre en el servidor (todas las noches y también a pedido).
+  // Solo borra boletas PAGADAS hace más de 30 días; las impagas nunca se borran.
+  const handleExecuteRetentionPurge = async () => {
+    if (!selectedTenant) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    try {
+      await flushSupabaseSync();
+      const { data, error } = await supabase.rpc('run_retention_purge', { p_business_id: selectedTenant.id });
+      if (error) throw error;
+      const purged = Number((data as any)?.purgedTotal || 0);
+      await syncTenantDataFromSupabase(selectedTenant.id);
+      loadDataForTenant(selectedTenant.id);
       showToast(
-        `🧹 Depuración de 30 días: Se eliminaron ${purgeResult.totalPurged} boletas del sistema (${purgeResult.purgedPendingCount} impagas / ${purgeResult.purgedPaidCount} archivadas). El historial y reputación de cada cliente quedó guardado de por vida.`
+        purged > 0
+          ? `🧹 Depuración de 30 días: se archivaron definitivamente ${purged} boleta(s) pagada(s). La ficha de cada cliente (confiable / problemático) se conserva.`
+          : '✨ No hay boletas pagadas hace más de 30 días. La base de datos está al día.'
       );
-    } else {
-      showToast('✨ Todas las boletas registradas tienen menos de 30 días. La base de datos está al día.');
+    } catch (err) {
+      showToast(describeCloudError(err));
     }
   };
 
@@ -4134,6 +4141,17 @@ export default function App() {
           onLogout={handleLogout}
           onOpenUserProfile={() => setIsUserProfileOpen(true)}
           onOpenSubscriptionPayModal={() => setIsSubscriptionPayOpen(true)}
+        />
+
+        {/* Estado de la conexión con Supabase y datos viejos del dispositivo */}
+        <CloudSyncStatusBanner
+          businessId={selectedTenant?.id || null}
+          canImportLegacy={currentUser?.role === 'dueño' || currentUser?.role === 'administrador'}
+          onLegacyImported={() => {
+            if (selectedTenant) {
+              syncTenantDataFromSupabase(selectedTenant.id).then(() => loadDataForTenant(selectedTenant.id));
+            }
+          }}
         />
 
         {/* SAAS MONTHLY SUBSCRIPTION & 30-DAY TRIAL WARNING BANNERS (NAVY / SILVER / CRIMSON) */}

@@ -27,14 +27,11 @@ import { RUBRO_PROFILES } from '../utils/businessMode';
 import { ContactChannelsModal } from './ContactChannelsModal';
 import { TermsConditionsModal, TermsConditionsScrollBox } from './TermsConditionsModal';
 import { TERMS_VERSION } from '../utils/termsAndConditions';
-import { importInternalDatabaseBackup } from '../utils/localInternalDb';
 import {
   authenticateUser,
-  findUserByEmail,
-  resetUserPasswordByEmail,
+  requestPasswordReset,
+  completePasswordReset,
   registerSelfServiceTrialTenant,
-  syncAuthCatalogFromSupabase,
-  flushSupabaseSync,
 } from '../utils/multiTenantStorage';
 
 interface LoginPageProps {
@@ -105,11 +102,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
 
   // Password Recovery Modal State
-  const [isRecoveryOpen, setIsRecoveryOpen] = useState(false);
+  // Si el usuario vuelve desde el link del email de recuperación, se abre directo el paso 2
+  const cameFromRecoveryLink =
+    typeof window !== 'undefined' &&
+    (window.location.hash.includes('type=recovery') || new URLSearchParams(window.location.search).has('recuperar'));
+  const [isRecoveryOpen, setIsRecoveryOpen] = useState(cameFromRecoveryLink);
   const [recoveryEmail, setRecoveryEmail] = useState('');
-  const [recoveryStep, setRecoveryStep] = useState<1 | 2>(1);
-  const [recoveryCode, setRecoveryCode] = useState('');
-  const [inputCode, setInputCode] = useState('');
+  const [recoveryStep, setRecoveryStep] = useState<1 | 2>(cameFromRecoveryLink ? 2 : 1);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
@@ -117,11 +116,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [isContactChannelsOpen, setIsContactChannelsOpen] = useState(false);
-  const [backupRestoreFeedback, setBackupRestoreFeedback] = useState<{
-    type: 'ok' | 'err';
-    text: string;
-  } | null>(null);
-  const loginBackupInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,8 +133,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setIsSubmitting(true);
 
     try {
-      await syncAuthCatalogFromSupabase();
-      const result = authenticateUser(username, password, tenantCode);
+      const result = await authenticateUser(username, password, tenantCode);
       setIsSubmitting(false);
 
       if (result.success && result.user) {
@@ -170,12 +163,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setRegError('El usuario de acceso debe tener al menos 3 caracteres.');
       return;
     }
-    if (!regPassword.trim() || regPassword.trim().length < 4) {
-      setRegError('La contraseña debe tener al menos 4 caracteres.');
+    if (!regPassword.trim() || regPassword.trim().length < 6) {
+      setRegError('La contraseña debe tener al menos 6 caracteres.');
       return;
     }
-    if (regEmail.trim() && !regEmail.includes('@')) {
-      setRegError('Ingresá un correo electrónico válido o dejalo vacío.');
+    if (!regEmail.trim() || !regEmail.includes('@')) {
+      setRegError('Ingresá un correo electrónico válido: lo vas a necesitar para confirmar la cuenta y recuperar tu clave.');
       return;
     }
     if (!regAcceptedTerms) {
@@ -185,8 +178,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
     setIsRegistering(true);
     try {
-      await syncAuthCatalogFromSupabase();
-      const res = registerSelfServiceTrialTenant({
+      const res = await registerSelfServiceTrialTenant({
         companyName: regCompanyName,
         ownerName: regOwnerName,
         phone: regPhone,
@@ -207,7 +199,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         return;
       }
 
-      await flushSupabaseSync();
       setIsRegistering(false);
       onLoginSuccess(res.user, res.tenant);
     } catch {
@@ -216,7 +207,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  // Step 1: Request recovery code by email
+  // Paso 1: enviar el email con el link de recuperación (Supabase Auth)
   const handleRequestRecoveryCode = async (e: React.FormEvent) => {
     e.preventDefault();
     setRecoveryError(null);
@@ -224,39 +215,30 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
     const cleanEmail = recoveryEmail.trim().toLowerCase();
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setRecoveryError('Ingrese un correo electrónico válido.');
+      setRecoveryError('Ingresá un correo electrónico válido.');
       return;
     }
 
     setIsSendingCode(true);
-    await syncAuthCatalogFromSupabase();
-    const matchedUser = findUserByEmail(cleanEmail);
-    if (!matchedUser) {
-      setIsSendingCode(false);
-      setRecoveryError('No encontramos ninguna cuenta asociada a este correo electrónico.');
+    const res = await requestPasswordReset(cleanEmail);
+    setIsSendingCode(false);
+    if (!res.success) {
+      setRecoveryError(res.error || 'No se pudo enviar el correo de recuperación.');
       return;
     }
-
-    const localCode = Math.floor(100000 + Math.random() * 900000).toString();
-    setRecoveryCode(localCode);
-    setRecoveryStep(2);
+    // Por seguridad no se informa si el email existe o no
     setRecoverySuccess(
-      `Código de verificación de 6 dígitos generado para ${cleanEmail}: ${localCode}`
+      `Si ${cleanEmail} tiene una cuenta, te llega un correo con un link para crear una nueva contraseña. Revisá también la carpeta de spam.`
     );
-    setIsSendingCode(false);
   };
 
-  // Step 2: Validate code & set new password
+  // Paso 2: el usuario volvió desde el link del correo y elige la nueva contraseña
   const handleConfirmPasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setRecoveryError(null);
 
-    if (inputCode.trim() !== recoveryCode.trim()) {
-      setRecoveryError('El código de verificación ingresado es incorrecto.');
-      return;
-    }
-    if (newPassword.trim().length < 4) {
-      setRecoveryError('La nueva contraseña debe tener al menos 4 caracteres.');
+    if (newPassword.trim().length < 6) {
+      setRecoveryError('La nueva contraseña debe tener al menos 6 caracteres.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -264,22 +246,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       return;
     }
 
-    const resetSuccess = resetUserPasswordByEmail(recoveryEmail, newPassword);
-    if (resetSuccess) {
-      await flushSupabaseSync();
-      setRecoverySuccess('Contraseña restablecida con éxito. Ya podés iniciar sesión.');
-      setPassword(newPassword);
+    const res = await completePasswordReset(newPassword.trim());
+    if (res.success) {
+      setRecoverySuccess('Contraseña actualizada. Ya podés iniciar sesión con la nueva clave.');
+      if (typeof window !== 'undefined') {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
       setTimeout(() => {
         setIsRecoveryOpen(false);
         setRecoveryStep(1);
         setRecoveryEmail('');
-        setInputCode('');
         setNewPassword('');
         setConfirmPassword('');
         setRecoverySuccess(null);
-      }, 1800);
+      }, 2200);
     } else {
-      setRecoveryError('Ocurrió un error al guardar la nueva contraseña.');
+      setRecoveryError(res.error || 'El link de recuperación venció. Pedí uno nuevo.');
     }
   };
 
@@ -443,7 +425,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 />
               </div>
               <p className="text-[11px] text-[#8D9CB0] mt-1">
-                Si lo dejás vacío, el sistema ingresa automáticamente a tu distribuidora asignada.
+                Si entrás con tu usuario (sin email), completá el código de tu empresa.
               </p>
             </div>
 
@@ -676,7 +658,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                           type={showRegPassword ? 'text' : 'password'}
                           value={regPassword}
                           onChange={(e) => setRegPassword(e.target.value)}
-                          placeholder="Mín. 4 caracteres"
+                          placeholder="Mín. 6 caracteres"
                           required
                           className="w-full pl-3 pr-9 py-2 bg-[#0B1933] border border-[#B6C2D2]/25 rounded-xl text-xs text-white font-mono placeholder-[#64748B] focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60"
                         />
@@ -767,45 +749,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
         {/* Feature Highlights & Support Channels Footer */}
         <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-center text-xs text-[#94A3B8]">
-          <div className="bg-[#0B1933]/80 border border-[#B6C2D2]/15 rounded-xl p-2.5 flex items-center gap-2 justify-center">
+          <div className="sm:col-span-2 bg-[#0B1933]/80 border border-[#B6C2D2]/15 rounded-xl p-2.5 flex items-center gap-2 justify-center">
             <Database className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Base interna local (sin nube)</span>
+            <span>Tus datos guardados en la nube, en todos tus dispositivos</span>
           </div>
-
-          <input
-            ref={loginBackupInputRef}
-            type="file"
-            accept=".json,application/json"
-            className="hidden"
-            onChange={async (e) => {
-              const file = e.target.files?.[0];
-              e.target.value = '';
-              if (!file) return;
-              const txt = await file.text();
-              const res = await importInternalDatabaseBackup(txt);
-              if (res.success) {
-                setBackupRestoreFeedback({
-                  type: 'ok',
-                  text: `Base restaurada (${res.tenantsCount} empresa(s), ${res.usersCount} usuario(s)). Actualizando...`,
-                });
-                setTimeout(() => window.location.reload(), 900);
-              } else {
-                setBackupRestoreFeedback({
-                  type: 'err',
-                  text: res.error || 'Archivo de respaldo inválido.',
-                });
-              }
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => loginBackupInputRef.current?.click()}
-            className="bg-[#0B1933]/80 hover:bg-[#13264A] border border-[#B6C2D2]/20 rounded-xl p-2.5 flex items-center gap-2 justify-center text-[#CBD5E1] hover:text-white font-medium transition-colors cursor-pointer"
-            title="Si usabas el sistema en otra PC o celular, cargá tu archivo de respaldo .json aquí"
-          >
-            <Upload className="w-4 h-4 text-[#CBD5E1] shrink-0" />
-            <span>Restaurar respaldo (.json)</span>
-          </button>
 
           <button
             type="button"
@@ -817,17 +764,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           </button>
         </div>
 
-        {backupRestoreFeedback && (
-          <div
-            className={`mt-3 p-2.5 rounded-xl border text-xs text-center font-semibold ${
-              backupRestoreFeedback.type === 'ok'
-                ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200'
-                : 'bg-rose-950/60 border-rose-500/40 text-rose-200'
-            }`}
-          >
-            {backupRestoreFeedback.text}
-          </div>
-        )}
       </div>
 
       <ContactChannelsModal
@@ -875,7 +811,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             {recoveryStep === 1 ? (
               <form onSubmit={handleRequestRecoveryCode} className="space-y-4">
                 <p className="text-xs text-[#CBD5E1] leading-relaxed">
-                  Ingresá el correo electrónico registrado en tu cuenta para generar un código de seguridad.
+                  Ingresá el correo electrónico de tu cuenta y te enviamos un link para crear una nueva contraseña.
+                  Si tu usuario no tiene email, pedile al dueño o al administrador que te cambie la clave.
                 </p>
 
                 <div>
@@ -910,40 +847,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     disabled={isSendingCode}
                     className="px-5 py-2.5 bg-[#E2E8F0] hover:bg-white text-[#091428] font-bold text-xs rounded-xl transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
                   >
-                    <span>{isSendingCode ? 'Generando...' : 'Enviar Código'}</span>
+                    <span>{isSendingCode ? 'Enviando…' : 'Enviar link'}</span>
                     <Send className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </form>
             ) : (
               <form onSubmit={handleConfirmPasswordReset} className="space-y-4">
-                <div className="p-3 rounded-xl bg-[#0F2142] border border-[#B6C2D2]/25 text-xs text-[#CBD5E1] space-y-1.5">
-                  <span className="font-semibold block">Código de Verificación:</span>
-                  <div className="flex items-center justify-between font-mono tabular-nums font-bold text-sm text-white bg-[#071021] px-3 py-1.5 rounded-lg border border-[#B6C2D2]/20">
-                    <span>{recoveryCode}</span>
-                    <button
-                      type="button"
-                      onClick={() => setInputCode(recoveryCode)}
-                      className="text-[11px] text-[#CBD5E1] hover:underline font-sans font-semibold cursor-pointer"
-                    >
-                      Autocompletar
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-[#CBD5E1] block mb-1">
-                    Ingresar Código (6 dígitos)
-                  </label>
-                  <input
-                    type="text"
-                    value={inputCode}
-                    onChange={(e) => setInputCode(e.target.value)}
-                    placeholder="123456"
-                    required
-                    className="w-full text-center tracking-widest font-mono tabular-nums text-base py-2 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-white focus:outline-hidden focus:ring-2 focus:ring-[#CBD5E1]/60"
-                  />
-                </div>
+                <p className="text-xs text-[#CBD5E1] leading-relaxed">Elegí tu nueva contraseña (mínimo 6 caracteres).</p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -955,7 +866,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                         type={showNewPassword ? 'text' : 'password'}
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Mín. 4 caracteres"
+                        placeholder="Mín. 6 caracteres"
                         required
                         className="w-full text-xs pl-3 pr-8 py-2.5 bg-[#071021] border border-[#B6C2D2]/25 rounded-xl text-white font-mono"
                       />
@@ -990,7 +901,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     onClick={() => setRecoveryStep(1)}
                     className="text-xs text-[#94A3B8] hover:text-white cursor-pointer"
                   >
-                    ← Volver
+                    ← Pedir otro link
                   </button>
                   <button
                     type="submit"

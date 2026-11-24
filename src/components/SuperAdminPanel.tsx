@@ -368,12 +368,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   // Initial user credentials
   const [createInitialUser, setCreateInitialUser] = useState(true);
   const [initialUsername, setInitialUsername] = useState('');
-  const [initialPassword, setInitialPassword] = useState('1234');
+  const [initialPassword, setInitialPassword] = useState('');
   const [initialOwnerName, setInitialOwnerName] = useState('');
 
   // Form states for New User Modal
   const [userFormUsername, setUserFormUsername] = useState('');
-  const [userFormPassword, setUserFormPassword] = useState('1234');
+  const [userFormPassword, setUserFormPassword] = useState('');
   const [userFormFullName, setUserFormFullName] = useState('');
   const [userFormRole, setUserFormRole] = useState<'dueño' | 'administrador' | 'vendedor'>('dueño');
   const [userFormTenantId, setUserFormTenantId] = useState<string>(tenants[0]?.id || '');
@@ -417,8 +417,8 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       return;
     }
 
-    if (createInitialUser && (!initialUsername.trim() || !initialPassword.trim())) {
-      showToast('Por favor defina el usuario y contraseña de acceso para esta empresa.');
+    if (createInitialUser && (!initialUsername.trim() || initialPassword.trim().length < 6)) {
+      showToast('Definí el usuario y una contraseña de al menos 6 caracteres para esta empresa.');
       return;
     }
 
@@ -559,7 +559,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       const newUser: PlatformUser = {
         id: `usr-${Date.now()}`,
         username: initialUsername.trim().toLowerCase(),
-        password: initialPassword.trim() || '1234',
+        password: initialPassword.trim(),
         fullName: initialOwnerName.trim() || `${tenantFormName} (Titular)`,
         email: tenantFormEmail.trim(),
         phone: tenantFormPhone.trim(),
@@ -591,7 +591,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     setTenantFormInitialPlan('trial');
     setTenantFormPlanTier('web');
     setInitialUsername('');
-    setInitialPassword('1234');
+    setInitialPassword('');
     setInitialOwnerName('');
 
     showToast(
@@ -1278,7 +1278,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       `🔑 DATOS DE ACCESO:\n` +
       `• ID / Código: ${tenant.tenantCode}\n` +
       `• Usuario: ${tenantUser.username}\n` +
-      `• Contraseña: ${tenantUser.password}\n\n` +
+      `• Contraseña: ${tenantUser.password || 'la que te pasamos al crear la cuenta (si no la tenés, usá “¿Olvidaste tu contraseña?”)'}\n\n` +
       `Ingresá desde el navegador y colocá tus datos para acceder a tu panel privado.`;
 
     navigator.clipboard.writeText(text);
@@ -1302,7 +1302,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       `🔑 DATOS DE ACCESO:\n` +
       `• ID / Código de Empresa: ${tenant.tenantCode}\n` +
       `• Usuario: ${tenantUser.username}\n` +
-      `• Contraseña: ${tenantUser.password}\n\n` +
+      `• Contraseña: ${tenantUser.password || 'la que te pasamos al crear la cuenta (si no la tenés, usá “¿Olvidaste tu contraseña?”)'}\n\n` +
       `Podés ingresar directamente con tu usuario y contraseña. Tus datos de ventas y cobranzas son 100% privados de tu empresa.`;
 
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
@@ -1312,8 +1312,8 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   // Handle Create User
   const handleCreateUser = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userFormUsername.trim() || !userFormPassword.trim()) {
-      showToast('Por favor complete usuario y contraseña.');
+    if (!userFormUsername.trim() || userFormPassword.trim().length < 6) {
+      showToast('Completá el usuario y una contraseña de al menos 6 caracteres.');
       return;
     }
 
@@ -1355,7 +1355,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
     setIsNewUserModalOpen(false);
     setUserFormUsername('');
-    setUserFormPassword('1234');
+    setUserFormPassword('');
     setUserFormFullName('');
     setUserFormPhone('');
     setUserFormEmail('');
@@ -2453,7 +2453,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                             <span className="text-slate-400 text-[11px]">Contraseña:</span>
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-amber-300 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                                {isPasswordVisible ? tenantOwnerUser.password : '••••••••'}
+                                {isPasswordVisible ? tenantOwnerUser.password || 'No se guarda (segura en Supabase)' : '••••••••'}
                               </span>
                               <button
                                 type="button"
@@ -3681,7 +3681,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2 font-mono">
                               <span className="bg-slate-900 px-2 py-1 rounded-md border border-slate-700 text-amber-300 font-bold">
-                                {isPasswordVisible ? user.password : '••••••••'}
+                                {isPasswordVisible ? user.password || 'No se guarda (segura en Supabase)' : '••••••••'}
                               </span>
                               <button
                                 type="button"
@@ -5278,11 +5278,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
-                  Contraseña / Clave: *
+                  Nueva contraseña (opcional)
                 </label>
                 <input
                   type="text"
-                  required
+                  minLength={6}
+                  placeholder="Dejala vacía para no cambiarla (mín. 6 caracteres)"
                   value={editingUser.password}
                   onChange={(e) => setEditingUser({ ...editingUser, password: e.target.value })}
                   className="w-full px-3.5 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-amber-300 font-mono font-bold"

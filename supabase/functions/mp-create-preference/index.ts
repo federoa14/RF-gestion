@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { readKeyRow, writeKey } from '../_shared/legacyStore.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -48,11 +49,7 @@ Deno.serve(async (req) => {
       }
 
       const publicOrderKey = `catalog_order_${orderId}`;
-      const { data: orderRow } = await supabase
-        .from('app_cloud_store')
-        .select('value')
-        .eq('key', publicOrderKey)
-        .maybeSingle();
+      const { data: orderRow } = await readKeyRow(supabase, publicOrderKey);
 
       const order = orderRow?.value;
       if (!order) {
@@ -62,11 +59,7 @@ Deno.serve(async (req) => {
       const tenantId = String(order.tenantId || body?.tenantId || '').trim();
       let accessToken = '';
       if (tenantId) {
-        const { data: merchantRow } = await supabase
-          .from('app_cloud_store')
-          .select('value')
-          .eq('key', `merchant_mp_token_${tenantId}`)
-          .maybeSingle();
+        const { data: merchantRow } = await readKeyRow(supabase, `merchant_mp_token_${tenantId}`);
         accessToken = String(merchantRow?.value?.accessToken || '').trim();
       }
       if (!accessToken) {
@@ -153,16 +146,10 @@ Deno.serve(async (req) => {
         updatedAt: nowIso,
       };
 
-      await supabase
-        .from('app_cloud_store')
-        .update({ value: updatedOrder, updated_at: nowIso })
-        .eq('key', publicOrderKey);
+      await writeKey(supabase, publicOrderKey, updatedOrder);
 
       if (tenantId) {
-        await supabase
-          .from('app_cloud_store')
-          .update({ value: updatedOrder, updated_at: nowIso })
-          .eq('key', `rec:${tenantId}:catalogOrders:${orderId}`);
+        await writeKey(supabase, `rec:${tenantId}:catalogOrders:${orderId}`, updatedOrder);
       }
 
       return jsonResponse({
@@ -190,11 +177,7 @@ Deno.serve(async (req) => {
 
       let accessToken = (Deno.env.get('MERCADOPAGO_ACCESS_TOKEN') || '').trim();
       if (!accessToken) {
-        const { data: secretRow } = await supabase
-          .from('app_cloud_store')
-          .select('value')
-          .eq('key', 'rec:secret:platform_mp_access_token')
-          .maybeSingle();
+        const { data: secretRow } = await readKeyRow(supabase, 'rec:secret:platform_mp_access_token');
         accessToken = String(secretRow?.value?.accessToken || '').trim();
       }
 
@@ -277,11 +260,7 @@ Deno.serve(async (req) => {
     }
 
     const orderKey = `client_payment_order_${orderToken}`;
-    const { data: orderRow } = await supabase
-      .from('app_cloud_store')
-      .select('value')
-      .eq('key', orderKey)
-      .maybeSingle();
+    const { data: orderRow } = await readKeyRow(supabase, orderKey);
 
     const order = orderRow?.value;
     if (!order) {
@@ -291,11 +270,7 @@ Deno.serve(async (req) => {
     const tenantId = String(order.tenantId || '').trim();
     let accessToken = '';
     if (tenantId) {
-      const { data: merchantRow } = await supabase
-        .from('app_cloud_store')
-        .select('value')
-        .eq('key', `merchant_mp_token_${tenantId}`)
-        .maybeSingle();
+      const { data: merchantRow } = await readKeyRow(supabase, `merchant_mp_token_${tenantId}`);
       accessToken = String(merchantRow?.value?.accessToken || '').trim();
     }
     if (!accessToken) {
@@ -363,19 +338,8 @@ Deno.serve(async (req) => {
       mpPreferenceId: mpData.id,
     };
 
-    await supabase
-      .from('app_cloud_store')
-      .update({ value: updatedOrder, updated_at: new Date().toISOString() })
-      .eq('key', orderKey);
+    await writeKey(supabase, orderKey, updatedOrder);
 
-    try {
-      await supabase
-        .from('client_payment_orders')
-        .update({ mp_init_point: mpData.init_point, mp_preference_id: mpData.id })
-        .eq('token', orderToken);
-    } catch {
-      // Optional relational mirror
-    }
 
     return jsonResponse({
       ok: true,
