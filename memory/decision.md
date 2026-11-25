@@ -77,3 +77,8 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Términos:** quedan registrados en la nube, en la configuración de la empresa (`config.termsAcceptedAt`) y en el dispositivo (`rf_terms_accepted_<empresa>`); si cualquiera existe, no se vuelve a pedir. Comprobado en la base: la aceptación de "Hay Vida en Jesus" quedó guardada después del arreglo de `businesses`.
 - **Tienda online:** antes de ver el catálogo se piden nombre y teléfono (y dirección opcional si hay envío); se recuerdan en el dispositivo (`rf_visitor_<empresa>`), precargan el carrito y alimentan el recordatorio de carrito abandonado por WhatsApp (Plan 3). Casilla opcional, sin marcar, para sumarse al club (solo Plan 3 con club activo).
 - **Fotos publicadas:** más chicas (480 px) para que la tienda cargue rápido y la publicación no falle por tiempo.
+
+## 2026-11-25 — Versión celular revisada
+- **Hallazgos corregidos:** pestañas del superadmin superpuestas en pantallas angostas (ahora se deslizan); en Configuración del catálogo los campos de texto empujaban fuera de la pantalla los botones "+ Agregar filtro / subfiltro / banner" (regla `input.flex-1 { min-width: 0 }` en `index.css`); formulario de subfiltros a 320 px.
+- **Prueba:** `tests/e2e/mobile.test.mjs` revisa a 360 y 320 px que no haya desborde horizontal ni elementos cortados (tienda, bienvenida, carrito, login, panel, mostrador, catálogo, diseño, términos, SuperGestión).
+- **Nota:** la franja de estado del panel ("En la calle…") se desliza de costado a propósito en el celular.

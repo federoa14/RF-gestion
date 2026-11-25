@@ -208,3 +208,13 @@
 .rf-panel[data-themed] .border-\[\#0B1933\] { border-color: var(--panel-primary); }
 .rf-panel[data-themed] .hover\:bg-\[\#13264A\]:hover { background-color: var(--panel-primary-hover); }
 .rf-panel[data-themed] .hover\:border-\[\#0B1933\]:hover { border-color: var(--panel-primary); }
+
+/* Celular: los campos de texto dentro de una fila pueden achicarse (no empujan los botones fuera de la pantalla) */
+input.flex-1,
+select.flex-1,
+textarea.flex-1 {
+  min-width: 0;
+}
+.flex > button.whitespace-nowrap {
+  flex-shrink: 0;
+}

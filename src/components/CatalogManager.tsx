@@ -3513,14 +3513,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   e.preventDefault();
                   handleAddCustomSubfilter(newSubfilterInput);
                 }}
-                className="flex items-center gap-1.5 shrink-0"
+                className="flex items-center gap-1.5 w-full sm:w-auto sm:shrink-0"
               >
                 <input
                   type="text"
                   value={newSubfilterInput}
                   onChange={(e) => setNewSubfilterInput(e.target.value)}
                   placeholder="Nuevo subfiltro (ej. Remeras, Ofertas...)"
-                  className="w-52 sm:w-56 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
+                  className="flex-1 min-w-0 sm:flex-none sm:w-56 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
                 />
                 <button
                   type="submit"
