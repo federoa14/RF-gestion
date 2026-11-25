@@ -461,6 +461,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     currencySymbol: settings.currencySymbol || config.currencySymbol || '$',
   }));
 
+  const lastAppliedDraftRef = useRef<string>('');
+
   useEffect(() => {
     const resolvedPhone =
       settings.whatsappPhone || config.senderPhone || config.distributorPhone || '';
@@ -472,7 +474,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       : presetForSync.defaultFilters;
 
     setInlineWhatsappDraft(resolvedPhone);
-    setDraftSettings({
+    const nextDraft: OnlineCatalogSettings = {
       published: settings.published !== false,
       catalogRubro:
         tenant?.catalogRubro || settings.catalogRubro || config.businessRubro || 'distribuidora',
@@ -515,6 +517,15 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         typeof settings.loyaltyPointsPerUnit === 'number' ? settings.loyaltyPointsPerUnit : 10,
       loyaltyTiers: normalizeLoyaltyTiers(settings.loyaltyTiers),
       currencySymbol: settings.currencySymbol || config.currencySymbol || '$',
+    };
+    // No pisar lo que el usuario está editando: antes cada sincronización en segundo plano
+    // (volver a la pestaña, avisos en vivo) reiniciaba el borrador y se perdían los colores elegidos.
+    setDraftSettings((prev) => {
+      if (lastAppliedDraftRef.current && JSON.stringify(prev) !== lastAppliedDraftRef.current) {
+        return prev;
+      }
+      lastAppliedDraftRef.current = JSON.stringify(nextDraft);
+      return nextDraft;
     });
   }, [
     settings,
@@ -1689,6 +1700,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       loyaltyRestrictRedeemMethods: draftSettings.loyaltyRestrictRedeemMethods !== false,
       updatedAt: new Date().toISOString(),
     };
+    lastAppliedDraftRef.current = JSON.stringify(next);
     setDraftSettings(next);
     if (onSaveMerchantPaymentConfig) {
       onSaveMerchantPaymentConfig({
@@ -7290,6 +7302,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     value={draftMerchantPayment.merchantPaymentAlias}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7308,6 +7321,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     value={draftMerchantPayment.merchantPaymentCvu}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7326,6 +7340,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     value={draftMerchantPayment.merchantPaymentHolder}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7344,6 +7359,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     value={draftMerchantPayment.merchantPaymentBank}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7362,6 +7378,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="url"
                     value={draftMerchantPayment.merchantMpCheckoutLink}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7379,6 +7396,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   </label>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={draftMerchantPayment.merchantMpAccessToken}
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
