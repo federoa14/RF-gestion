@@ -1,0 +1,39 @@
+# Verificación automática en cada push y pull request:
+# tipos, compilación, pruebas de lógica y pruebas en el navegador.
+name: Pruebas
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Instalar dependencias
+        run: bun install --frozen-lockfile
+
+      - name: Revisar tipos
+        run: npx tsc --noEmit
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Pruebas de lógica
+        run: npm run test:unit
+
+      - name: Instalar Chromium para las pruebas
+        run: npx playwright install --with-deps chromium
+
+      - name: Pruebas en el navegador
+        run: npm run test:e2e
