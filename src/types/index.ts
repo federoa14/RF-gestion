@@ -232,7 +232,8 @@ export interface AutoDispatchLog {
   messageSnippet: string;
   fullMessage?: string;
   whatsappUrl?: string;
-  ruleMilestone?: '2d' | '6d' | '10d' | '15d' | 'overdue' | 'overdue_client' | 'blocked_charge' | 'daily_closing' | 'custom';
+  // '2d' | '6d' | '10d' | '15d' se conservan solo para registros históricos
+  ruleMilestone?: 'vendor_reminder' | 'owner_alert' | 'alert_mode' | 'critical_sale' | '2d' | '6d' | '10d' | '15d' | 'overdue' | 'overdue_client' | 'blocked_charge' | 'daily_closing' | 'custom';
   status: 'sent' | 'simulated';
   deliveryStatus?: 'delivered' | 'sent' | 'queued' | 'gateway_api' | 'simulated';
   gatewayResponse?: string;
@@ -267,6 +268,8 @@ export interface DistributorConfig {
   tenantCode?: string; // Código de acceso de la distribuidora (ej. "DIST-001")
   // Parámetros de Envío Directo y Pasarela WhatsApp:
   whatsappProvider?: 'server_daemon' | 'meta' | 'twilio' | 'webhook';
+  hasWhatsAppCredentials?: boolean; // El comercio conectó su WhatsApp Business (el token vive solo en el servidor)
+  whatsappDisplayPhone?: string; // Número conectado, para mostrar
   whatsappApiToken?: string;
   whatsappPhoneNumberId?: string;
   twilioAccountSid?: string;
@@ -281,7 +284,9 @@ export interface DistributorConfig {
   totalPurgedBoletasCount?: number; // Total histórico de boletas depuradas
   // Prórrogas y Margen de Vencido Crítico (Plata en la calle vencida):
   defaultExtensionDays?: number; // Días de prórroga rápida por defecto (ej. 3 o 5 días)
-  overdueGraceDays?: number; // Días posteriores al vencimiento para figurar en rojo crítico (ej. 5 días)
+  overdueGraceDays?: number; // Días posteriores al vencimiento para figurar en rojo crítico (días de mora)
+  saleAlertModeDays?: number; // Días desde la venta para entrar en "modo alerta" (prioridad de cobro)
+  saleCriticalDays?: number; // Días desde la venta para "alerta crítica" (prioridad máxima)
   // Control de Envíos de WhatsApp a Clientes (Activación / Desactivación por Empresa):
   enableClientWhatsAppReminders?: boolean; // Activar o desactivar el envío de recordatorios por WhatsApp a clientes
   customClientOverdueTemplate?: string; // Plantilla personalizada para el recordatorio de factura vencida al cliente
@@ -630,6 +635,20 @@ export interface CatalogPromoBanner {
   active: boolean;
 }
 
+// Diseño de la tienda online (Plan 3). Sin definir = diseño estándar.
+export interface CatalogStoreTheme {
+  palette?: 'marino' | 'esmeralda' | 'bordo' | 'naranja' | 'violeta' | 'grafito' | 'personalizada';
+  primaryColor?: string; // #RRGGBB, solo con paleta personalizada
+  accentColor?: string; // #RRGGBB, solo con paleta personalizada
+  font?: 'jakarta' | 'inter' | 'nunito' | 'lora' | 'playfair';
+  fontSize?: 'normal' | 'grande';
+  cardStyle?: 'borde' | 'sombra' | 'plano';
+  cardCorners?: 'redondeado' | 'recto';
+  bannerColors?: 'propios' | 'tienda'; // 'propios' = el color elegido en cada banner
+  bannerBackground?: 'oscuro' | 'claro'; // con colores de la tienda
+  bannerTitleSize?: 'normal' | 'grande';
+}
+
 export interface CatalogLoyaltyTier {
   id: string;
   minPoints: number;
@@ -866,6 +885,9 @@ export interface OnlineCatalogSettings {
   pickupHours?: string;
   pickupInstructions?: string;
   paymentNote?: string;
+  // Medios de pago que el comercio ofrece en la tienda (sin definir = todos, como antes)
+  paymentMethods?: Partial<Record<'transferencia' | 'mercadopago' | 'efectivo' | 'acordar', boolean>>;
+  storeTheme?: CatalogStoreTheme;
   currencySymbol?: string;
   defaultLowStockThreshold?: number; // Alerta cuando queden <= N unidades (por defecto 2)
   cashOrTransferDiscountPercent?: number; // % descuento pagando Efectivo / Transferencia
@@ -1003,6 +1025,8 @@ export interface PublishedPublicCatalog {
   pickupHours: string;
   pickupInstructions?: string;
   paymentNote?: string;
+  paymentMethods?: Partial<Record<'transferencia' | 'mercadopago' | 'efectivo' | 'acordar', boolean>>;
+  storeTheme?: CatalogStoreTheme;
   merchantPaymentAlias?: string;
   merchantPaymentCvu?: string;
   merchantPaymentBank?: string;

@@ -43,9 +43,9 @@ import {
   OnlineCatalogSettings,
 } from '../types';
 import { formatCurrency, formatDateEs, getBoletaBalance } from '../utils/alerts';
-import { createWhatsAppUrl } from '../utils/whatsapp';
+import { createWhatsAppUrl, hasUsablePhone } from '../utils/whatsapp';
 import { getBusinessLabels, ExcessPaymentAllocationPlan } from '../utils/businessMode';
-import { analyzeClientPurchaseInsights } from '../utils/clientInsights';
+import { analyzeClientPurchaseInsights, formatWeekdayPlural } from '../utils/clientInsights';
 import { analyzeColdClientsForIndumentaria } from '../utils/coldClientsRadar';
 import { ClientAccountStatementModal } from './ClientAccountStatementModal';
 import { ClientDetailModal } from './ClientDetailModal';
@@ -667,7 +667,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
                       </select>
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap">
-                      {client.phone ? (
+                      {hasUsablePhone(client.phone) ? (
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono text-slate-600 dark:text-slate-300">{client.phone}</span>
                           <a
@@ -951,7 +951,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
                     <div className="flex items-center gap-1 text-[10px] text-slate-500 dark:text-[#94A3B8]">
                       <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
                       <span className="truncate">
-                        Suele comprar los <strong>{insights.topWeekdays[0].label}</strong>
+                        Suele comprar los <strong>{formatWeekdayPlural(insights.topWeekdays[0].label)}</strong>
                         {insights.topMonthPeriods[0] ? ` · ${insights.topMonthPeriods[0].label}` : ''}
                       </span>
                     </div>
@@ -1015,7 +1015,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
                     <span className="truncate">{client.address || 'Sin dirección cargada'}</span>
                   </div>
 
-                  {client.phone ? (
+                  {hasUsablePhone(client.phone) ? (
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-2 font-mono">
                         <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -1347,7 +1347,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
                 </div>
 
                 <input
-                  type="number"
+                  type="number" inputMode="decimal"
                   min="0"
                   step="1000"
                   placeholder="Ej. 300000 (Dejá vacío o en 0 si es sin límite fijo)"

@@ -718,7 +718,7 @@ export const SalespersonRendicionView: React.FC<SalespersonRendicionViewProps> =
                   </p>
                   <p className="text-xs text-slate-500 dark:text-[#94A3B8] max-w-sm mx-auto">
                     {scope === 'due_or_overdue'
-                      ? 'Este preventista no tiene boletas vencidas ni que venzan hoy. Podés cambiar el alcance a "Todas las boletas pendientes" si querés incluir facturas futuras.'
+                      ? 'Este preventista no tiene boletas vencidas ni que venzan hoy. Podés cambiar el alcance a "Todas las boletas pendientes" si querés incluir boletas futuras.'
                       : 'Este preventista no tiene boletas pendientes registradas.'}
                   </p>
                 </div>
@@ -804,7 +804,7 @@ export const SalespersonRendicionView: React.FC<SalespersonRendicionViewProps> =
                                 Cobrado en Efectivo ({sym})
                               </label>
                               <input
-                                type="number"
+                                type="number" inputMode="decimal"
                                 min="0"
                                 step="0.01"
                                 value={draft?.collectedCash ?? ''}
@@ -820,7 +820,7 @@ export const SalespersonRendicionView: React.FC<SalespersonRendicionViewProps> =
                                 Transferencia ({sym})
                               </label>
                               <input
-                                type="number"
+                                type="number" inputMode="decimal"
                                 min="0"
                                 step="0.01"
                                 value={draft?.collectedTransfer ?? ''}
@@ -836,7 +836,7 @@ export const SalespersonRendicionView: React.FC<SalespersonRendicionViewProps> =
                                 Cheque / Otro ({sym})
                               </label>
                               <input
-                                type="number"
+                                type="number" inputMode="decimal"
                                 min="0"
                                 step="0.01"
                                 value={draft?.collectedOther ?? ''}
@@ -858,7 +858,7 @@ export const SalespersonRendicionView: React.FC<SalespersonRendicionViewProps> =
                                 Extender vencimiento (+ días):
                               </span>
                               <input
-                                type="number"
+                                type="number" inputMode="decimal"
                                 min="1"
                                 max="60"
                                 value={draft?.extensionDays ?? String(config.defaultExtensionDays || 3)}
@@ -946,7 +946,7 @@ export const SalespersonRendicionView: React.FC<SalespersonRendicionViewProps> =
                   </button>
                 </div>
                 <input
-                  type="number"
+                  type="number" inputMode="decimal"
                   min="0"
                   step="0.01"
                   value={declaredCashInput}

@@ -1,5 +1,6 @@
 import { Boleta, BusinessRubro, DistributorConfig, SaleLineItem } from '../types';
 import { addDaysToDate, getBoletaBalance } from './alerts';
+import { RUBRO_ESCALATION_DEFAULTS } from './alertThresholds';
 
 export interface RubroProfile {
   id: BusinessRubro;
@@ -7,6 +8,8 @@ export interface RubroProfile {
   shortLabel: string;
   badgeTag: string;
   description: string;
+  // Criterio único de términos: "Boleta" para el documento de deuda en todos los rubros,
+  // "Cuota" solo cuando está financiada, "Venta" para el acto comercial, "Pago" para el dinero que entra.
   saleSingular: string;
   salePlural: string;
   sellerLabel: string;
@@ -37,9 +40,9 @@ export const RUBRO_PROFILES: Record<BusinessRubro, RubroProfile> = {
     shortLabel: 'Mayorista / Distrib.',
     badgeTag: '1 FACTURA P/ CLIENTE · TOPE $',
     description:
-      'Perfil mayorista: estricto control de 1 sola factura fiada por cliente, tope máximo en pesos ($), preventistas en ruta y plazos cortos.',
-    saleSingular: 'Factura / Boleta',
-    salePlural: 'Facturas / Boletas',
+      'Perfil mayorista: estricto control de 1 sola boleta pendiente por cliente, tope máximo en pesos ($), preventistas en ruta y plazos cortos.',
+    saleSingular: 'Boleta',
+    salePlural: 'Boletas',
     sellerLabel: 'Preventista / Vendedor',
     clientLabel: 'Comercio / Cliente',
     clientPlaceholder: 'Ej. Almacén Los Amigos',
@@ -59,7 +62,7 @@ export const RUBRO_PROFILES: Record<BusinessRubro, RubroProfile> = {
     defaultInstallmentInterestPercent: 0,
     suggestedTerms: [5, 7, 10, 15],
     featureBullets: [
-      'Máximo 1 factura pendiente por cliente (bloqueo automático)',
+      'Máximo 1 boleta pendiente por cliente (bloqueo automático)',
       'Tope máximo de fiado ($) editable por comercio',
       'Sin cuotas personales ni canasto · Plazos cortos (5 a 15d)',
     ],
@@ -71,8 +74,8 @@ export const RUBRO_PROFILES: Record<BusinessRubro, RubroProfile> = {
     badgeTag: 'CUOTAS 2-12 · SEÑAS · PRENDAS',
     description:
       'Perfil indumentaria: múltiples compras y prendas abiertas por cliente, señas/reservas y financiación en 2, 3, 4, 5, 6, 9 o 12 cuotas personales con interés.',
-    saleSingular: 'Venta / Cuota',
-    salePlural: 'Ventas y Cuotas',
+    saleSingular: 'Boleta',
+    salePlural: 'Boletas',
     sellerLabel: 'Vendedora / Mostrador',
     clientLabel: 'Cliente',
     clientPlaceholder: 'Ej. Camila Fernández',
@@ -104,8 +107,8 @@ export const RUBRO_PROFILES: Record<BusinessRubro, RubroProfile> = {
     badgeTag: 'CANASTO MIXTO · POR PRODUCTO',
     description:
       'Perfil minorista ágil: canasto dinámico por producto (qué va en 1 pago hoy, qué en fiado y qué en cuotas) con comprobante visual.',
-    saleSingular: 'Venta / Ticket',
-    salePlural: 'Ventas / Tickets',
+    saleSingular: 'Boleta',
+    salePlural: 'Boletas',
     sellerLabel: 'Caja / Despacho',
     clientLabel: 'Cliente',
     clientPlaceholder: 'Ej. Lucas Pereyra / Pedido Web #412',
@@ -137,8 +140,8 @@ export const RUBRO_PROFILES: Record<BusinessRubro, RubroProfile> = {
     badgeTag: 'LIBRETA FIADO · ENTREGAS',
     description:
       'Perfil libreta digital: múltiples tickets simples y entregas a cuenta con tope máximo por cliente (sin cuotas financieras complejas).',
-    saleSingular: 'Fiado / Ticket',
-    salePlural: 'Fiados / Libreta',
+    saleSingular: 'Boleta',
+    salePlural: 'Boletas',
     sellerLabel: 'Caja / Atendido por',
     clientLabel: 'Cliente / Vecino',
     clientPlaceholder: 'Ej. Marta Sánchez (Vecina)',
@@ -158,7 +161,7 @@ export const RUBRO_PROFILES: Record<BusinessRubro, RubroProfile> = {
     defaultInstallmentInterestPercent: 0,
     suggestedTerms: [7, 15, 30],
     featureBullets: [
-      'Libreta simple de múltiples fiados y entregas parciales',
+      'Varias boletas por cliente y pagos parciales',
       'Control de Tope de Fiado mensual por cliente',
       'Envío directo de resumen de deuda por WhatsApp',
     ],
@@ -170,8 +173,8 @@ export const RUBRO_PROFILES: Record<BusinessRubro, RubroProfile> = {
     badgeTag: 'MÚLTIPLES REMITOS · FIFO',
     description:
       'Perfil cuenta corriente comercial: múltiples remitos abiertos por empresa u obra, imputación FIFO de pagos a cuenta y plazos largos.',
-    saleSingular: 'Movimiento / Remito',
-    salePlural: 'Cuenta Corriente',
+    saleSingular: 'Boleta',
+    salePlural: 'Boletas',
     sellerLabel: 'Responsable / Mostrador',
     clientLabel: 'Cliente / Empresa',
     clientPlaceholder: 'Ej. Constructora Sur / Taller El Rayo',
@@ -238,6 +241,8 @@ export function applyRubroProfileToConfig(
     adminAlertDays: profile.defaultAdminAlertDays,
     overdueGraceDays: profile.defaultOverdueGraceDays,
     overdueAlertDays: profile.defaultTermDays,
+    saleAlertModeDays: RUBRO_ESCALATION_DEFAULTS[profile.id]?.alertModeDays,
+    saleCriticalDays: RUBRO_ESCALATION_DEFAULTS[profile.id]?.criticalSaleDays,
     defaultClientCreditLimit: profile.defaultClientCreditLimit,
     defaultInstallmentInterestPercent: profile.defaultInstallmentInterestPercent,
   };

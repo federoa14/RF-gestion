@@ -21,10 +21,101 @@ import { dbGetItem, dbSetItem } from './localInternalDb';
 import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
 import {
   fetchClientPaymentOrderFromSupabase,
+  getCloudSession,
   saveClientPaymentOrderToSupabase,
 } from './supabaseSync';
 
-const CLOUD_TABLE = 'app_cloud_store';
+// -----------------------------------------------------------------------------
+// Enrutador de claves viejas → tablas nuevas (esquema v2)
+// Las funciones de este archivo siguen usando las claves de antes; acá se decide
+// a qué tabla va cada una y si se usa acceso directo (miembros del comercio,
+// protegido por RLS) o una función pública acotada (catálogo, links de pago).
+// -----------------------------------------------------------------------------
+
+const COLLECTION_TO_TABLE: Record<string, string> = {
+  catalogOrders: 'catalog_orders',
+  catalogStockAlerts: 'catalog_stock_alerts',
+  catalogPromoSubscribers: 'catalog_promo_subscribers',
+  catalogLoyaltyAccounts: 'catalog_loyalty_accounts',
+  catalogAbandonedCarts: 'catalog_abandoned_carts',
+  catalogGiftCards: 'catalog_gift_cards',
+  catalogProducts: 'catalog_products',
+};
+
+function isMemberOf(businessId?: string | null): boolean {
+  const session = getCloudSession();
+  if (!session || !businessId) return false;
+  return session.role === 'superadmin' || session.businessId === businessId;
+}
+
+async function putBusinessEntity(table: string, businessId: string, id: string, data: unknown): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !businessId || !id) return false;
+  if (isMemberOf(businessId)) {
+    const { error } = await supabase
+      .from(table)
+      .upsert({ business_id: businessId, id, data }, { onConflict: 'business_id,id' });
+    return !error;
+  }
+  const { error } = await supabase.rpc('public_entity_put', {
+    p_business_id: businessId,
+    p_kind: table,
+    p_id: id,
+    p_data: data,
+  });
+  return !error;
+}
+
+async function listBusinessEntities<T>(table: string, businessId: string, limit = 1000): Promise<T[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !businessId || !isMemberOf(businessId)) return [];
+  const { data, error } = await supabase
+    .from(table)
+    .select('data')
+    .eq('business_id', businessId)
+    .order('updated_at', { ascending: false })
+    .limit(limit);
+  if (error || !Array.isArray(data)) return [];
+  return data.map((r: any) => r.data as T).filter(Boolean);
+}
+
+async function getPublicEntity<T>(table: string, businessId: string, id: string): Promise<T | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !businessId || !id) return null;
+  if (isMemberOf(businessId)) {
+    const { data } = await supabase.from(table).select('data').eq('business_id', businessId).eq('id', id).maybeSingle();
+    return (data?.data as T) || null;
+  }
+  const { data, error } = await supabase.rpc('public_entity_get', { p_business_id: businessId, p_kind: table, p_id: id });
+  return error ? null : ((data as T) || null);
+}
+
+async function findPublicEntities<T>(table: string, businessId: string, value: string): Promise<T[]> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !businessId || !value) return [];
+  const { data, error } = await supabase.rpc('public_entity_find', { p_business_id: businessId, p_kind: table, p_value: value });
+  return !error && Array.isArray(data) ? (data as T[]) : [];
+}
+
+async function putPaymentDoc(kind: 'payment_link' | 'subscription_order', token: string, businessId: string, doc: any): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !token) return false;
+  const table = kind === 'payment_link' ? 'payment_links' : 'subscription_pay_orders';
+  if (isMemberOf(businessId)) {
+    const { error } = await supabase.from(table).upsert({ token, business_id: businessId, data: doc }, { onConflict: 'token' });
+    if (!error) return true;
+  }
+  const { error } = await supabase.rpc('public_payment_doc_patch', { p_kind: kind, p_token: token, p_patch: doc });
+  return !error;
+}
+
+async function getPaymentDoc<T>(kind: 'payment_link' | 'subscription_order', token: string): Promise<T | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !token) return null;
+  const { data, error } = await supabase.rpc('public_payment_doc_get', { p_kind: kind, p_token: token });
+  return error ? null : ((data as T) || null);
+}
+
 const VERIFIED_TENANT_PAYMENTS_KEY = 'saas_verified_tenant_payments_v1';
 
 export interface VerifiedTenantPaymentRecord {
@@ -55,13 +146,47 @@ export async function readCloudJsonRecord<T>(key: string): Promise<T | null> {
   const supabase = getSupabaseClient();
   if (!supabase || !key) return null;
   try {
-    const { data, error } = await supabase
-      .from(CLOUD_TABLE)
-      .select('value')
-      .eq('key', key)
-      .maybeSingle();
-    if (error || !data?.value) return null;
-    return data.value as T;
+    if (key.startsWith('public_catalog_ref_')) {
+      const cat = (await supabase.rpc('public_catalog_get', { p_handle: key.slice('public_catalog_ref_'.length) })).data;
+      return cat?.tenantId ? ({ tenantId: cat.tenantId } as T) : null;
+    }
+    if (key.startsWith('public_catalog_')) {
+      const businessId = key.slice('public_catalog_'.length);
+      if (isMemberOf(businessId)) {
+        const { data } = await supabase.from('public_catalogs').select('snapshot').eq('business_id', businessId).maybeSingle();
+        return data?.snapshot ? ({ ...data.snapshot, tenantId: businessId } as T) : null;
+      }
+      const { data } = await supabase.rpc('public_catalog_get', { p_handle: businessId });
+      return (data as T) || null;
+    }
+    if (key.startsWith('rec:platform:tenants:')) {
+      const id = key.slice('rec:platform:tenants:'.length);
+      if (!isMemberOf(id)) return null;
+      const { data } = await supabase.from('businesses').select('id, data').eq('id', id).maybeSingle();
+      return data ? ({ ...data.data, id: data.id } as T) : null;
+    }
+    if (key.startsWith(VERIFIED_PAYMENT_ENTITY_PREFIX)) {
+      const [bid, month] = key.slice(VERIFIED_PAYMENT_ENTITY_PREFIX.length).split('::');
+      const { data } = await supabase.from('subscription_payments').select('data').eq('business_id', bid).eq('month_key', month).maybeSingle();
+      return (data?.data as T) || null;
+    }
+    if (key === VERIFIED_TENANT_PAYMENTS_KEY) {
+      const { data } = await supabase.from('subscription_payments').select('business_id, month_key, data');
+      const map: Record<string, unknown> = {};
+      for (const r of data || []) map[`${r.business_id}::${r.month_key}`] = r.data;
+      return map as T;
+    }
+    if (key.startsWith('client_payment_order_')) {
+      return await getPaymentDoc<T>('payment_link', key.slice('client_payment_order_'.length));
+    }
+    if (key.startsWith(TENANT_SUB_PAY_ORDER_PREFIX)) {
+      return await getPaymentDoc<T>('subscription_order', key.slice(TENANT_SUB_PAY_ORDER_PREFIX.length));
+    }
+    const rec = key.match(/^rec:([^:]+):([^:]+):(.+)$/);
+    if (rec && COLLECTION_TO_TABLE[rec[2]]) {
+      return await getPublicEntity<T>(COLLECTION_TO_TABLE[rec[2]], rec[1], rec[3]);
+    }
+    return null;
   } catch {
     return null;
   }
@@ -70,30 +195,59 @@ export async function readCloudJsonRecord<T>(key: string): Promise<T | null> {
 async function insertOrUpdateCloudStoreKey<T>(key: string, value: T): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase || !key) return false;
-  const now = new Date().toISOString();
+  const v: any = value;
   try {
-    const { data: updatedRows, error: updErr } = await supabase
-      .from(CLOUD_TABLE)
-      .update({ value, updated_at: now })
-      .eq('key', key)
-      .select('key');
-
-    if (updErr) return false;
-    if (updatedRows && updatedRows.length > 0) return true;
-
-    const { error: insErr } = await supabase.from(CLOUD_TABLE).insert({
-      key,
-      value,
-      updated_at: now,
-    });
-    if (!insErr) return true;
-    if (insErr.code === '23505') {
-      const { error: retryErr } = await supabase
-        .from(CLOUD_TABLE)
-        .update({ value, updated_at: now })
-        .eq('key', key);
-      return !retryErr;
+    // Claves públicas viejas duplicadas: ahora todo vive en la tabla del comercio
+    if (
+      key.startsWith('public_catalog_ref_') ||
+      key.startsWith('catalog_order_') ||
+      key.startsWith('catalog_stock_alert_') ||
+      key.startsWith('catalog_promo_sub_') ||
+      key.startsWith('catalog_loyalty_') ||
+      key.startsWith('catalog_abandoned_cart_') ||
+      key.startsWith('catalog_gift_card_') ||
+      key === VERIFIED_TENANT_PAYMENTS_KEY
+    ) {
+      return true;
     }
+    if (key === 'rec:secret:platform_mp_access_token') {
+      const { error } = await supabase.rpc('set_platform_mp_token', { p_token: v?.accessToken || '' });
+      return !error;
+    }
+    if (key.startsWith('merchant_mp_token_')) {
+      const { error } = await supabase.rpc('set_merchant_mp_token', {
+        p_business_id: key.slice('merchant_mp_token_'.length),
+        p_token: v?.accessToken || '',
+      });
+      return !error;
+    }
+    if (key.startsWith('public_catalog_')) {
+      const businessId = key.slice('public_catalog_'.length);
+      if (!isMemberOf(businessId)) return false;
+      const { error } = await supabase
+        .from('public_catalogs')
+        .upsert({ business_id: businessId, snapshot: value }, { onConflict: 'business_id' });
+      return !error;
+    }
+    if (key.startsWith(VERIFIED_PAYMENT_ENTITY_PREFIX)) {
+      const [bid, month] = key.slice(VERIFIED_PAYMENT_ENTITY_PREFIX.length).split('::');
+      if (!isMemberOf(bid)) return true; // si paga alguien sin sesión, lo registra el servidor al aprobar la orden
+      const { error } = await supabase
+        .from('subscription_payments')
+        .upsert({ business_id: bid, month_key: month, data: value }, { onConflict: 'business_id,month_key' });
+      return !error;
+    }
+    if (key.startsWith('client_payment_order_')) {
+      return await putPaymentDoc('payment_link', key.slice('client_payment_order_'.length), v?.tenantId, value);
+    }
+    if (key.startsWith(TENANT_SUB_PAY_ORDER_PREFIX)) {
+      return await putPaymentDoc('subscription_order', key.slice(TENANT_SUB_PAY_ORDER_PREFIX.length), v?.tenantId, value);
+    }
+    const rec = key.match(/^rec:([^:]+):([^:]+):(.+)$/);
+    if (rec && COLLECTION_TO_TABLE[rec[2]]) {
+      return await putBusinessEntity(COLLECTION_TO_TABLE[rec[2]], rec[1], rec[3], value);
+    }
+    console.warn('[Supabase] Clave sin destino en el esquema nuevo:', key);
     return false;
   } catch {
     return false;
@@ -181,148 +335,29 @@ export async function createMercadoPagoPreferenceViaEdgeFunction(
 export async function mirrorPlatformBillingToSupabaseTable(
   cfg: PlatformBillingConfig
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return;
-  const payload = {
-    alias: cfg.alias || '',
-    cvu: cfg.cvu || '',
-    account_holder_name: cfg.accountHolderName || '',
-    bank_or_wallet_name: cfg.bankOrWalletName || 'Mercado Pago',
-    default_monthly_fee: Number(cfg.defaultMonthlyFee || 25000),
-    annual_discount_percent: Number(cfg.annualDiscountPercent || 0),
-    mp_checkout_link: cfg.mpCheckoutLink || '',
-    mp_public_key: cfg.mpPublicKey || '',
-    has_mp_access_token: Boolean(cfg.hasMpAccessToken),
-    updated_at: new Date().toISOString(),
-  };
-  try {
-    const { data: updatedRows } = await supabase
-      .from('platform_billing_config')
-      .update(payload)
-      .eq('id', 'default')
-      .select('id');
-    if (!updatedRows || updatedRows.length === 0) {
-      await supabase.from('platform_billing_config').insert({ id: 'default', ...payload });
-    }
-  } catch {
-    // app_cloud_store remains authoritative if RLS restricts anon writes
-  }
+  // Ya no se usa: el esquema v2 guarda todo en sus tablas (ver supabaseSync).
 }
 
 export async function mirrorPlatformSupportToSupabaseTable(
   cfg: PlatformSupportConfig
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase) return;
-  const payload = {
-    contact_name: cfg.contactName || '',
-    whatsapp_phone: cfg.whatsappPhone || '',
-    email: cfg.email || '',
-    attention_hours: cfg.attentionHours || '',
-    welcome_message: cfg.welcomeMessage || '',
-    updated_at: new Date().toISOString(),
-  };
-  try {
-    const { data: updatedRows } = await supabase
-      .from('platform_support_config')
-      .update(payload)
-      .eq('id', 'default')
-      .select('id');
-    if (!updatedRows || updatedRows.length === 0) {
-      await supabase.from('platform_support_config').insert({ id: 'default', ...payload });
-    }
-  } catch {
-    // non-blocking
-  }
+  // Ya no se usa: el esquema v2 guarda todo en sus tablas (ver supabaseSync).
 }
 
 export async function mirrorPlatformAnnouncementToSupabaseTable(
   item: PlatformAnnouncement
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase || !item?.id) return;
-  const payload = {
-    title: item.title,
-    message: item.message,
-    category: item.category,
-    audience: item.audience,
-    cta_type: item.ctaType || 'none',
-    cta_label: item.ctaLabel || '',
-    cta_url: item.ctaUrl || '',
-    active: Boolean(item.active),
-    expires_at: item.expiresAt || null,
-    author_name: item.authorName || '',
-    created_at: item.createdAt || new Date().toISOString(),
-  };
-  try {
-    const { data: updatedRows } = await supabase
-      .from('platform_announcements')
-      .update(payload)
-      .eq('id', item.id)
-      .select('id');
-    if (!updatedRows || updatedRows.length === 0) {
-      await supabase.from('platform_announcements').insert({ id: item.id, ...payload });
-    }
-  } catch {
-    // non-blocking
-  }
+  // Ya no se usa: el esquema v2 guarda todo en sus tablas (ver supabaseSync).
 }
 
 export async function deletePlatformAnnouncementFromSupabaseTable(id: string): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase || !id) return;
-  try {
-    await supabase.from('platform_announcements').delete().eq('id', id);
-  } catch {
-    // non-blocking
-  }
+  // Ya no se usa: el esquema v2 guarda todo en sus tablas (ver supabaseSync).
 }
 
 export async function mirrorClientPaymentOrderToSupabaseTable(
   order: ClientPaymentOrder
 ): Promise<void> {
-  const supabase = getSupabaseClient();
-  if (!supabase || !order?.token) return;
-  if (!isUuid(order.tenantId) || !isUuid(order.clientId)) return;
-  const payload = {
-    tenant_id: order.tenantId,
-    distributor_name: order.distributorName,
-    client_id: order.clientId,
-    client_name: order.clientName,
-    client_phone: order.clientPhone || null,
-    amount: Number(order.amount || 0),
-    currency_symbol: order.currencySymbol || '$',
-    boleta_ids: order.boletaIds || [],
-    boleta_numbers: order.boletaNumbers || [],
-    alias: order.alias || null,
-    cvu: order.cvu || null,
-    holder_name: order.holderName || null,
-    bank_name: order.bankName || null,
-    mp_checkout_link: order.mpCheckoutLink || null,
-    mp_init_point: order.mpInitPoint || null,
-    mp_preference_id: order.mpPreferenceId || null,
-    status: order.status,
-    payment_method: order.paymentMethod || null,
-    mp_payment_id: order.mpPaymentId || null,
-    paid_at: order.paidAt || null,
-    reconciled_in_app: Boolean(order.reconciledInApp),
-    reconciled_at: order.reconciledAt || null,
-    verification_summary: order.verificationSummary || null,
-    receipt_image_url: order.receiptImageUrl || null,
-    created_at: order.createdAt || new Date().toISOString(),
-  };
-  try {
-    const { data: updatedRows } = await supabase
-      .from('client_payment_orders')
-      .update(payload)
-      .eq('token', order.token)
-      .select('token');
-    if (!updatedRows || updatedRows.length === 0) {
-      await supabase.from('client_payment_orders').insert({ token: order.token, ...payload });
-    }
-  } catch {
-    // non-blocking
-  }
+  // Ya no se usa: el esquema v2 guarda todo en sus tablas (ver supabaseSync).
 }
 
 // ============================================================================
@@ -340,51 +375,7 @@ export async function getClientPaymentOrderFromCloud(
   token: string
 ): Promise<ClientPaymentOrder | null> {
   if (!token) return null;
-  const fromBridge = await fetchClientPaymentOrderFromSupabase(token);
-  if (fromBridge) return fromBridge;
-
-  const supabase = getSupabaseClient();
-  if (!supabase) return null;
-  try {
-    const { data, error } = await supabase
-      .from('client_payment_orders')
-      .select(
-        'token, tenant_id, distributor_name, client_id, client_name, client_phone, amount, currency_symbol, boleta_ids, boleta_numbers, alias, cvu, holder_name, bank_name, mp_checkout_link, mp_init_point, mp_preference_id, status, payment_method, mp_payment_id, paid_at, reconciled_in_app, reconciled_at, verification_summary, receipt_image_url, created_at'
-      )
-      .eq('token', token)
-      .maybeSingle();
-    if (error || !data) return null;
-    return {
-      token: String(data.token),
-      tenantId: String(data.tenant_id),
-      distributorName: String(data.distributor_name || ''),
-      clientId: String(data.client_id),
-      clientName: String(data.client_name || ''),
-      clientPhone: data.client_phone || undefined,
-      amount: Number(data.amount || 0),
-      currencySymbol: String(data.currency_symbol || '$'),
-      boletaIds: Array.isArray(data.boleta_ids) ? data.boleta_ids : [],
-      boletaNumbers: Array.isArray(data.boleta_numbers) ? data.boleta_numbers : [],
-      alias: data.alias || undefined,
-      cvu: data.cvu || undefined,
-      holderName: data.holder_name || undefined,
-      bankName: data.bank_name || undefined,
-      mpCheckoutLink: data.mp_checkout_link || undefined,
-      mpInitPoint: data.mp_init_point || undefined,
-      mpPreferenceId: data.mp_preference_id || undefined,
-      status: data.status === 'approved' ? 'approved' : 'pending',
-      paymentMethod: data.payment_method || undefined,
-      mpPaymentId: data.mp_payment_id || undefined,
-      paidAt: data.paid_at || undefined,
-      reconciledInApp: Boolean(data.reconciled_in_app),
-      reconciledAt: data.reconciled_at || undefined,
-      verificationSummary: data.verification_summary || undefined,
-      receiptImageUrl: data.receipt_image_url || undefined,
-      createdAt: String(data.created_at || new Date().toISOString()),
-    };
-  } catch {
-    return null;
-  }
+  return fetchClientPaymentOrderFromSupabase(token);
 }
 
 export async function verifyClientPaymentOrderInSupabase(params: {
@@ -510,39 +501,19 @@ export async function fetchPendingReconciliationOrdersFromSupabase(
   tenantId: string
 ): Promise<ClientPaymentOrder[]> {
   const supabase = getSupabaseClient();
-  if (!supabase || !isSupabaseConfigured()) return [];
-
+  if (!supabase || !isSupabaseConfigured() || !tenantId || !isMemberOf(tenantId)) return [];
   try {
-    let query = supabase
-      .from(CLOUD_TABLE)
-      .select('value')
-      .like('key', 'client_payment_order_%')
-      .eq('value->>status', 'approved')
-      .or('value->>reconciledInApp.is.null,value->>reconciledInApp.eq.false')
+    const { data, error } = await supabase
+      .from('payment_links')
+      .select('data')
+      .eq('business_id', tenantId)
+      .eq('status', 'approved')
       .order('updated_at', { ascending: false })
       .limit(50);
-
-    if (tenantId) {
-      query = query.in('value->>tenantId', [tenantId, 'default-tenant']);
-    }
-
-    const { data, error } = await query;
-
     if (error || !Array.isArray(data)) return [];
-
-    const results: ClientPaymentOrder[] = [];
-    for (const row of data) {
-      const o = row?.value as ClientPaymentOrder | undefined;
-      if (
-        o &&
-        o.status === 'approved' &&
-        !o.reconciledInApp &&
-        (!tenantId || o.tenantId === tenantId || o.tenantId === 'default-tenant')
-      ) {
-        results.push(o);
-      }
-    }
-    return results;
+    return data
+      .map((r: any) => r.data as ClientPaymentOrder)
+      .filter((o) => o && o.status === 'approved' && !o.reconciledInApp);
   } catch {
     return [];
   }
@@ -569,37 +540,8 @@ const VERIFIED_PAYMENT_ENTITY_PREFIX = 'rec:platform:verified_payments:';
 export async function fetchVerifiedTenantPaymentsMapFromSupabase(): Promise<
   Record<string, VerifiedTenantPaymentRecord>
 > {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    const stored = await readCloudJsonRecord<Record<string, VerifiedTenantPaymentRecord>>(
-      VERIFIED_TENANT_PAYMENTS_KEY
-    );
-    return stored && typeof stored === 'object' ? { ...stored } : {};
-  }
-
-  const [stored, individualRes] = await Promise.all([
-    readCloudJsonRecord<Record<string, VerifiedTenantPaymentRecord>>(VERIFIED_TENANT_PAYMENTS_KEY),
-    supabase
-      .from(CLOUD_TABLE)
-      .select('key, value')
-      .like('key', `${VERIFIED_PAYMENT_ENTITY_PREFIX}%`)
-      .limit(1000)
-      .then((res) => res, () => ({ data: null })),
-  ]);
-
-  const result: Record<string, VerifiedTenantPaymentRecord> =
-    stored && typeof stored === 'object' ? { ...stored } : {};
-
-  if (Array.isArray(individualRes?.data)) {
-    for (const row of individualRes.data) {
-      if (!row?.key || !row?.value) continue;
-      const mapKey = String(row.key).slice(VERIFIED_PAYMENT_ENTITY_PREFIX.length);
-      if (mapKey) {
-        result[mapKey] = row.value as VerifiedTenantPaymentRecord;
-      }
-    }
-  }
-  return result;
+  const map = await readCloudJsonRecord<Record<string, VerifiedTenantPaymentRecord>>(VERIFIED_TENANT_PAYMENTS_KEY);
+  return map && typeof map === 'object' ? { ...map } : {};
 }
 
 export async function fetchVerifiedTenantPaymentStatusFromSupabase(
@@ -607,45 +549,10 @@ export async function fetchVerifiedTenantPaymentStatusFromSupabase(
   monthKey: string
 ): Promise<{ approved: boolean; payment: VerifiedTenantPaymentRecord | null }> {
   if (!tenantId || !monthKey) return { approved: false, payment: null };
-  const mapKey = `${tenantId}::${monthKey}`;
-  const individualKey = `${VERIFIED_PAYMENT_ENTITY_PREFIX}${mapKey}`;
-  const supabase = getSupabaseClient();
-  if (!supabase) return { approved: false, payment: null };
-
-  try {
-    // Una sola consulta por PK para revisar el registro individual y el mapa agregado en paralelo
-    const { data, error } = await supabase
-      .from(CLOUD_TABLE)
-      .select('key, value')
-      .in('key', [individualKey, VERIFIED_TENANT_PAYMENTS_KEY]);
-
-    if (!error && Array.isArray(data)) {
-      let individualRecord: VerifiedTenantPaymentRecord | null = null;
-      let aggregateMap: Record<string, VerifiedTenantPaymentRecord> | null = null;
-
-      for (const row of data) {
-        if (row.key === individualKey && row.value) {
-          individualRecord = row.value as VerifiedTenantPaymentRecord;
-        } else if (row.key === VERIFIED_TENANT_PAYMENTS_KEY && row.value && typeof row.value === 'object') {
-          aggregateMap = row.value as Record<string, VerifiedTenantPaymentRecord>;
-        }
-      }
-
-      const record = individualRecord || aggregateMap?.[mapKey] || null;
-      return {
-        approved: Boolean(record && record.status === 'approved'),
-        payment: record,
-      };
-    }
-  } catch {
-    // fallback below
-  }
-
-  const individual = await readCloudJsonRecord<VerifiedTenantPaymentRecord>(individualKey);
-  return {
-    approved: Boolean(individual && individual.status === 'approved'),
-    payment: individual || null,
-  };
+  const record = await readCloudJsonRecord<VerifiedTenantPaymentRecord>(
+    `${VERIFIED_PAYMENT_ENTITY_PREFIX}${tenantId}::${monthKey}`
+  );
+  return { approved: Boolean(record && record.status === 'approved'), payment: record || null };
 }
 
 export async function verifyAndRecordTenantPaymentInSupabase(params: {
@@ -841,36 +748,6 @@ export async function createTenantSubscriptionPayOrder(params: {
     // non-blocking
   }
 
-  // 2. Respaldo: intentar servidor Express (/api/mercadopago/create-preference)
-  if (!mpInitPoint && typeof fetch === 'function') {
-    try {
-      const res = await fetch('/api/mercadopago/create-preference', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: params.tenant.id,
-          tenantCode: params.tenant.tenantCode,
-          tenantName: params.tenant.name,
-          monthKey: params.monthKey,
-          monthName: params.monthName,
-          amount: params.amount,
-          planType: params.planType,
-          monthsCount: params.monthsCount,
-          payerEmail: params.payerEmail || params.tenant.email || undefined,
-          originUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.initPoint) {
-          mpInitPoint = data.initPoint;
-          mpPreferenceId = data.preferenceId;
-        }
-      }
-    } catch {
-      // non-blocking
-    }
-  }
 
   const order: TenantSubscriptionPayOrder = {
     token,
@@ -1126,190 +1003,15 @@ export async function fetchPublicCatalogFromSupabase(
 ): Promise<PublishedPublicCatalog | null> {
   const rawId = decodeURIComponent(identifier || '').trim();
   if (!rawId) return null;
-  const lower = rawId.toLowerCase();
-
-  // 1. Verificar cache local si existe (útil en la misma sesión o sin Supabase)
   const localCatalog = readLocalPublicCatalogFallback(rawId);
-  if (localCatalog && !isSupabaseConfigured()) {
-    return localCatalog;
-  }
-
   const supabase = getSupabaseClient();
-  if (!supabase) {
-    return localCatalog;
-  }
-
+  if (!supabase) return localCatalog;
   try {
-    let resolvedCatalog: PublishedPublicCatalog | null = null;
-    let resolvedTenantObj: Tenant | undefined;
-
-    const directKey = `public_catalog_${rawId}`;
-    const refKey = `public_catalog_ref_${lower}`;
-    const directTenantKey = `rec:platform:tenants:${rawId}`;
-    const lookupKeys = Array.from(
-      new Set([
-        directKey,
-        refKey,
-        directTenantKey,
-        ...(rawId !== lower ? [`public_catalog_${lower}`] : []),
-        ...(localCatalog?.tenantId && localCatalog.tenantId !== rawId
-          ? [`public_catalog_${localCatalog.tenantId}`, `rec:platform:tenants:${localCatalog.tenantId}`]
-          : []),
-      ])
-    );
-
-    // 2. Consulta directa por PK (1 RTT): catálogo directo, puntero por slug/código y estado del tenant
-    const { data: pkRows } = await supabase
-      .from(CLOUD_TABLE)
-      .select('key, value')
-      .in('key', lookupKeys);
-
-    let refTenantId: string | null = null;
-    if (Array.isArray(pkRows)) {
-      for (const row of pkRows) {
-        if (row.key === directKey || row.key === `public_catalog_${lower}`) {
-          const val = row.value as PublishedPublicCatalog | undefined;
-          if (val?.tenantId) resolvedCatalog = val;
-        } else if (row.key === refKey) {
-          const refVal = row.value as { tenantId?: string } | undefined;
-          if (refVal?.tenantId) refTenantId = refVal.tenantId;
-        } else if (row.key.startsWith('rec:platform:tenants:') && row.value) {
-          resolvedTenantObj = row.value as Tenant;
-        }
-      }
-      if (!resolvedCatalog && refTenantId) {
-        const hit = pkRows.find((r) => r.key === `public_catalog_${refTenantId}`);
-        if (hit?.value && (hit.value as PublishedPublicCatalog).tenantId) {
-          resolvedCatalog = hit.value as PublishedPublicCatalog;
-        }
-      }
-    }
-
-    // 3. Si encontramos el tenantId vía puntero (`public_catalog_ref_<handle>`), traer catálogo + estado del tenant juntos por PK
-    if (!resolvedCatalog && refTenantId) {
-      const targetCatalogKey = `public_catalog_${refTenantId}`;
-      const targetTenantKey = `rec:platform:tenants:${refTenantId}`;
-      const { data: refRows } = await supabase
-        .from(CLOUD_TABLE)
-        .select('key, value')
-        .in('key', [targetCatalogKey, targetTenantKey]);
-
-      if (Array.isArray(refRows)) {
-        for (const row of refRows) {
-          if (row.key === targetCatalogKey && row.value) {
-            const val = row.value as PublishedPublicCatalog;
-            if (val.tenantId) resolvedCatalog = val;
-          } else if (row.key === targetTenantKey && row.value) {
-            resolvedTenantObj = row.value as Tenant;
-          }
-        }
-      }
-    }
-
-    // 4. Fallback indexado de 1 sola fila para catálogos publicados antes de existir punteros `public_catalog_ref_*`
-    if (!resolvedCatalog) {
-      const safeRaw = rawId.replace(/[,()"'\\]/g, '').trim();
-      const safeLower = lower.replace(/[,()"'\\]/g, '').trim();
-      if (safeLower) {
-        const eqConditions = Array.from(
-          new Set([
-            `value->>slug.eq.${safeLower}`,
-            `value->>tenantCode.eq.${safeRaw}`,
-            `value->>tenantCode.eq.${safeLower}`,
-            `value->>tenantCode.eq.${safeRaw.toUpperCase()}`,
-            `value->>tenantId.eq.${safeRaw}`,
-          ])
-        ).join(',');
-
-        const { data: exactMatchRows } = await supabase
-          .from(CLOUD_TABLE)
-          .select('value')
-          .like('key', 'public_catalog_%')
-          .or(eqConditions)
-          .limit(1);
-
-        const matchedVal = exactMatchRows?.[0]?.value as PublishedPublicCatalog | undefined;
-        if (matchedVal?.tenantId) {
-          resolvedCatalog = matchedVal;
-        } else {
-          // Último recurso para códigos con mayúsculas/minúsculas mixtas sin traer otros catálogos (solo 1 fila)
-          const { data: ilikeRows } = await supabase
-            .from(CLOUD_TABLE)
-            .select('value')
-            .like('key', 'public_catalog_%')
-            .or(`value->>slug.ilike.${safeLower},value->>tenantCode.ilike.${safeLower}`)
-            .limit(1);
-          const ilikeVal = ilikeRows?.[0]?.value as PublishedPublicCatalog | undefined;
-          if (ilikeVal?.tenantId) {
-            resolvedCatalog = ilikeVal;
-          }
-        }
-
-        // Backfill asíncrono del puntero para que la próxima apertura sea O(1) por PK
-        if (resolvedCatalog?.tenantId) {
-          void insertOrUpdateCloudStoreKey(refKey, { tenantId: resolvedCatalog.tenantId });
-        }
-      }
-    }
-
-    if (!resolvedCatalog) {
-      return localCatalog;
-    }
-
-    // 5. Verificar si SuperGestión habilitó/pausó el servicio de catálogo para esa empresa
-    if (!resolvedTenantObj || resolvedTenantObj.id !== resolvedCatalog.tenantId) {
-      try {
-        const { data: tenantRow } = await supabase
-          .from(CLOUD_TABLE)
-          .select('value')
-          .eq('key', `rec:platform:tenants:${resolvedCatalog.tenantId}`)
-          .maybeSingle();
-        if (tenantRow?.value) {
-          resolvedTenantObj = tenantRow.value as Tenant;
-        }
-      } catch {
-        // keep snapshot value
-      }
-    }
-
-    if (resolvedTenantObj) {
-      resolvedCatalog = {
-        ...resolvedCatalog,
-        logoUrl:
-          resolvedTenantObj.config?.distributorLogoUrl ||
-          resolvedTenantObj.logoUrl ||
-          resolvedCatalog.logoUrl,
-        icon:
-          resolvedTenantObj.config?.distributorIcon ||
-          resolvedTenantObj.icon ||
-          resolvedCatalog.icon,
-        merchantPaymentAlias:
-          resolvedTenantObj.config?.merchantPaymentAlias ?? resolvedCatalog.merchantPaymentAlias,
-        merchantPaymentCvu:
-          resolvedTenantObj.config?.merchantPaymentCvu ?? resolvedCatalog.merchantPaymentCvu,
-        merchantPaymentBank:
-          resolvedTenantObj.config?.merchantPaymentBank ?? resolvedCatalog.merchantPaymentBank,
-        merchantPaymentHolder:
-          resolvedTenantObj.config?.merchantPaymentHolder ?? resolvedCatalog.merchantPaymentHolder,
-        merchantMpCheckoutLink:
-          resolvedTenantObj.config?.merchantMpCheckoutLink ?? resolvedCatalog.merchantMpCheckoutLink,
-        hasMerchantMpAccessToken:
-          typeof resolvedTenantObj.config?.hasMerchantMpAccessToken === 'boolean'
-            ? resolvedTenantObj.config.hasMerchantMpAccessToken
-            : resolvedCatalog.hasMerchantMpAccessToken,
-        catalogRubro:
-          resolvedTenantObj.catalogRubro ||
-          resolvedCatalog.catalogRubro ||
-          resolvedTenantObj.businessRubro ||
-          resolvedTenantObj.config?.businessRubro,
-        enabledBySuperAdmin:
-          resolvedTenantObj.catalogEnabled !== false &&
-          resolvedTenantObj.status !== 'suspended' &&
-          !resolvedTenantObj.subscription?.isPaused,
-      };
-    }
-
-    return resolvedCatalog;
+    // El servidor resuelve por slug, código o id y aplica el estado actual del comercio
+    // (pausado / suspendido / deshabilitado por el superadmin).
+    const { data, error } = await supabase.rpc('public_catalog_get', { p_handle: rawId });
+    if (error) return localCatalog;
+    return (data as PublishedPublicCatalog) || null;
   } catch {
     return localCatalog;
   }
@@ -1338,8 +1040,10 @@ export async function submitPublicCatalogOrderToSupabase(
     insertOrUpdateCloudStoreKey(tenantEntityKey, order),
   ]);
 
-  // Descontar cantidades en stock en el catálogo público publicado (si los artículos controlan stock)
+  // Descontar stock en el catálogo publicado: si el pedido lo carga un comprador, lo hace el servidor
+  // (public_entity_put). Si lo carga el comercio, se actualiza acá.
   try {
+    if (!isMemberOf(order.tenantId)) throw new Error('skip');
     const qtyByProd = new Map<string, number>();
     for (const it of order.items || []) {
       if (it.productId && Number(it.quantity) > 0) {
@@ -1398,48 +1102,7 @@ export async function fetchCatalogOrdersForTenantFromSupabase(
   tenantId: string
 ): Promise<CatalogPickupOrder[]> {
   if (!tenantId) return [];
-  const mergedMap = new Map<string, CatalogPickupOrder>();
-
-  try {
-    const rawLocal = dbGetItem(`public_orders_cache_${tenantId}`);
-    if (rawLocal) {
-      const localList = JSON.parse(rawLocal);
-      if (Array.isArray(localList)) {
-        for (const o of localList) {
-          if (o && o.id && o.tenantId === tenantId) mergedMap.set(o.id, o);
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const supabase = getSupabaseClient();
-  if (!supabase) return Array.from(mergedMap.values());
-
-  try {
-    const { data, error } = await supabase
-      .from(CLOUD_TABLE)
-      .select('value')
-      .like('key', 'rec:%:catalogOrders:%')
-      .eq('value->>tenantId', tenantId)
-      .order('updated_at', { ascending: false })
-      .limit(200);
-    if (!error && Array.isArray(data)) {
-      for (const row of data) {
-        const o = row?.value as CatalogPickupOrder | undefined;
-        if (o && o.id && o.tenantId === tenantId) {
-          const prev = mergedMap.get(o.id);
-          if (!prev || (o.updatedAt || o.createdAt) >= (prev.updatedAt || prev.createdAt)) {
-            mergedMap.set(o.id, o);
-          }
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return Array.from(mergedMap.values());
+  return listBusinessEntities<CatalogPickupOrder>('catalog_orders', tenantId, 500);
 }
 
 export async function submitCatalogStockAlertToSupabase(
@@ -1470,48 +1133,7 @@ export async function fetchCatalogStockAlertsForTenantFromSupabase(
   tenantId: string
 ): Promise<CatalogStockAlertRequest[]> {
   if (!tenantId) return [];
-  const mergedMap = new Map<string, CatalogStockAlertRequest>();
-
-  try {
-    const rawLocal = dbGetItem(`public_stock_alerts_cache_${tenantId}`);
-    if (rawLocal) {
-      const localList = JSON.parse(rawLocal);
-      if (Array.isArray(localList)) {
-        for (const a of localList) {
-          if (a && a.id && a.tenantId === tenantId) mergedMap.set(a.id, a);
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const supabase = getSupabaseClient();
-  if (!supabase) return Array.from(mergedMap.values());
-
-  try {
-    const { data, error } = await supabase
-      .from(CLOUD_TABLE)
-      .select('value')
-      .like('key', 'rec:%:catalogStockAlerts:%')
-      .eq('value->>tenantId', tenantId)
-      .order('updated_at', { ascending: false })
-      .limit(300);
-    if (!error && Array.isArray(data)) {
-      for (const row of data) {
-        const a = row?.value as CatalogStockAlertRequest | undefined;
-        if (a && a.id && a.tenantId === tenantId) {
-          const prev = mergedMap.get(a.id);
-          if (!prev || (a.updatedAt || a.createdAt) >= (prev.updatedAt || prev.createdAt)) {
-            mergedMap.set(a.id, a);
-          }
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return Array.from(mergedMap.values());
+  return listBusinessEntities<CatalogStockAlertRequest>('catalog_stock_alerts', tenantId, 500);
 }
 
 export async function syncCatalogOrderToSupabase(
@@ -1543,29 +1165,8 @@ export async function fetchPublicCatalogOrderFromSupabase(
   tenantIdHint?: string
 ): Promise<CatalogPickupOrder | null> {
   const cleanId = (orderId || '').trim();
-  if (!cleanId) return null;
-
-  let localFallback: CatalogPickupOrder | null = null;
-  if (tenantIdHint) {
-    try {
-      const raw = dbGetItem(`public_orders_cache_${tenantIdHint}`);
-      const arr: CatalogPickupOrder[] = raw ? JSON.parse(raw) : [];
-      localFallback = arr.find((o) => o.id === cleanId) || null;
-    } catch {
-      localFallback = null;
-    }
-  }
-
-  const remote = await readCloudJsonRecord<CatalogPickupOrder>(`catalog_order_${cleanId}`);
-  if (remote && remote.id) {
-    if (
-      !localFallback ||
-      (remote.updatedAt || remote.createdAt) >= (localFallback.updatedAt || localFallback.createdAt)
-    ) {
-      return remote;
-    }
-  }
-  return localFallback || remote;
+  if (!cleanId || !tenantIdHint) return null;
+  return getPublicEntity<CatalogPickupOrder>('catalog_orders', tenantIdHint, cleanId);
 }
 
 export async function createCatalogOrderMercadoPagoPreference(params: {
@@ -1590,45 +1191,7 @@ export async function createCatalogOrderMercadoPagoPreference(params: {
       ? window.location.href.split('?')[0]
       : '';
 
-  // 1. Intentar vía backend Express (/api/catalog/mp-create-preference)
-  try {
-    const res = await fetch('/api/catalog/mp-create-preference', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        tenantId: order.tenantId,
-        storeName: order.storeName,
-        customerName: order.customerName,
-        amount: order.totalAmount,
-        items: order.items.map((it) => ({
-          id: it.productId,
-          title: it.productName,
-          quantity: it.quantity,
-          unit_price: it.unitPrice,
-        })),
-        catalogHandle,
-        mpSubOption,
-        returnUrl: safeOrigin,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.ok && data?.initPoint) {
-        return {
-          ok: true,
-          mode: 'mercadopago_api',
-          initPoint: data.initPoint,
-          sandboxInitPoint: data.sandboxInitPoint,
-          preferenceId: data.preferenceId,
-        };
-      }
-    }
-  } catch {
-    // Fallback to Supabase Edge Function below
-  }
-
+  // Mercado Pago se resuelve solo en el servidor (Edge Function mp-create-preference)
   // 2. Intentar vía Supabase Edge Function (mp-create-preference con scope catalog_order)
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -1678,28 +1241,6 @@ export async function verifyCatalogOrderMercadoPagoPayment(params: {
   message?: string;
 }> {
   const { orderId, tenantId, paymentId, collectionStatus, mpSubOption } = params;
-
-  try {
-    const res = await fetch('/api/catalog/mp-verify-payment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        orderId,
-        tenantId,
-        paymentId,
-        collectionStatus,
-        mpSubOption,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.verified) {
-        return { verified: true, status: 'approved', order: data.order, message: data.message };
-      }
-    }
-  } catch {
-    // Try Supabase Edge Function next
-  }
 
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -1766,37 +1307,10 @@ export async function notifyCatalogOrderCustomerStageViaServer(params: {
   deliveryStatus?: string;
   info?: string;
 }> {
-  const { order, stage, message, config } = params;
-  if (!order?.customerPhone?.trim() || !message.trim()) {
-    return { success: false, info: 'Sin teléfono de cliente' };
-  }
-  try {
-    const res = await fetch('/api/catalog/notify-customer-stage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId: order.tenantId,
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
-        stage,
-        message,
-        ...(config ? { whatsappConfig: config } : {}),
-      }),
-    });
-    if (!res.ok) {
-      return { success: false, info: `HTTP ${res.status}` };
-    }
-    const data = await res.json();
-    return {
-      success: Boolean(data?.success),
-      deliveryStatus: data?.deliveryStatus,
-      info: data?.info,
-    };
-  } catch {
-    return { success: false, info: 'Servidor no disponible' };
-  }
+  // Los mensajes a compradores se mandan a mano con el enlace de WhatsApp (wa.me).
+  // Los envíos automáticos oficiales (Cloud API) son solo los del servidor: ver whatsapp-dispatch.
+  void params;
+  return { success: false, info: 'Envío manual por WhatsApp' };
 }
 
 export async function testMerchantMercadoPagoConnection(params: {
@@ -1820,32 +1334,29 @@ export async function testMerchantMercadoPagoConnection(params: {
   };
   error?: string;
 }> {
+  // La prueba la hace el servidor (Edge Function): el token no se guarda ni se lee en el navegador.
+  const supabase = getSupabaseClient();
+  if (!supabase) return { ok: false, valid: false, error: 'La app no está conectada a Supabase.' };
   try {
-    const res = await fetch('/api/merchant/mp-test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId: params.tenantId,
-        ...(params.mpAccessToken?.trim()
-          ? { mpAccessToken: params.mpAccessToken.trim() }
-          : {}),
-      }),
+    const { data, error } = await supabase.functions.invoke('mp-test-connection', {
+      body: { tenantId: params.tenantId, mpAccessToken: params.mpAccessToken?.trim() || undefined },
     });
-    const data = await res.json().catch(() => null);
-    if (!data) {
-      return {
-        ok: false,
-        valid: false,
-        error: 'El servidor backend de pruebas no respondió en esta vista.',
-      };
+    if (error || !data) {
+      return { ok: false, valid: false, error: 'No se pudo conectar con el servidor para probar Mercado Pago.' };
     }
-    return data;
-  } catch {
+    const baseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
     return {
-      ok: false,
-      valid: false,
-      error: 'No se pudo conectar con el servidor para probar las credenciales de Mercado Pago.',
+      ok: true,
+      valid: Boolean(data.ok),
+      hasSavedToken: Boolean(data.ok),
+      account: data.account,
+      error: data.ok ? undefined : data.message,
+      webhookUrls: baseUrl
+        ? { supabaseWebhookUrl: `${baseUrl}/functions/v1/mp-webhook?tenantId=${encodeURIComponent(params.tenantId)}` }
+        : undefined,
     };
+  } catch {
+    return { ok: false, valid: false, error: 'No se pudo conectar con el servidor para probar Mercado Pago.' };
   }
 }
 
@@ -1853,30 +1364,10 @@ export async function notifyCatalogStockAlertViaServer(params: {
   alert: CatalogStockAlertRequest;
   message: string;
 }): Promise<{ success: boolean; deliveryStatus?: string; info?: string }> {
-  if (!params.alert?.customerPhone?.trim() || !params.message.trim()) {
-    return { success: false, info: 'Sin teléfono del cliente' };
-  }
-  try {
-    const res = await fetch('/api/catalog/notify-stock-alert', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        alertId: params.alert.id,
-        tenantId: params.alert.tenantId,
-        customerPhone: params.alert.customerPhone,
-        message: params.message,
-      }),
-    });
-    if (!res.ok) return { success: false, info: `HTTP ${res.status}` };
-    const data = await res.json();
-    return {
-      success: Boolean(data?.success),
-      deliveryStatus: data?.deliveryStatus,
-      info: data?.info,
-    };
-  } catch {
-    return { success: false, info: 'Servidor no disponible' };
-  }
+  // Los mensajes a compradores se mandan a mano con el enlace de WhatsApp (wa.me).
+  // Los envíos automáticos oficiales (Cloud API) son solo los del servidor: ver whatsapp-dispatch.
+  void params;
+  return { success: false, info: 'Envío manual por WhatsApp' };
 }
 
 export async function verifyCatalogTransferReceiptViaServer(params: {
@@ -1965,48 +1456,7 @@ export async function fetchCatalogPromoSubscribersForTenantFromSupabase(
   tenantId: string
 ): Promise<CatalogPromoSubscriber[]> {
   if (!tenantId) return [];
-  const mergedMap = new Map<string, CatalogPromoSubscriber>();
-
-  try {
-    const rawLocal = dbGetItem(`public_promo_subs_cache_${tenantId}`);
-    if (rawLocal) {
-      const localList = JSON.parse(rawLocal);
-      if (Array.isArray(localList)) {
-        for (const s of localList) {
-          if (s && s.id && s.tenantId === tenantId) mergedMap.set(s.id, s);
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const supabase = getSupabaseClient();
-  if (!supabase) return Array.from(mergedMap.values());
-
-  try {
-    const { data, error } = await supabase
-      .from(CLOUD_TABLE)
-      .select('value')
-      .like('key', 'rec:%:catalogPromoSubscribers:%')
-      .eq('value->>tenantId', tenantId)
-      .order('updated_at', { ascending: false })
-      .limit(500);
-    if (!error && Array.isArray(data)) {
-      for (const row of data) {
-        const s = row?.value as CatalogPromoSubscriber | undefined;
-        if (s && s.id && s.tenantId === tenantId) {
-          const prev = mergedMap.get(s.id);
-          if (!prev || (s.updatedAt || s.createdAt) >= (prev.updatedAt || prev.createdAt)) {
-            mergedMap.set(s.id, s);
-          }
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return Array.from(mergedMap.values());
+  return listBusinessEntities<CatalogPromoSubscriber>('catalog_promo_subscribers', tenantId, 1000);
 }
 
 export async function sendCatalogPromoWhatsAppViaServer(params: {
@@ -2014,25 +1464,10 @@ export async function sendCatalogPromoWhatsAppViaServer(params: {
   customerPhone: string;
   message: string;
 }): Promise<{ success: boolean; deliveryStatus?: string; info?: string }> {
-  if (!params.customerPhone?.trim() || !params.message.trim()) {
-    return { success: false, info: 'Sin teléfono del suscriptor' };
-  }
-  try {
-    const res = await fetch('/api/catalog/send-promo-message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-    if (!res.ok) return { success: false, info: `HTTP ${res.status}` };
-    const data = await res.json();
-    return {
-      success: Boolean(data?.success),
-      deliveryStatus: data?.deliveryStatus,
-      info: data?.info,
-    };
-  } catch {
-    return { success: false, info: 'Servidor no disponible' };
-  }
+  // Los mensajes a compradores se mandan a mano con el enlace de WhatsApp (wa.me).
+  // Los envíos automáticos oficiales (Cloud API) son solo los del servidor: ver whatsapp-dispatch.
+  void params;
+  return { success: false, info: 'Envío manual por WhatsApp' };
 }
 
 export async function fetchPublicCatalogLoyaltyAccountFromSupabase(
@@ -2041,50 +1476,8 @@ export async function fetchPublicCatalogLoyaltyAccountFromSupabase(
 ): Promise<CatalogLoyaltyAccount | null> {
   const cleanDni = normalizeDni(rawDni);
   if (!tenantId || cleanDni.length < 6) return null;
-  const publicKey = `catalog_loyalty_${tenantId}_${cleanDni}`;
-  const cacheKey = `public_loyalty_cache_${tenantId}_${cleanDni}`;
-
-  let localAccount: CatalogLoyaltyAccount | null = null;
-  try {
-    const rawLocal = dbGetItem(cacheKey);
-    if (rawLocal) {
-      const parsed = JSON.parse(rawLocal) as CatalogLoyaltyAccount;
-      if (parsed && parsed.tenantId === tenantId && parsed.dni === cleanDni) {
-        localAccount = parsed;
-      }
-    }
-  } catch {
-    // ignore local cache read error
-  }
-
-  const supabase = getSupabaseClient();
-  if (!supabase) return localAccount;
-
-  try {
-    const { data, error } = await supabase
-      .from(CLOUD_TABLE)
-      .select('value')
-      .eq('key', publicKey)
-      .maybeSingle();
-
-    if (!error && data?.value) {
-      const remoteAcc = data.value as CatalogLoyaltyAccount;
-      if (remoteAcc && remoteAcc.tenantId === tenantId && remoteAcc.dni === cleanDni) {
-        if (!localAccount || (remoteAcc.updatedAt || '') >= (localAccount.updatedAt || '')) {
-          try {
-            dbSetItem(cacheKey, JSON.stringify(remoteAcc));
-          } catch {
-            // ignore
-          }
-          return remoteAcc;
-        }
-      }
-    }
-  } catch {
-    // fallback to local cache if remote fails
-  }
-
-  return localAccount;
+  const found = await findPublicEntities<CatalogLoyaltyAccount>('catalog_loyalty_accounts', tenantId, cleanDni);
+  return found.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))[0] || null;
 }
 
 export async function upsertCatalogLoyaltyAccountToSupabase(
@@ -2132,69 +1525,7 @@ export async function fetchCatalogLoyaltyAccountsForTenantFromSupabase(
   tenantId: string
 ): Promise<CatalogLoyaltyAccount[]> {
   if (!tenantId) return [];
-  const mergedMap = new Map<string, CatalogLoyaltyAccount>();
-
-  const mergeEntry = (acc: CatalogLoyaltyAccount | undefined) => {
-    if (!acc || !acc.dni || acc.tenantId !== tenantId) return;
-    const cleanDni = normalizeDni(acc.dni);
-    if (cleanDni.length < 6) return;
-    const prev = mergedMap.get(cleanDni);
-    if (!prev || (acc.updatedAt || acc.createdAt) >= (prev.updatedAt || prev.createdAt)) {
-      mergedMap.set(cleanDni, { ...acc, dni: cleanDni });
-    }
-  };
-
-  try {
-    const rawIdx = dbGetItem(`public_loyalty_index_${tenantId}`);
-    const dnis: string[] = rawIdx ? (JSON.parse(rawIdx) as string[]) : [];
-    if (Array.isArray(dnis)) {
-      for (const d of dnis) {
-        const cleanD = normalizeDni(d);
-        if (!cleanD) continue;
-        const rawLocal = dbGetItem(`public_loyalty_cache_${tenantId}_${cleanD}`);
-        if (rawLocal) {
-          mergeEntry(JSON.parse(rawLocal) as CatalogLoyaltyAccount);
-        }
-      }
-    }
-  } catch {
-    // ignore local index read error
-  }
-
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from(CLOUD_TABLE)
-        .select('value')
-        .like('key', `rec:${tenantId}:catalogLoyaltyAccounts:%`)
-        .limit(1000);
-
-      if (!error && Array.isArray(data)) {
-        for (const row of data) {
-          mergeEntry(row?.value as CatalogLoyaltyAccount | undefined);
-        }
-      }
-
-      const { data: publicRows, error: pubErr } = await supabase
-        .from(CLOUD_TABLE)
-        .select('value')
-        .like('key', `catalog_loyalty_${tenantId}_%`)
-        .limit(1000);
-
-      if (!pubErr && Array.isArray(publicRows)) {
-        for (const row of publicRows) {
-          mergeEntry(row?.value as CatalogLoyaltyAccount | undefined);
-        }
-      }
-    } catch {
-      // ignore remote query error
-    }
-  }
-
-  return Array.from(mergedMap.values()).sort((a, b) =>
-    (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
-  );
+  return listBusinessEntities<CatalogLoyaltyAccount>('catalog_loyalty_accounts', tenantId, 1000);
 }
 
 // ============================================================================
@@ -2230,76 +1561,15 @@ export async function fetchPublicAbandonedCartByIdFromSupabase(
   tenantIdHint?: string
 ): Promise<CatalogAbandonedCart | null> {
   const cleanId = (cartId || '').trim();
-  if (!cleanId) return null;
-
-  let localFallback: CatalogAbandonedCart | null = null;
-  if (tenantIdHint) {
-    try {
-      const raw = dbGetItem(`public_abandoned_carts_cache_${tenantIdHint}`);
-      const arr: CatalogAbandonedCart[] = raw ? JSON.parse(raw) : [];
-      localFallback = arr.find((c) => c.id === cleanId) || null;
-    } catch {
-      localFallback = null;
-    }
-  }
-
-  const remote = await readCloudJsonRecord<CatalogAbandonedCart>(`catalog_abandoned_cart_${cleanId}`);
-  if (remote && remote.id) {
-    if (!localFallback || (remote.updatedAt || remote.createdAt) >= (localFallback.updatedAt || localFallback.createdAt)) {
-      return remote;
-    }
-  }
-  return localFallback || remote;
+  if (!cleanId || !tenantIdHint) return null;
+  return getPublicEntity<CatalogAbandonedCart>('catalog_abandoned_carts', tenantIdHint, cleanId);
 }
 
 export async function fetchCatalogAbandonedCartsForTenantFromSupabase(
   tenantId: string
 ): Promise<CatalogAbandonedCart[]> {
   if (!tenantId) return [];
-  const mergedMap = new Map<string, CatalogAbandonedCart>();
-
-  const mergeEntry = (c: CatalogAbandonedCart | undefined) => {
-    if (!c || !c.id || c.tenantId !== tenantId) return;
-    const prev = mergedMap.get(c.id);
-    if (!prev || (c.updatedAt || c.createdAt) >= (prev.updatedAt || prev.createdAt)) {
-      mergedMap.set(c.id, c);
-    }
-  };
-
-  try {
-    const rawLocal = dbGetItem(`public_abandoned_carts_cache_${tenantId}`);
-    if (rawLocal) {
-      const arr = JSON.parse(rawLocal);
-      if (Array.isArray(arr)) {
-        for (const item of arr) mergeEntry(item as CatalogAbandonedCart);
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from(CLOUD_TABLE)
-        .select('value')
-        .like('key', `rec:${tenantId}:catalogAbandonedCarts:%`)
-        .order('updated_at', { ascending: false })
-        .limit(250);
-      if (!error && Array.isArray(data)) {
-        for (const row of data) {
-          mergeEntry(row?.value as CatalogAbandonedCart | undefined);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return Array.from(mergedMap.values()).sort((a, b) =>
-    (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
-  );
+  return listBusinessEntities<CatalogAbandonedCart>('catalog_abandoned_carts', tenantId, 500);
 }
 
 // ============================================================================
@@ -2355,77 +1625,15 @@ export async function fetchPublicGiftCardByCodeFromSupabase(
 ): Promise<CatalogGiftCard | null> {
   const cleanCode = normalizeGiftCardCode(rawCode);
   if (!tenantId || cleanCode.length < 3) return null;
-
-  let localFallback: CatalogGiftCard | null = null;
-  try {
-    const raw = dbGetItem(`public_gift_cards_cache_${tenantId}`);
-    if (raw) {
-      const arr: CatalogGiftCard[] = JSON.parse(raw);
-      localFallback = arr.find((g) => normalizeGiftCardCode(g.code) === cleanCode) || null;
-    }
-  } catch {
-    localFallback = null;
-  }
-
-  const publicKey = `catalog_gift_card_${tenantId}_${cleanCode}`;
-  const remote = await readCloudJsonRecord<CatalogGiftCard>(publicKey);
-  if (remote && normalizeGiftCardCode(remote.code) === cleanCode) {
-    if (!localFallback || (remote.updatedAt || remote.createdAt) >= (localFallback.updatedAt || localFallback.createdAt)) {
-      return remote;
-    }
-  }
-  return localFallback || remote;
+  const found = await findPublicEntities<CatalogGiftCard>('catalog_gift_cards', tenantId, cleanCode);
+  return found[0] || null;
 }
 
 export async function fetchCatalogGiftCardsForTenantFromSupabase(
   tenantId: string
 ): Promise<CatalogGiftCard[]> {
   if (!tenantId) return [];
-  const mergedMap = new Map<string, CatalogGiftCard>();
-
-  const mergeEntry = (g: CatalogGiftCard | undefined) => {
-    if (!g || !g.code || g.tenantId !== tenantId) return;
-    const cleanCode = normalizeGiftCardCode(g.code);
-    const prev = mergedMap.get(cleanCode);
-    if (!prev || (g.updatedAt || g.createdAt) >= (prev.updatedAt || prev.createdAt)) {
-      mergedMap.set(cleanCode, { ...g, code: cleanCode });
-    }
-  };
-
-  try {
-    const raw = dbGetItem(`public_gift_cards_cache_${tenantId}`);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) {
-        for (const item of arr) mergeEntry(item as CatalogGiftCard);
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from(CLOUD_TABLE)
-        .select('value')
-        .like('key', `rec:${tenantId}:catalogGiftCards:%`)
-        .order('updated_at', { ascending: false })
-        .limit(300);
-      if (!error && Array.isArray(data)) {
-        for (const row of data) {
-          mergeEntry(row?.value as CatalogGiftCard | undefined);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return Array.from(mergedMap.values()).sort((a, b) =>
-    (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt)
-  );
+  return listBusinessEntities<CatalogGiftCard>('catalog_gift_cards', tenantId, 500);
 }
 
 // ============================================================================
@@ -2438,52 +1646,10 @@ export async function fetchPublicCatalogOrdersByDniFromSupabase(
 ): Promise<CatalogPickupOrder[]> {
   const cleanDni = normalizeDni(rawDni);
   if (!tenantId || cleanDni.length < 6) return [];
-
-  const mergedMap = new Map<string, CatalogPickupOrder>();
-  const mergeOrder = (o: CatalogPickupOrder | undefined) => {
-    if (!o || !o.id || o.tenantId !== tenantId) return;
-    if (normalizeDni(o.customerDni || '') !== cleanDni) return;
-    const prev = mergedMap.get(o.id);
-    if (!prev || (o.updatedAt || o.createdAt) >= (prev.updatedAt || prev.createdAt)) {
-      mergedMap.set(o.id, o);
-    }
-  };
-
-  try {
-    const raw = dbGetItem(`public_orders_cache_${tenantId}`);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) {
-        for (const o of arr) mergeOrder(o as CatalogPickupOrder);
-      }
-    }
-  } catch {
-    // ignore local cache read error
-  }
-
-  const supabase = getSupabaseClient();
-  if (supabase) {
-    try {
-      const { data, error } = await supabase
-        .from(CLOUD_TABLE)
-        .select('value')
-        .like('key', 'rec:%:catalogOrders:%')
-        .eq('value->>tenantId', tenantId)
-        .eq('value->>customerDni', cleanDni)
-        .order('updated_at', { ascending: false })
-        .limit(25);
-      if (!error && Array.isArray(data)) {
-        for (const row of data) {
-          mergeOrder(row?.value as CatalogPickupOrder | undefined);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return Array.from(mergedMap.values())
+  const found = await findPublicEntities<CatalogPickupOrder>('catalog_orders', tenantId, cleanDni);
+  return found
     .filter((o) => o.status !== 'cancelado')
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
     .slice(0, 8);
 }
+

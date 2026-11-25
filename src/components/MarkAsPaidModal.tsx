@@ -231,7 +231,7 @@ export const MarkAsPaidModal: React.FC<MarkAsPaidModalProps> = ({
                   <div className="flex items-center gap-1.5">
                     <Percent className="w-3.5 h-3.5 text-amber-600" />
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       max="100"
                       step="0.5"

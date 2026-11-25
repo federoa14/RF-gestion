@@ -1,3 +1,4 @@
+import { getStoreThemeRootProps, resolveStoreTheme } from '../utils/storeTheme';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search,
@@ -77,6 +78,11 @@ import {
   verifyCatalogOrderMercadoPagoPayment,
   verifyCatalogTransferReceiptViaServer,
 } from '../utils/supabaseServices';
+import {
+  CATALOG_PAYMENT_OPTION_LABELS,
+  resolveEnabledPaymentOptions,
+  type CatalogPaymentOptionKey,
+} from '../utils/catalogPaymentOptions';
 import { formatCurrency } from '../utils/alerts';
 import { getCatalogRubroPreset, normalizeFilterList } from '../utils/catalogRubros';
 import {
@@ -198,6 +204,42 @@ async function compressTransferReceiptFile(file: File): Promise<string> {
   });
 }
 
+/** Placeholder prolijo para productos sin foto: inicial del producto + categoría */
+function ProductPhotoPlaceholder({ name, category, compact = false }: { name: string; category?: string; compact?: boolean }) {
+  const initial = (name || '?').trim().charAt(0).toUpperCase() || '?';
+  if (compact) {
+    return (
+      <div
+        className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 text-slate-500 font-bold text-sm"
+        role="img"
+        aria-label={`${name} (sin foto)`}
+      >
+        {initial}
+      </div>
+    );
+  }
+  return (
+    <div
+      className="w-full h-full flex flex-col items-center justify-center gap-1.5 bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 text-slate-500"
+      role="img"
+      aria-label={`${name} (sin foto)`}
+    >
+      <span className="w-14 h-14 rounded-2xl bg-white/80 border border-slate-200 shadow-xs flex items-center justify-center text-2xl font-black text-slate-600">
+        {initial}
+      </span>
+      {category && (
+        <span className="px-2 py-0.5 rounded-md bg-white/70 text-[10px] font-semibold uppercase tracking-wide text-slate-500 max-w-[85%] truncate">
+          {category}
+        </span>
+      )}
+      <span className="flex items-center gap-1 text-[10px] text-slate-400">
+        <ImageIcon className="w-3 h-3" aria-hidden="true" />
+        Sin foto
+      </span>
+    </div>
+  );
+}
+
 function isSafeExternalHttpUrl(url?: string): boolean {
   return Boolean(url && /^https?:\/\//i.test(url.trim()));
 }
@@ -226,6 +268,21 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const [mpSubOption, setMpSubOption] = useState<'dinero_en_cuenta' | 'tarjetas_todos'>(
     'dinero_en_cuenta'
   );
+  // Medios de pago que el comercio eligió ofrecer (Mercado Pago solo si está configurado)
+  const enabledPayOptions = useMemo(
+    () =>
+      catalog
+        ? resolveEnabledPaymentOptions(catalog.paymentMethods, {
+            mercadoPagoAvailable: Boolean(catalog.hasMerchantMpAccessToken || catalog.merchantMpCheckoutLink?.trim()),
+          })
+        : (['transferencia', 'mercadopago', 'efectivo', 'acordar'] as CatalogPaymentOptionKey[]),
+    [catalog]
+  );
+  useEffect(() => {
+    if (enabledPayOptions.length > 0 && !enabledPayOptions.includes(selectedPayGroup)) {
+      setSelectedPayGroup(enabledPayOptions[0]);
+    }
+  }, [enabledPayOptions, selectedPayGroup]);
   const [transferReceiptImageUrl, setTransferReceiptImageUrl] = useState('');
   const [transferReference, setTransferReference] = useState('');
   const [isCompressingReceipt, setIsCompressingReceipt] = useState(false);
@@ -629,6 +686,12 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
   const isFullWebFeatures =
     catalog?.canAccessFullFeatures !== false && catalog?.planTier !== 'web';
+
+  // Diseño de la tienda (Plan 3): colores, letra, tarjetas y banners
+  const storeThemeEnabled = isFullWebFeatures && Boolean(catalog?.storeTheme);
+  const storeThemeRootProps = getStoreThemeRootProps(catalog?.storeTheme, storeThemeEnabled);
+  const resolvedStoreTheme = resolveStoreTheme(catalog?.storeTheme);
+  const useStoreBannerColors = storeThemeEnabled && resolvedStoreTheme.bannerColors === 'tienda';
 
   // #9 Tick Flash Sale clock every 1s only if there are active timed flash offers (Plan Full)
   useEffect(() => {
@@ -2184,7 +2247,10 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const currency = catalog.currencySymbol || '$';
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col">
+    <div
+      {...storeThemeRootProps}
+      className={`${storeThemeRootProps.className} min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col`}
+    >
       {/* Top Navigation Header */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
@@ -2194,6 +2260,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               icon={catalog.icon}
               name={catalog.storeName}
               size="sm"
+              initialFallback
             />
             <div className="min-w-0">
               <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate">
@@ -2205,40 +2272,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
             </div>
           </div>
 
-          {/* Quick Header Search Bar on desktop */}
-          <div className="hidden md:block flex-1 max-w-sm mx-4">
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="search"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nombre o descripción..."
-                aria-label="Buscar productos por nombre o descripción"
-                className="w-full pl-9 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
-              />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm('')}
-                  aria-label="Limpiar búsqueda"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-400 hover:text-slate-700 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={onExitToApp}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Acceso Sistema</span>
-            </button>
 
             <button
               type="button"
@@ -2265,6 +2299,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                 icon={catalog.icon}
                 name={catalog.storeName}
                 size="lg"
+                initialFallback
               />
             </div>
             <div className="space-y-2 min-w-0">
@@ -2316,12 +2351,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                 </div>
               </div>
             )}
-            {catalog.paymentNote && (
+            {enabledPayOptions.length > 0 && (
               <div className="flex items-start gap-2">
                 <CreditCard className="w-4 h-4 text-sky-300 shrink-0 mt-0.5" />
                 <div>
                   <span className="text-slate-300 block text-[11px]">Medios de pago</span>
-                  <strong className="text-white">{catalog.paymentNote}</strong>
+                  <strong className="text-white">
+                    {enabledPayOptions.map((k) => CATALOG_PAYMENT_OPTION_LABELS[k].title).join(' · ')}
+                  </strong>
+                  {catalog.paymentNote &&
+                    catalog.paymentNote.trim() !== 'Efectivo, transferencia o link de pago' && (
+                      <span className="block text-[11px] text-slate-300 mt-0.5">{catalog.paymentNote}</span>
+                    )}
                 </div>
               </div>
             )}
@@ -2330,7 +2371,11 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       </section>
 
       {/* Main Catalog Area */}
-      <main className="max-w-6xl mx-auto w-full px-4 sm:px-6 pb-8 pt-4 flex-1 space-y-5">
+      <main
+        className={`max-w-6xl mx-auto w-full px-4 sm:px-6 pt-4 flex-1 space-y-5 ${
+          totalCartUnits > 0 && !isCartOpen ? 'pb-32' : 'pb-8'
+        }`}
+      >
         {/* Top DNI Loyalty Program Bar (non-sticky so mobile chrome stays minimal, visible immediately upon opening catalog) */}
         {isFullWebFeatures &&
           catalog.enableLoyaltyProgram &&
@@ -2667,7 +2712,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
             <section className="space-y-2.5" aria-label="Promociones destacadas">
               <div className={`grid ${gridColsClass} gap-3`}>
                 {activeBanners.map((banner) => {
-                  const isLightTheme = banner.theme === 'amber';
+                  const isLightTheme = useStoreBannerColors
+                    ? resolvedStoreTheme.bannerBackground === 'claro'
+                    : banner.theme === 'amber';
                   const hasBannerImg =
                     banner.mode === 'image' &&
                     Boolean(banner.imageUrl?.trim()) &&
@@ -2685,7 +2732,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                         key={banner.id}
                         type="button"
                         onClick={() => handleBannerClick(banner)}
-                        className="group relative text-left rounded-2xl border border-slate-200 overflow-hidden bg-slate-900 transition-transform hover:-translate-y-0.5 cursor-pointer"
+                        className="rf-store-round group relative text-left rounded-2xl border border-slate-200 overflow-hidden bg-slate-900 transition-transform hover:-translate-y-0.5 cursor-pointer"
                       >
                         <div className="aspect-[16/6] sm:aspect-[16/5] w-full overflow-hidden bg-slate-100">
                           <img
@@ -2734,21 +2781,29 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       key={banner.id}
                       type="button"
                       onClick={() => handleBannerClick(banner)}
-                      className={`text-left rounded-2xl border p-4 sm:p-5 flex items-center justify-between gap-4 transition-transform hover:-translate-y-0.5 cursor-pointer ${
-                        themeClassMap[banner.theme || 'navy']
+                      className={`rf-store-round text-left rounded-2xl border p-4 sm:p-5 flex items-center justify-between gap-4 transition-transform hover:-translate-y-0.5 cursor-pointer ${
+                        useStoreBannerColors
+                          ? resolvedStoreTheme.bannerBackground === 'claro'
+                            ? 'rf-banner-store-light'
+                            : 'rf-banner-store-dark'
+                          : themeClassMap[banner.theme || 'navy']
                       }`}
                     >
                       <div className="min-w-0 space-y-1">
                         {banner.badgeText && (
                           <div
                             className={`text-[11px] font-bold tracking-wide uppercase ${
-                              isLightTheme ? 'text-amber-800' : 'text-emerald-300'
+                              useStoreBannerColors
+                                ? 'rf-banner-badge'
+                                : isLightTheme
+                                ? 'text-amber-800'
+                                : 'text-emerald-300'
                             }`}
                           >
                             {banner.badgeText}
                           </div>
                         )}
-                        <div className="text-base font-bold leading-snug">
+                        <div className="rf-banner-title text-base font-bold leading-snug">
                           {banner.title}
                         </div>
                         {banner.subtitle && (
@@ -2777,7 +2832,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       </div>
                       <span
                         className={`inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold shrink-0 whitespace-nowrap ${
-                          isLightTheme
+                          useStoreBannerColors
+                            ? 'rf-banner-cta'
+                            : isLightTheme
                             ? 'bg-[#0B1933] text-white'
                             : 'bg-white text-slate-900'
                         }`}
@@ -2963,7 +3020,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               return (
                 <article
                   key={product.id}
-                  className={`bg-white border rounded-2xl overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
+                  className={`rf-store-card bg-white border rounded-2xl overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
                     isCardFullyOutOfStock ? 'border-slate-200 bg-slate-50/40' : 'border-slate-200'
                   }`}
                 >
@@ -2995,9 +3052,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                         </span>
                       </button>
                     ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 bg-gradient-to-br from-slate-100 to-slate-200">
-                        <ImageIcon className="w-9 h-9 opacity-50" />
-                      </div>
+                      <ProductPhotoPlaceholder name={product.name} category={product.category} />
                     )}
 
                     {galleryImages.length > 1 && (
@@ -3461,6 +3516,20 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
           </section>
         )}
       </main>
+
+      {/* Pie de página: el acceso del comercio queda discreto, fuera de la vista del comprador */}
+      <footer className="border-t border-slate-200 bg-white/70">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+          <span>{catalog.storeName}</span>
+          <button
+            type="button"
+            onClick={onExitToApp}
+            className="px-2 py-2 rounded text-slate-400 hover:text-slate-600 underline-offset-2 hover:underline cursor-pointer"
+          >
+            Acceso para el comercio
+          </button>
+        </div>
+      </footer>
 
       {/* Floating Bottom Bar when cart has items */}
       {totalCartUnits > 0 && !isCartOpen && (
@@ -4099,7 +4168,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                               selectedPayGroup === 'mercadopago' &&
                                               mpSubOption !== 'dinero_en_cuenta'
                                             ) {
-                                              setSelectedPayGroup('efectivo');
+                                              setSelectedPayGroup(
+                                                enabledPayOptions.includes('efectivo') ? 'efectivo' : enabledPayOptions[0] || 'acordar'
+                                              );
                                             }
                                           }}
                                           className="px-2 py-1 rounded-lg bg-white border border-amber-300 hover:bg-amber-100 text-[10px] font-bold text-amber-950 cursor-pointer"
@@ -4107,6 +4178,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                           Cambiar a Retiro en local
                                         </button>
                                       )}
+                                      {enabledPayOptions.includes('transferencia') && (
                                       <button
                                         type="button"
                                         onClick={() => setSelectedPayGroup('transferencia')}
@@ -4114,6 +4186,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                       >
                                         Pagar con Transferencia
                                       </button>
+                                      )}
+                                      {enabledPayOptions.includes('mercadopago') && (
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -4124,6 +4198,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                       >
                                         Dinero en cuenta MP
                                       </button>
+                                      )}
                                     </div>
                                   </div>
                                 )
@@ -4160,7 +4235,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                           value={giftCardCodeInput}
                           onChange={(e) => setGiftCardCodeInput(e.target.value.toUpperCase())}
                           placeholder="Código de Gift Card (ej. GC-A8F2)"
-                          className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 uppercase"
+                          className="flex-1 min-w-0 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 uppercase"
                         />
                         <button
                           type="button"
@@ -4479,7 +4554,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                               : 'Para canjear puntos elegí Retiro en el local, Transferencia o Mercado Pago (Dinero en cuenta).'}
                           </p>
                         )}
-                      <div className="grid grid-cols-2 gap-2">
+                      {/* Solo los medios de pago que el comercio eligió ofrecer */}
+                      <div className={`grid gap-2 ${enabledPayOptions.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                        {enabledPayOptions.includes('transferencia') && (
                         <button
                           type="button"
                           onClick={() => setSelectedPayGroup('transferencia')}
@@ -4501,7 +4578,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             Ver Alias y subir comprobante
                           </p>
                         </button>
+                        )}
 
+                        {enabledPayOptions.includes('mercadopago') && (
                         <button
                           type="button"
                           onClick={() => setSelectedPayGroup('mercadopago')}
@@ -4523,7 +4602,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             Dinero en cuenta / Tarjetas
                           </p>
                         </button>
+                        )}
 
+                        {enabledPayOptions.includes('efectivo') && (
                         <button
                           type="button"
                           onClick={() => setSelectedPayGroup('efectivo')}
@@ -4545,7 +4626,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             {deliveryMethod === 'envio' ? 'Al recibir envío' : 'Al retirar en local'}
                           </p>
                         </button>
+                        )}
 
+                        {enabledPayOptions.includes('acordar') && (
                         <button
                           type="button"
                           onClick={() => setSelectedPayGroup('acordar')}
@@ -4567,6 +4650,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             Con el vendedor por WhatsApp
                           </p>
                         </button>
+                        )}
                       </div>
 
                       {/* Transferencia Box: Alias del dueño + carga de comprobante */}
@@ -5019,7 +5103,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <ImageIcon className="w-5 h-5 text-slate-400" />
+                    <ProductPhotoPlaceholder name={stockAlertProduct.name} compact />
                   )}
                 </div>
                 <div className="min-w-0 flex-1">

@@ -23,6 +23,7 @@ import {
 import { Boleta, DistributorConfig, Client, Salesperson, Administrator } from '../types';
 import { calculateAlertStatus, formatCurrency, formatDateEs, getBoletaBalance } from '../utils/alerts';
 import { createWhatsAppUrl, generateClientWhatsAppMessage, generateUserSignedReminder } from '../utils/whatsapp';
+import { getAlertThresholds } from '../utils/alertThresholds';
 
 interface UnpaidBoletasViewProps {
   boletas: Boleta[];
@@ -65,7 +66,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
-  const graceThreshold = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  const graceThreshold = getAlertThresholds(config).overdueGraceDays;
 
   // Enriched items with balance and alert status
   const enrichedItems = pendingBoletas.map((b) => {
@@ -226,7 +227,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
           </span>
         </div>
 
-        {/* Vencido Crítico (+5d) */}
+        {/* Vencido crítico (días de mora ≥ overdueGraceDays) */}
         <div
           onClick={() => setStatusFilter('critical_overdue')}
           className={`p-4 rounded-2xl border transition-all cursor-pointer ${
@@ -238,7 +239,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 flex items-center gap-1">
               <Flame className="w-3.5 h-3.5 text-rose-600" />
-              <span>Vencido Crítico (+{graceThreshold}d)</span>
+              <span>Vencido crítico ({graceThreshold}+ días de mora)</span>
             </span>
           </div>
           <span className="text-xl sm:text-2xl font-black font-mono text-rose-600 dark:text-rose-400 block mt-1">
@@ -298,7 +299,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Buscar por cliente que debe la factura, número de boleta o vendedor..."
+            placeholder="Buscar por cliente, número de boleta o vendedor..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white"
@@ -326,7 +327,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                   : 'text-rose-600 dark:text-rose-400'
               }`}
             >
-              🔴 Vencidas +{graceThreshold}d ({criticalOverdueItems.length})
+              🔴 Vencidas con {graceThreshold}+ días de mora ({criticalOverdueItems.length})
             </button>
             <button
               onClick={() => setStatusFilter('extended')}
@@ -358,12 +359,12 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
 
       {/* Detailed Table View */}
       <div className="bg-white dark:bg-[#0B1933] rounded-xl border border-[#CBD5E1] dark:border-[#B6C2D2]/20 overflow-hidden shadow-2xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto rt-cards-scroll">
+          <table className="rt-cards w-full text-left text-xs">
             <thead className="bg-[#0B1933] text-[#E2E8F0] font-semibold border-b border-[#B6C2D2]/25">
               <tr>
                 <th className="px-4 py-3.5">N° Boleta</th>
-                <th className="px-4 py-3.5">Cliente que Debe la Factura</th>
+                <th className="px-4 py-3.5">Cliente</th>
                 <th className="px-4 py-3.5 text-right">Monto y Saldo</th>
                 <th className="px-4 py-3.5">Fecha de Venta</th>
                 <th className="px-4 py-3.5">Vencimiento</th>
@@ -411,7 +412,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       }`}
                     >
                       {/* Nro Boleta */}
-                      <td className="px-4 py-3.5 font-mono font-bold text-slate-900 dark:text-white">
+                      <td className="px-4 py-3.5 font-mono font-bold text-slate-900 dark:text-white" data-label="N° Boleta">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span>#{boleta.boletaNumber}</span>
                           {boleta.isSigned && (
@@ -438,7 +439,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Cliente que debe la factura */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" data-label="Cliente">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-black text-slate-900 dark:text-white text-sm">
                             {boleta.clientName}
@@ -467,7 +468,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Monto y Saldo adeudado */}
-                      <td className="px-4 py-3.5 text-right font-mono tabular-nums">
+                      <td className="px-4 py-3.5 text-right font-mono tabular-nums" data-label="Monto y Saldo">
                         <span className="text-sm font-black text-slate-900 dark:text-white block">
                           {formatCurrency(balance.balanceDue, config.currencySymbol)}
                         </span>
@@ -486,7 +487,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Fecha de Venta (cuándo se hizo) */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" data-label="Fecha de Venta">
                         <span className="font-semibold text-slate-700 dark:text-slate-300 block">
                           {formatDateEs(boleta.saleDate)}
                         </span>
@@ -496,7 +497,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Fecha de Cobro Programada (cuándo se debió cobrar) */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" data-label="Vencimiento">
                         <span
                           className={`font-bold block ${
                             isCritical
@@ -522,7 +523,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Estado y Demora */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" data-label="Estado / Demora">
                         <span
                           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border shadow-2xs ${status.badgeColor}`}
                         >
@@ -531,7 +532,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Vendedor a cargo */}
-                      <td className="px-4 py-3.5 text-slate-700 dark:text-slate-300">
+                      <td className="px-4 py-3.5 text-slate-700 dark:text-slate-300" data-label="Vendedor a Cargo">
                         <div className="flex items-center gap-1 font-semibold">
                           <Bike className="w-3.5 h-3.5 text-indigo-500" />
                           <span>{boleta.salespersonName}</span>
@@ -539,7 +540,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Prórroga & Acciones Rápidas */}
-                      <td className="px-4 py-3.5 text-center">
+                      <td className="px-4 py-3.5 text-center" data-label="Prórroga & Acciones">
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           {/* BOTÓN PRORROGAR BOLETA */}
                           <button

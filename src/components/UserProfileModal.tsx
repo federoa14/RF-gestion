@@ -119,16 +119,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
     const wantsToChangePassword = newPassword.trim().length > 0;
     if (wantsToChangePassword) {
-      if (newPassword.length < 4) {
-        setFeedback({ type: 'error', message: 'La nueva contraseña debe tener al menos 4 caracteres.' });
+      if (newPassword.length < 6) {
+        setFeedback({ type: 'error', message: 'La nueva contraseña debe tener al menos 6 caracteres.' });
         return;
       }
       if (newPassword !== confirmPassword) {
         setFeedback({ type: 'error', message: 'La nueva contraseña y su confirmación no coinciden.' });
-        return;
-      }
-      if (currentPassword && currentPassword !== currentUser.password) {
-        setFeedback({ type: 'error', message: 'La contraseña actual ingresada es incorrecta.' });
         return;
       }
     }
@@ -272,7 +268,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </div>
 
               <p className="text-[11px] text-slate-600 dark:text-[#94A3B8] leading-relaxed">
-                Cada rubro cambia por completo cómo trabaja el sistema: regla de 1 factura por persona vs múltiples compras, cuotas con interés, señas, canasto por producto, plazos y tope en pesos.
+                Cada rubro cambia por completo cómo trabaja el sistema: regla de 1 boleta por persona vs múltiples compras, cuotas con interés, señas, canasto por producto, plazos y tope en pesos.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -544,7 +540,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     type={showNewPass ? 'text' : 'password'}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Mínimo 4 caracteres"
+                    placeholder="Mínimo 6 caracteres"
                     className="w-full text-xs pl-3 pr-9 py-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#071021] text-slate-900 dark:text-white font-mono"
                   />
                   <button

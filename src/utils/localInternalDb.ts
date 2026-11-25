@@ -1,254 +1,196 @@
 /**
- * Base de Datos Interna Local del Dispositivo (IndexedDB) + Sincronización Supabase
+ * Almacenamiento de la app
  * -----------------------------------------------------------------------------
- * Mantiene caché local rápida en IndexedDB y sincroniza automáticamente
- * empresas, usuarios, clientes, boletas, rendiciones y configuraciones en Supabase.
+ * Desde la Fase 3 los datos viven en Supabase (tablas por comercio con RLS).
+ * Este módulo mantiene en memoria lo que la app está usando y:
+ *   · manda a Supabase todo lo que se guarda (vía supabaseSync),
+ *   · guarda en el dispositivo solo preferencias locales (sesión, avisos cerrados),
+ *   · lee la base vieja de IndexedDB ÚNICAMENTE para la importación única.
  */
 import {
-  hydrateFromSupabase,
-  queueSupabaseUpsert,
-  queueSupabaseDelete,
-  refreshKeysFromSupabase,
-  startSupabaseRealtimeSubscription,
   flushSupabaseSync,
+  hydrateForSession,
+  importLegacyTenantDataIfMissing,
   isCloudSyncedKey,
+  queueSupabaseDelete,
+  queueSupabaseUpsert,
+  refreshKeysFromSupabase,
+  resetCloudSession,
+  getCloudSession,
+  type CloudSessionProfile,
 } from './supabaseSync';
+import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
 
-const IDB_NAME = 'cobranzas_base_interna_v1';
-const IDB_VERSION = 1;
-const STORE_NAME = 'records';
+const LEGACY_IDB_NAME = 'cobranzas_base_interna_v1';
+const LEGACY_STORE_NAME = 'records';
 const BACKUP_FORMAT = 'cobranzas_base_interna_backup_v1';
-
-interface StoredRecord {
-  key: string;
-  value: string;
-  updatedAt?: number;
-}
+const LEGACY_IMPORT_DONE_KEY = 'rf_legacy_import_done_v1';
 
 const memoryStore = new Map<string, string>();
-let idbInstance: IDBDatabase | null = null;
-let dbEngine: 'IndexedDB' | 'localStorage' = 'localStorage';
 let initPromise: Promise<void> | null = null;
-let isPersistedFlag = false;
 
-const MIGRATABLE_PREFIXES = [
-  'distribuidora_',
-  'saas_',
-  'client_payment_links_',
+const LEGACY_PREFIXES = ['distribuidora_', 'saas_', 'client_payment_links_'];
+
+function isLegacyRelevantKey(key: string): boolean {
+  return LEGACY_PREFIXES.some((prefix) => key.startsWith(prefix));
+}
+
+// Cachés temporales y datos sensibles: viven solo en memoria (ni nube ni dispositivo)
+const MEMORY_ONLY_PREFIXES = [
+  'distribuidora_', // claves de la versión de un solo comercio (pueden traer tokens de WhatsApp)
+  'public_',
+  'catalog_',
+  'merchant_mp_token_',
+  'client_payment_order_',
+  'tenant_sub_pay_order_',
+  'rec:',
 ];
 
-function isRelevantKey(key: string): boolean {
-  return MIGRATABLE_PREFIXES.some((prefix) => key.startsWith(prefix));
+function isMemoryOnlyKey(key: string): boolean {
+  return MEMORY_ONLY_PREFIXES.some((p) => key.startsWith(p));
 }
 
-function openIdbConnection(): Promise<IDBDatabase | null> {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined' || !window.indexedDB) {
-      resolve(null);
-      return;
-    }
-
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        resolve(null);
-      }
-    }, 1500);
-
-    try {
-      const request = window.indexedDB.open(IDB_NAME, IDB_VERSION);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME, { keyPath: 'key' });
-        }
-      };
-      request.onsuccess = () => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(request.result);
-        }
-      };
-      request.onerror = () => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(null);
-        }
-      };
-      request.onblocked = () => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(null);
-        }
-      };
-    } catch {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve(null);
-      }
-    }
-  });
+/** Claves que se guardan solo en este dispositivo (preferencias, sesión, avisos cerrados) */
+function isDeviceKey(key: string): boolean {
+  return !isCloudSyncedKey(key) && !isMemoryOnlyKey(key);
 }
 
-function readAllRecordsFromIdb(db: IDBDatabase): Promise<StoredRecord[]> {
-  return new Promise((resolve) => {
-    try {
-      const tx = db.transaction(STORE_NAME, 'readonly');
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.getAll();
-      req.onsuccess = () => {
-        resolve(Array.isArray(req.result) ? req.result : []);
-      };
-      req.onerror = () => resolve([]);
-    } catch {
-      resolve([]);
-    }
-  });
-}
-
-function writeBatchToIdb(db: IDBDatabase, records: StoredRecord[]): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (records.length === 0) {
-      resolve(true);
-      return;
-    }
-    try {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      records.forEach((rec) => store.put(rec));
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => resolve(false);
-      tx.onabort = () => resolve(false);
-    } catch {
-      resolve(false);
-    }
-  });
-}
-
-function writeSingleToIdb(key: string, value: string): void {
-  if (!idbInstance) return;
+function readDeviceStorage(key: string): string | null {
   try {
-    const tx = idbInstance.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put({
-      key,
-      value,
-      updatedAt: Date.now(),
-    } satisfies StoredRecord);
+    return typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
   } catch {
-    // Silent fallback — memoryStore stays up to date
+    return null;
   }
 }
 
-function deleteSingleFromIdb(key: string): void {
-  if (!idbInstance) return;
+function writeDeviceStorage(key: string, value: string | null): void {
   try {
-    const tx = idbInstance.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).delete(key);
+    if (typeof window === 'undefined') return;
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
   } catch {
-    // Silent
+    // Sin espacio o almacenamiento bloqueado: queda en memoria
   }
 }
 
-let cloudSyncStarted = false;
+// -----------------------------------------------------------------------------
+// Sesión de Supabase
+// -----------------------------------------------------------------------------
 
-export async function ensureCloudHydrated(): Promise<void> {
-  if (cloudSyncStarted) return;
-  cloudSyncStarted = true;
-  await hydrateFromSupabase(memoryStore, applyExternalSyncedRecord);
-  startSupabaseRealtimeSubscription(applyExternalSyncedRecord, deleteExternalSyncedRecord, dbGetItem);
+export interface LoadedProfile extends CloudSessionProfile {
+  username: string | null;
+  fullName: string;
+  phone: string | null;
+  legacyUserId: string | null;
+  active: boolean;
+}
+
+export async function loadProfileForUser(userId: string): Promise<LoadedProfile | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, business_id, role, username, full_name, email, phone, active, legacy_user_id')
+    .eq('id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  return {
+    userId: data.id,
+    role: data.role,
+    businessId: data.business_id,
+    email: data.email,
+    username: data.username,
+    fullName: data.full_name || '',
+    phone: data.phone,
+    legacyUserId: data.legacy_user_id,
+    active: data.active !== false,
+  };
+}
+
+/** Carga todos los datos del usuario que inició sesión */
+export async function startCloudSession(profile: LoadedProfile): Promise<void> {
+  await hydrateForSession(
+    profile,
+    (key, value) => memoryStore.set(key, value),
+    (key) => dbGetItem(key)
+  );
+}
+
+/** Cierra la sesión y borra de la memoria los datos del comercio */
+export async function endCloudSession(): Promise<void> {
+  try {
+    await flushSupabaseSync();
+  } catch {
+    // si no hay conexión, la cola queda guardada para la próxima sesión
+  }
+  for (const key of Array.from(memoryStore.keys())) {
+    if (isCloudSyncedKey(key)) memoryStore.delete(key);
+  }
+  resetCloudSession();
+  await getSupabaseClient()?.auth.signOut().catch(() => null);
 }
 
 /**
- * Inicializa la base interna IndexedDB antes de montar la interfaz React.
- * Migra automáticamente cualquier dato previo de localStorage hacia IndexedDB.
+ * Se llama antes de montar la app: si hay una sesión de Supabase guardada,
+ * carga el perfil y los datos para entrar directo.
  */
-export async function initInternalDatabase(options?: {
-  deferCloudHydration?: boolean;
-}): Promise<void> {
+export async function initInternalDatabase(options?: { deferCloudHydration?: boolean }): Promise<void> {
   if (initPromise) return initPromise;
-
   initPromise = (async () => {
-    const db = await openIdbConnection();
-
-    if (db) {
-      idbInstance = db;
-      dbEngine = 'IndexedDB';
-      const existingRecords = await readAllRecordsFromIdb(db);
-      for (const rec of existingRecords) {
-        if (rec && typeof rec.key === 'string' && typeof rec.value === 'string') {
-          memoryStore.set(rec.key, rec.value);
-        }
-      }
-
-      // Solicitar persistencia al navegador para proteger la base interna local
-      try {
-        if (navigator.storage && typeof navigator.storage.persist === 'function') {
-          const already = await navigator.storage.persisted?.();
-          isPersistedFlag = Boolean(already || (await navigator.storage.persist()));
-        }
-      } catch {
-        isPersistedFlag = false;
-      }
-    }
-
-    // Migrar claves preexistentes desde localStorage hacia IndexedDB si faltan en memoryStore
-    const toMigrate: StoredRecord[] = [];
+    if (!isSupabaseConfigured() || options?.deferCloudHydration) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
     try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        for (let i = 0; i < window.localStorage.length; i++) {
-          const k = window.localStorage.key(i);
-          if (!k || !isRelevantKey(k)) continue;
-          const v = window.localStorage.getItem(k);
-          if (v !== null && !memoryStore.has(k)) {
-            memoryStore.set(k, v);
-            toMigrate.push({ key: k, value: v, updatedAt: Date.now() });
-          }
-        }
+      const { data } = await supabase.auth.getSession();
+      const userId = data.session?.user?.id;
+      if (!userId) {
+        clearStoredSessionUser();
+        return;
       }
-    } catch {
-      // ignore localStorage access restrictions
-    }
-
-    if (db && toMigrate.length > 0) {
-      await writeBatchToIdb(db, toMigrate);
-    }
-
-    // Hidratar y sincronizar con Supabase (omitir bloqueo en rutas públicas de catálogo o link de cobro)
-    if (!options?.deferCloudHydration) {
-      await ensureCloudHydrated();
+      const profile = await loadProfileForUser(userId);
+      if (!profile || !profile.active) {
+        clearStoredSessionUser();
+        await supabase.auth.signOut().catch(() => null);
+        return;
+      }
+      await startCloudSession(profile);
+    } catch (err) {
+      console.error('[Supabase] No se pudieron cargar los datos al iniciar', err);
+      startupError = err;
     }
   })();
-
   return initPromise;
 }
 
+let startupError: unknown = null;
+export function getStartupError(): unknown {
+  return startupError;
+}
+
+function clearStoredSessionUser(): void {
+  memoryStore.delete('saas_distribuidoras_session_user_v2_zero');
+  writeDeviceStorage('saas_distribuidoras_session_user_v2_zero', null);
+}
+
+export async function ensureCloudHydrated(): Promise<void> {
+  // Las vistas públicas no cargan datos privados; al volver a la app se recarga.
+  if (!getCloudSession()) {
+    initPromise = null;
+    await initInternalDatabase();
+  }
+}
+
+// -----------------------------------------------------------------------------
+// API de lectura/escritura que usa toda la app
+// -----------------------------------------------------------------------------
+
 export function applyExternalSyncedRecord(key: string, value: string): void {
   memoryStore.set(key, value);
-  writeSingleToIdb(key, value);
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem(key, value);
-    }
-  } catch {
-    // IndexedDB guarda igual incluso si supera cuota de localStorage
-  }
 }
 
 export function deleteExternalSyncedRecord(key: string): void {
   memoryStore.delete(key);
-  deleteSingleFromIdb(key);
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem(key);
-    }
-  } catch {
-    // ignore
-  }
 }
 
 export async function syncKeysFromCloud(keys: string[]): Promise<string[]> {
@@ -256,54 +198,36 @@ export async function syncKeysFromCloud(keys: string[]): Promise<string[]> {
 }
 
 export function dbGetItem(key: string): string | null {
-  if (memoryStore.has(key)) {
-    return memoryStore.get(key) ?? null;
-  }
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const val = window.localStorage.getItem(key);
-      if (val !== null) {
-        memoryStore.set(key, val);
-        if (idbInstance) {
-          writeSingleToIdb(key, val);
-        }
-      }
-      return val;
-    }
-  } catch {
-    // ignore
+  if (memoryStore.has(key)) return memoryStore.get(key) ?? null;
+  if (isDeviceKey(key)) {
+    const v = readDeviceStorage(key);
+    if (v !== null) memoryStore.set(key, v);
+    return v;
   }
   return null;
 }
 
 export function dbSetItem(key: string, value: string): void {
   memoryStore.set(key, value);
-  writeSingleToIdb(key, value);
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem(key, value);
-    }
-  } catch {
-    // Si localStorage excede su cuota de 5MB (por fotos/flyers), IndexedDB conserva todo sin fallar
+  if (isCloudSyncedKey(key)) {
+    queueSupabaseUpsert(key, value);
+  } else if (isDeviceKey(key)) {
+    writeDeviceStorage(key, value);
   }
-  queueSupabaseUpsert(key, value);
 }
 
 export function dbRemoveItem(key: string): void {
   memoryStore.delete(key);
-  deleteSingleFromIdb(key);
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.removeItem(key);
-    }
-  } catch {
-    // ignore
-  }
-  queueSupabaseDelete(key);
+  if (isCloudSyncedKey(key)) queueSupabaseDelete(key);
+  else if (isDeviceKey(key)) writeDeviceStorage(key, null);
 }
 
+// -----------------------------------------------------------------------------
+// Estado y respaldos
+// -----------------------------------------------------------------------------
+
 export interface InternalDbStatus {
-  engine: 'IndexedDB' | 'localStorage';
+  engine: 'Supabase';
   dbName: string;
   recordCount: number;
   usedBytes: number;
@@ -312,36 +236,32 @@ export interface InternalDbStatus {
 }
 
 export async function getInternalDatabaseStatus(): Promise<InternalDbStatus> {
-  await initInternalDatabase();
   let approxBytes = 0;
+  let records = 0;
   memoryStore.forEach((val, key) => {
+    if (!isCloudSyncedKey(key)) return;
     approxBytes += (key.length + val.length) * 2;
-  });
-
-  let quotaBytes: number | null = null;
-  let usageBytes = approxBytes;
-  try {
-    if (navigator.storage && typeof navigator.storage.estimate === 'function') {
-      const est = await navigator.storage.estimate();
-      if (typeof est.quota === 'number') quotaBytes = est.quota;
-      if (typeof est.usage === 'number' && est.usage > usageBytes) {
-        usageBytes = est.usage;
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) records += parsed.length;
+      else if (parsed && typeof parsed === 'object') {
+        for (const v of Object.values(parsed)) if (Array.isArray(v)) records += v.length;
       }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
-  }
-
+  });
   return {
-    engine: dbEngine,
-    dbName: IDB_NAME,
-    recordCount: memoryStore.size,
-    usedBytes: usageBytes,
-    quotaBytes,
-    persisted: isPersistedFlag,
+    engine: 'Supabase',
+    dbName: 'Supabase (nube)',
+    recordCount: records,
+    usedBytes: approxBytes,
+    quotaBytes: null,
+    persisted: true,
   };
 }
 
+/** Respaldo descargable con los datos que el usuario tiene cargados */
 export function exportInternalDatabaseBackup(labelPrefix = 'Respaldo_Base_Interna'): {
   filename: string;
   jsonString: string;
@@ -350,39 +270,19 @@ export function exportInternalDatabaseBackup(labelPrefix = 'Respaldo_Base_Intern
 } {
   const entries: Record<string, string> = {};
   memoryStore.forEach((value, key) => {
-    if (isRelevantKey(key)) {
-      entries[key] = value;
-    }
+    if (isCloudSyncedKey(key) && key !== 'saas_distribuidoras_users_v2_zero') entries[key] = value;
   });
-
-  // Incluir cualquier clave adicional en localStorage por seguridad
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      for (let i = 0; i < window.localStorage.length; i++) {
-        const k = window.localStorage.key(i);
-        if (k && isRelevantKey(k) && !(k in entries)) {
-          const v = window.localStorage.getItem(k);
-          if (v !== null) entries[k] = v;
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-
   const payload = {
     format: BACKUP_FORMAT,
-    dbName: IDB_NAME,
+    dbName: 'supabase',
     exportedAt: new Date().toISOString(),
     recordCount: Object.keys(entries).length,
     entries,
   };
-
   const jsonString = JSON.stringify(payload, null, 2);
   const dateTag = new Date().toISOString().split('T')[0];
-  const filename = `${labelPrefix}_${dateTag}.json`;
   return {
-    filename,
+    filename: `${labelPrefix}_${dateTag}.json`,
     jsonString,
     recordCount: Object.keys(entries).length,
     sizeBytes: new Blob([jsonString]).size,
@@ -404,13 +304,13 @@ export function downloadInternalDatabaseBackup(labelPrefix?: string): {
   a.click();
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 2500);
-  return {
-    filename: backup.filename,
-    recordCount: backup.recordCount,
-    sizeBytes: backup.sizeBytes,
-  };
+  return { filename: backup.filename, recordCount: backup.recordCount, sizeBytes: backup.sizeBytes };
 }
 
+/**
+ * Importa un respaldo .json (de esta versión o de la anterior con IndexedDB).
+ * Solo agrega lo que no existe en Supabase: nunca pisa datos más nuevos.
+ */
 export async function importInternalDatabaseBackup(rawJson: string): Promise<{
   success: boolean;
   importedCount: number;
@@ -418,93 +318,153 @@ export async function importInternalDatabaseBackup(rawJson: string): Promise<{
   usersCount: number;
   error?: string;
 }> {
-  await initInternalDatabase();
+  const fail = (error: string) => ({ success: false, importedCount: 0, tenantsCount: 0, usersCount: 0, error });
+  let parsed: any;
   try {
-    const parsed = JSON.parse(rawJson);
-    if (
-      !parsed ||
-      parsed.format !== BACKUP_FORMAT ||
-      typeof parsed.entries !== 'object' ||
-      Array.isArray(parsed.entries)
-    ) {
-      return {
-        success: false,
-        importedCount: 0,
-        tenantsCount: 0,
-        usersCount: 0,
-        error: 'El archivo seleccionado no es un respaldo válido de la base interna.',
-      };
-    }
-
-    const entries = parsed.entries as Record<string, unknown>;
-    const batch: StoredRecord[] = [];
-    let tenantsCount = 0;
-    let usersCount = 0;
-
-    for (const [key, value] of Object.entries(entries)) {
-      if (typeof key !== 'string' || typeof value !== 'string' || !isRelevantKey(key)) continue;
-      memoryStore.set(key, value);
-      batch.push({ key, value, updatedAt: Date.now() });
-
-      try {
-        if (typeof window !== 'undefined' && window.localStorage) {
-          window.localStorage.setItem(key, value);
-        }
-      } catch {
-        // IndexedDB guarda igual incluso si supera cuota de localStorage
-      }
-
-      if (key === 'saas_distribuidoras_tenants_v2_zero') {
-        try {
-          const arr = JSON.parse(value);
-          if (Array.isArray(arr)) tenantsCount = arr.length;
-        } catch {}
-      }
-      if (key === 'saas_distribuidoras_users_v2_zero') {
-        try {
-          const arr = JSON.parse(value);
-          if (Array.isArray(arr)) usersCount = arr.length;
-        } catch {}
-      }
-    }
-
-    if (batch.length === 0) {
-      return {
-        success: false,
-        importedCount: 0,
-        tenantsCount: 0,
-        usersCount: 0,
-        error: 'El archivo de respaldo no contiene registros compatibles.',
-      };
-    }
-
-    if (idbInstance) {
-      await writeBatchToIdb(idbInstance, batch);
-    }
-
-    for (const rec of batch) {
-      if (isCloudSyncedKey(rec.key)) {
-        queueSupabaseUpsert(rec.key, rec.value);
-      }
-    }
-    void flushSupabaseSync();
-
-    return {
-      success: true,
-      importedCount: batch.length,
-      tenantsCount,
-      usersCount,
-    };
+    parsed = JSON.parse(rawJson);
   } catch {
-    return {
-      success: false,
-      importedCount: 0,
-      tenantsCount: 0,
-      usersCount: 0,
-      error: 'No se pudo leer el archivo JSON de respaldo.',
-    };
+    return fail('No se pudo leer el archivo JSON de respaldo.');
+  }
+  if (!parsed || parsed.format !== BACKUP_FORMAT || typeof parsed.entries !== 'object' || Array.isArray(parsed.entries)) {
+    return fail('El archivo seleccionado no es un respaldo válido.');
+  }
+  const session = getCloudSession();
+  if (!session) return fail('Iniciá sesión para importar el respaldo.');
+  try {
+    const result = await importLegacyEntries(parsed.entries as Record<string, unknown>);
+    if (result.tenantsCount === 0) {
+      return fail('El respaldo no tiene datos de tu comercio.');
+    }
+    return { success: true, importedCount: result.inserted, tenantsCount: result.tenantsCount, usersCount: 0 };
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : 'No se pudo importar el respaldo.');
   }
 }
+
+async function importLegacyEntries(entries: Record<string, unknown>): Promise<{ inserted: number; tenantsCount: number }> {
+  const session = getCloudSession();
+  if (!session) throw new Error('Iniciá sesión para importar.');
+  let inserted = 0;
+  let tenantsCount = 0;
+  for (const [key, value] of Object.entries(entries)) {
+    if (typeof value !== 'string' || !key.startsWith('saas_distribuidora_data_v2_')) continue;
+    const businessId = key.slice('saas_distribuidora_data_v2_'.length);
+    if (session.role !== 'superadmin' && businessId !== session.businessId) continue;
+    let data: any;
+    try {
+      data = JSON.parse(value);
+    } catch {
+      continue;
+    }
+    const res = await importLegacyTenantDataIfMissing(businessId, data);
+    inserted += res.inserted;
+    tenantsCount += 1;
+  }
+  return { inserted, tenantsCount };
+}
+
+// -----------------------------------------------------------------------------
+// Importación única desde la base vieja de este dispositivo (IndexedDB)
+// -----------------------------------------------------------------------------
+
+function readLegacyIndexedDb(): Promise<Record<string, string>> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.indexedDB) return resolve({});
+    let settled = false;
+    const done = (v: Record<string, string>) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    setTimeout(() => done({}), 3000);
+    try {
+      const req = window.indexedDB.open(LEGACY_IDB_NAME);
+      req.onupgradeneeded = () => {
+        // No existía: no hay nada que importar. Se cancela para no crear la base.
+        req.transaction?.abort();
+        done({});
+      };
+      req.onerror = () => done({});
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(LEGACY_STORE_NAME)) {
+          db.close();
+          return done({});
+        }
+        const tx = db.transaction(LEGACY_STORE_NAME, 'readonly');
+        const getAll = tx.objectStore(LEGACY_STORE_NAME).getAll();
+        getAll.onsuccess = () => {
+          const out: Record<string, string> = {};
+          for (const rec of getAll.result || []) {
+            if (rec && typeof rec.key === 'string' && typeof rec.value === 'string') out[rec.key] = rec.value;
+          }
+          db.close();
+          done(out);
+        };
+        getAll.onerror = () => {
+          db.close();
+          done({});
+        };
+      };
+    } catch {
+      done({});
+    }
+  });
+}
+
+/** Datos viejos de este dispositivo (IndexedDB + localStorage) */
+export async function readLegacyDeviceData(): Promise<Record<string, string>> {
+  const fromIdb = await readLegacyIndexedDb();
+  try {
+    if (typeof window !== 'undefined') {
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k && isLegacyRelevantKey(k) && !(k in fromIdb)) {
+          const v = window.localStorage.getItem(k);
+          if (v !== null) fromIdb[k] = v;
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return fromIdb;
+}
+
+/** ¿Hay datos viejos del comercio en este dispositivo que todavía no se importaron? */
+export async function hasPendingLegacyDeviceData(businessId: string | null): Promise<boolean> {
+  if (!businessId || readDeviceStorage(`${LEGACY_IMPORT_DONE_KEY}_${businessId}`)) return false;
+  const legacy = await readLegacyDeviceData();
+  const raw = legacy[`saas_distribuidora_data_v2_${businessId}`];
+  if (!raw) return false;
+  try {
+    const data = JSON.parse(raw);
+    return ['clients', 'boletas', 'paidBoletas', 'catalogProducts', 'catalogOrders'].some(
+      (k) => Array.isArray(data?.[k]) && data[k].length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Sube a Supabase los datos viejos de este dispositivo sin pisar nada existente */
+export async function importLegacyDeviceData(businessId: string): Promise<{ inserted: number }> {
+  const legacy = await readLegacyDeviceData();
+  const raw = legacy[`saas_distribuidora_data_v2_${businessId}`];
+  if (!raw) return { inserted: 0 };
+  const res = await importLegacyEntries({ [`saas_distribuidora_data_v2_${businessId}`]: raw });
+  writeDeviceStorage(`${LEGACY_IMPORT_DONE_KEY}_${businessId}`, new Date().toISOString());
+  return { inserted: res.inserted };
+}
+
+export function dismissLegacyDeviceImport(businessId: string): void {
+  writeDeviceStorage(`${LEGACY_IMPORT_DONE_KEY}_${businessId}`, `dismissed-${new Date().toISOString()}`);
+}
+
+// -----------------------------------------------------------------------------
+// Exportación CSV (sin cambios de comportamiento)
+// -----------------------------------------------------------------------------
 
 export function downloadTenantCsvBackup(tenantId?: string, companyName = 'Empresa'): {
   filename: string;
@@ -515,24 +475,12 @@ export function downloadTenantCsvBackup(tenantId?: string, companyName = 'Empres
   let boletas: any[] = [];
   let paidBoletas: any[] = [];
   let clients: any[] = [];
-
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
       boletas = Array.isArray(parsed?.boletas) ? parsed.boletas : [];
       paidBoletas = Array.isArray(parsed?.paidBoletas) ? parsed.paidBoletas : [];
       clients = Array.isArray(parsed?.clients) ? parsed.clients : [];
-    } catch {
-      // ignore
-    }
-  } else {
-    try {
-      const pRaw = dbGetItem('distribuidora_boletas_v2_zero');
-      const paidRaw = dbGetItem('distribuidora_paid_boletas_v2_zero');
-      const cRaw = dbGetItem('distribuidora_clients_v2_zero');
-      if (pRaw) boletas = JSON.parse(pRaw);
-      if (paidRaw) paidBoletas = JSON.parse(paidRaw);
-      if (cRaw) clients = JSON.parse(cRaw);
     } catch {
       // ignore
     }
@@ -576,7 +524,7 @@ export function downloadTenantCsvBackup(tenantId?: string, companyName = 'Empres
     ),
   ];
 
-  const content = '\uFEFF' + csvLines.join('\n');
+  const content = '﻿' + csvLines.join('\n');
   const dateTag = new Date().toISOString().split('T')[0];
   const safeName = companyName.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 32) || 'Cobranzas';
   const filename = `Respaldo_${safeName}_${dateTag}.csv`;

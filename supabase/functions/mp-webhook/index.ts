@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { readKeyRow, writeKey } from '../_shared/legacyStore.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,26 +39,9 @@ async function verifyWebhookSignature(req: Request, dataId: string, secret: stri
   return expectedHex === v1;
 }
 
-async function upsertCloudKey(supabase: ReturnType<typeof createClient>, key: string, value: unknown) {
-  const now = new Date().toISOString();
-  const { data: updated } = await supabase
-    .from('app_cloud_store')
-    .update({ value, updated_at: now })
-    .eq('key', key)
-    .select('key');
-  if (!updated || updated.length === 0) {
-    const { error } = await supabase.from('app_cloud_store').insert({
-      key,
-      value,
-      updated_at: now,
-    });
-    if (error?.code === '23505') {
-      await supabase
-        .from('app_cloud_store')
-        .update({ value, updated_at: now })
-        .eq('key', key);
-    }
-  }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function upsertCloudKey(supabase: any, key: string, value: unknown) {
+  await writeKey(supabase as any, key, value);
 }
 
 Deno.serve(async (req) => {
@@ -121,22 +105,14 @@ Deno.serve(async (req) => {
     // Resolver Access Token del comercio o de plataforma
     let accessToken = '';
     if ((scopeParam === 'client_order' || scopeParam === 'catalog_order') && tenantIdParam) {
-      const { data: merchantRow } = await supabase
-        .from('app_cloud_store')
-        .select('value')
-        .eq('key', `merchant_mp_token_${tenantIdParam}`)
-        .maybeSingle();
+      const { data: merchantRow } = await readKeyRow(supabase, `merchant_mp_token_${tenantIdParam}`);
       accessToken = String(merchantRow?.value?.accessToken || '').trim();
     }
     if (!accessToken) {
       accessToken = (Deno.env.get('MERCADOPAGO_ACCESS_TOKEN') || '').trim();
     }
     if (!accessToken) {
-      const { data: secretRow } = await supabase
-        .from('app_cloud_store')
-        .select('value')
-        .eq('key', 'rec:secret:platform_mp_access_token')
-        .maybeSingle();
+      const { data: secretRow } = await readKeyRow(supabase, 'rec:secret:platform_mp_access_token');
       accessToken = String(secretRow?.value?.accessToken || '').trim();
     }
 
@@ -173,11 +149,7 @@ Deno.serve(async (req) => {
     if (extRef.startsWith('cpay::') || (scopeParam === 'client_order' && tokenParam)) {
       const orderToken = extRef.startsWith('cpay::') ? extRef.slice('cpay::'.length) : tokenParam;
       const orderKey = `client_payment_order_${orderToken}`;
-      const { data: orderRow } = await supabase
-        .from('app_cloud_store')
-        .select('value')
-        .eq('key', orderKey)
-        .maybeSingle();
+      const { data: orderRow } = await readKeyRow(supabase, orderKey);
 
       if (orderRow?.value) {
         const updatedOrder = {
@@ -216,11 +188,7 @@ Deno.serve(async (req) => {
     if (extRef.startsWith('catord::') || (scopeParam === 'catalog_order' && orderIdParam)) {
       const resolvedOrderId = extRef.startsWith('catord::') ? extRef.slice('catord::'.length) : orderIdParam;
       const publicOrderKey = `catalog_order_${resolvedOrderId}`;
-      const { data: orderRow } = await supabase
-        .from('app_cloud_store')
-        .select('value')
-        .eq('key', publicOrderKey)
-        .maybeSingle();
+      const { data: orderRow } = await readKeyRow(supabase, publicOrderKey);
 
       if (orderRow?.value) {
         const prev = orderRow.value;
@@ -273,11 +241,7 @@ Deno.serve(async (req) => {
 
         await upsertCloudKey(supabase, entityKey, verifiedRecord);
 
-        const { data: mapRow } = await supabase
-          .from('app_cloud_store')
-          .select('value')
-          .eq('key', 'saas_verified_tenant_payments_v1')
-          .maybeSingle();
+        const { data: mapRow } = await readKeyRow(supabase, 'saas_verified_tenant_payments_v1');
 
         const currentMap = mapRow?.value && typeof mapRow.value === 'object' ? mapRow.value : {};
         await upsertCloudKey(supabase, 'saas_verified_tenant_payments_v1', {

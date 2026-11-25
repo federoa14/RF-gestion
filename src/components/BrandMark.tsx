@@ -6,6 +6,8 @@ interface BrandMarkProps {
   icon?: string;
   name?: string;
   size?: 'sm' | 'md' | 'lg';
+  // Sin logo subido: muestra la inicial del comercio en lugar del emblema genérico
+  initialFallback?: boolean;
 }
 
 /**
@@ -17,6 +19,7 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
   icon = 'shield',
   name = 'Distribuidora',
   size = 'md',
+  initialFallback = false,
 }) => {
   const sizeClasses =
     size === 'sm'
@@ -42,6 +45,20 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
           referrerPolicy="no-referrer"
           className={`w-full h-full object-cover ${!logoUrl ? 'scale-[1.06]' : ''}`}
         />
+      </div>
+    );
+  }
+
+  const initial = (name || '').trim().charAt(0).toUpperCase();
+  if (!logoUrl && initialFallback && initial) {
+    const textSize = size === 'sm' ? 'text-base' : size === 'lg' ? 'text-2xl' : 'text-lg';
+    return (
+      <div
+        className={`${sizeClasses} bg-[#0B1933] text-white border border-white/20 shadow-xs shrink-0 flex items-center justify-center font-black ${textSize}`}
+        role="img"
+        aria-label={name}
+      >
+        {initial}
       </div>
     );
   }

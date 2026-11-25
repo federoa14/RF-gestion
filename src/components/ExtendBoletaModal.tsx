@@ -146,7 +146,7 @@ export const ExtendBoletaModal: React.FC<ExtendBoletaModalProps> = ({
             <div className="flex items-center gap-2">
               <span className="text-xs text-slate-500">O ingresar otra cantidad:</span>
               <input
-                type="number"
+                type="number" inputMode="decimal"
                 min="1"
                 max="90"
                 placeholder="Ej. 15"

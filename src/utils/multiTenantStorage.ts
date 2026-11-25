@@ -38,17 +38,20 @@ import {
   loadAutoDispatchLogs,
   loadRendiciones,
 } from './storage';
-import { purgeExpiredBoletas } from './retentionPurge';
-import { dbGetItem, dbSetItem, dbRemoveItem, syncKeysFromCloud } from './localInternalDb';
-import { flushSupabaseSync, isCloudHydrated } from './supabaseSync';
 import {
-  deletePlatformAnnouncementFromSupabaseTable,
-  mirrorPlatformAnnouncementToSupabaseTable,
-  mirrorPlatformBillingToSupabaseTable,
-  mirrorPlatformSupportToSupabaseTable,
-  savePlatformMpAccessTokenSecret,
-} from './supabaseServices';
-import { getSupabaseClient } from './supabaseClient';
+  dbGetItem,
+  dbSetItem,
+  dbRemoveItem,
+  syncKeysFromCloud,
+  applyExternalSyncedRecord,
+  loadProfileForUser,
+  startCloudSession,
+  endCloudSession,
+} from './localInternalDb';
+import { flushSupabaseSync, describeCloudError, getCloudSession, getAuthUserIdForPlatformUser } from './supabaseSync';
+import { savePlatformMpAccessTokenSecret } from './supabaseServices';
+import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
+import { syntheticEmailFor } from './authEmail';
 
 export { flushSupabaseSync };
 
@@ -154,35 +157,8 @@ purgeLegacyTenantKeys();
 // INITIAL TENANTS - CLEAN EMPTY LIST (NO DEMO COMPANIES)
 export const INITIAL_TENANTS: Tenant[] = [];
 
-// INITIAL USERS - ONLY SYSTEM SUPERADMINS (NO DEMO TENANT USERS)
-export const INITIAL_USERS: PlatformUser[] = [
-  {
-    id: 'usr-superadmin',
-    username: 'admin',
-    password: 'admin123',
-    fullName: 'Federico Roa',
-    email: 'federoa14@gmail.com',
-    phone: '+54 9 11 3290-8811',
-    role: 'superadmin',
-    tenantId: 'all',
-    tenantCode: 'MASTER',
-    createdAt: new Date().toISOString().split('T')[0],
-    active: true,
-  },
-  {
-    id: 'usr-federoa',
-    username: 'federoa',
-    password: '123456',
-    fullName: 'Federico Roa (Maestro)',
-    email: 'federoa14@gmail.com',
-    phone: '+54 9 11 3290-8811',
-    role: 'superadmin',
-    tenantId: 'all',
-    tenantCode: 'MASTER',
-    createdAt: new Date().toISOString().split('T')[0],
-    active: true,
-  },
-];
+// Los usuarios viven en Supabase Auth: no hay usuarios ni contraseñas escritos en el código.
+export const INITIAL_USERS: PlatformUser[] = [];
 
 // Complete Tenant Data structure for isolation
 export interface TenantData {
@@ -281,44 +257,17 @@ export async function syncTenantDataFromSupabase(tenantId: string): Promise<bool
 }
 
 export async function fetchPlatformBillingConfigFromServer(): Promise<PlatformBillingConfig> {
-  await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_BILLING]);
-  const current = loadPlatformBillingConfig();
+  // Lectura pública (también sirve en la pantalla de login y en los links de pago)
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data } = await supabase
-        .from('platform_billing_config')
-        .select(
-          'alias, cvu, account_holder_name, bank_or_wallet_name, default_monthly_fee, annual_discount_percent, mp_checkout_link, mp_public_key, has_mp_access_token, updated_at'
-        )
-        .eq('id', 'default')
-        .maybeSingle();
-      if (data) {
-        const srvUpdated = String(data.updated_at || '');
-        const curUpdated = current.updatedAt || '';
-        if (!curUpdated || (srvUpdated && srvUpdated > curUpdated)) {
-          const merged: PlatformBillingConfig = {
-            ...current,
-            alias: data.alias ?? current.alias,
-            cvu: data.cvu ?? current.cvu,
-            accountHolderName: data.account_holder_name ?? current.accountHolderName,
-            bankOrWalletName: data.bank_or_wallet_name ?? current.bankOrWalletName,
-            defaultMonthlyFee: Number(data.default_monthly_fee ?? current.defaultMonthlyFee),
-            annualDiscountPercent: Number(data.annual_discount_percent ?? current.annualDiscountPercent ?? 0),
-            mpCheckoutLink: data.mp_checkout_link ?? current.mpCheckoutLink,
-            mpPublicKey: data.mp_public_key ?? current.mpPublicKey,
-            hasMpAccessToken: Boolean(data.has_mp_access_token ?? current.hasMpAccessToken),
-            updatedAt: srvUpdated || current.updatedAt,
-          };
-          savePlatformBillingConfig(merged);
-          return merged;
-        }
-      }
+      const { data } = await supabase.from('platform_settings').select('value').eq('key', 'billing').maybeSingle();
+      if (data?.value) applyExternalSyncedRecord(STORAGE_KEYS.PLATFORM_BILLING, JSON.stringify(data.value));
     } catch {
-      // app_cloud_store remains authoritative
+      // Sin conexión: se usa lo último cargado
     }
   }
-  return current;
+  return loadPlatformBillingConfig();
 }
 
 export async function persistPlatformBillingConfigToServer(
@@ -334,7 +283,6 @@ export async function persistPlatformBillingConfigToServer(
   await Promise.all([
     mpAccessToken?.trim() ? savePlatformMpAccessTokenSecret(mpAccessToken.trim()) : Promise.resolve(false),
     flushSupabaseSync(),
-    mirrorPlatformBillingToSupabaseTable(nextConfig),
   ]);
   return loadPlatformBillingConfig();
 }
@@ -370,45 +318,23 @@ export function savePlatformSupportConfig(config: PlatformSupportConfig): void {
 }
 
 export async function fetchPlatformSupportConfigFromServer(): Promise<PlatformSupportConfig> {
-  await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_SUPPORT]);
-  const current = loadPlatformSupportConfig();
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data } = await supabase
-        .from('platform_support_config')
-        .select('contact_name, whatsapp_phone, email, attention_hours, welcome_message, updated_at')
-        .eq('id', 'default')
-        .maybeSingle();
-      if (data) {
-        const srvUpdated = String(data.updated_at || '');
-        const curUpdated = current.updatedAt || '';
-        if (!curUpdated || (srvUpdated && srvUpdated > curUpdated)) {
-          const merged: PlatformSupportConfig = {
-            ...current,
-            contactName: data.contact_name ?? current.contactName,
-            whatsappPhone: data.whatsapp_phone ?? current.whatsappPhone,
-            email: data.email ?? current.email,
-            attentionHours: data.attention_hours ?? current.attentionHours,
-            welcomeMessage: data.welcome_message ?? current.welcomeMessage,
-            updatedAt: srvUpdated || current.updatedAt,
-          };
-          savePlatformSupportConfig(merged);
-          return merged;
-        }
-      }
+      const { data } = await supabase.from('platform_settings').select('value').eq('key', 'support').maybeSingle();
+      if (data?.value) applyExternalSyncedRecord(STORAGE_KEYS.PLATFORM_SUPPORT, JSON.stringify(data.value));
     } catch {
-      // app_cloud_store remains authoritative
+      // Sin conexión: se usa lo último cargado
     }
   }
-  return current;
+  return loadPlatformSupportConfig();
 }
 
 export async function persistPlatformSupportConfigToServer(
   config: PlatformSupportConfig
 ): Promise<PlatformSupportConfig> {
   savePlatformSupportConfig(config);
-  await Promise.all([flushSupabaseSync(), mirrorPlatformSupportToSupabaseTable(config)]);
+  await flushSupabaseSync();
   return loadPlatformSupportConfig();
 }
 
@@ -438,37 +364,8 @@ export async function fetchPlatformAnnouncementsFromServer(params?: {
   onlyActive?: boolean;
   audience?: string;
 }): Promise<PlatformAnnouncement[]> {
-  await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_ANNOUNCEMENTS]);
-  let local = loadPlatformAnnouncements();
-
-  const supabase = getSupabaseClient();
-  if (supabase && local.length === 0) {
-    try {
-      const { data } = await supabase
-        .from('platform_announcements')
-        .select('id, title, message, category, audience, cta_type, cta_label, cta_url, active, created_at, expires_at, author_name')
-        .order('created_at', { ascending: false });
-      if (Array.isArray(data) && data.length > 0) {
-        local = data.map((row) => ({
-          id: String(row.id),
-          title: String(row.title || ''),
-          message: String(row.message || ''),
-          category: row.category || 'novedad',
-          audience: row.audience || 'all',
-          ctaType: row.cta_type || 'none',
-          ctaLabel: row.cta_label || '',
-          ctaUrl: row.cta_url || '',
-          active: Boolean(row.active),
-          createdAt: String(row.created_at || new Date().toISOString()),
-          expiresAt: row.expires_at || undefined,
-          authorName: row.author_name || undefined,
-        }));
-        savePlatformAnnouncements(local);
-      }
-    } catch {
-      // app_cloud_store remains authoritative
-    }
-  }
+  if (getCloudSession()) await syncKeysFromCloud([STORAGE_KEYS.PLATFORM_ANNOUNCEMENTS]);
+  const local = loadPlatformAnnouncements();
 
   if (!params?.onlyActive && !params?.audience) return local;
   const today = new Date().toISOString().split('T')[0];
@@ -494,10 +391,7 @@ export async function savePlatformAnnouncementToServer(
     ? current.map((x) => (x.id === newItem.id ? newItem : x))
     : [newItem, ...current];
   savePlatformAnnouncements(updated);
-  await Promise.all([
-    flushSupabaseSync(),
-    mirrorPlatformAnnouncementToSupabaseTable(newItem),
-  ]);
+  await flushSupabaseSync();
   return updated;
 }
 
@@ -507,21 +401,14 @@ export async function togglePlatformAnnouncementOnServer(
 ): Promise<PlatformAnnouncement[]> {
   const updated = loadPlatformAnnouncements().map((x) => (x.id === id ? { ...x, active } : x));
   savePlatformAnnouncements(updated);
-  const target = updated.find((x) => x.id === id);
-  await Promise.all([
-    flushSupabaseSync(),
-    target ? mirrorPlatformAnnouncementToSupabaseTable(target) : Promise.resolve(),
-  ]);
+  await flushSupabaseSync();
   return updated;
 }
 
 export async function deletePlatformAnnouncementFromServer(id: string): Promise<PlatformAnnouncement[]> {
   const updated = loadPlatformAnnouncements().filter((x) => x.id !== id);
   savePlatformAnnouncements(updated);
-  await Promise.all([
-    flushSupabaseSync(),
-    deletePlatformAnnouncementFromSupabaseTable(id),
-  ]);
+  await flushSupabaseSync();
   return updated;
 }
 
@@ -562,7 +449,7 @@ export function loadPlatformUsers(): PlatformUser[] {
     const raw = dbGetItem(STORAGE_KEYS.USERS);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch (e) {
     console.warn('Error reading users from internal db', e);
@@ -594,7 +481,8 @@ export function getCurrentSessionUser(): PlatformUser | null {
 export function setCurrentSessionUser(user: PlatformUser | null): void {
   try {
     if (user) {
-      dbSetItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      // Nunca se guarda la contraseña en el dispositivo
+      dbSetItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({ ...user, password: '' }));
     } else {
       dbRemoveItem(STORAGE_KEYS.CURRENT_USER);
     }
@@ -701,23 +589,7 @@ export function loadTenantData(tenantId: string): TenantData {
     };
   }
 
-  // REGLA DE RETENCIÓN DE 30 DÍAS:
-  // Purgar boletas mayores a 30 días y preservar el perfil crediticio permanente de los clientes
-  if (data && isCloudHydrated()) {
-    const purgeResult = purgeExpiredBoletas(data.boletas || [], data.paidBoletas || [], data.clients || []);
-    if (purgeResult.totalPurged > 0) {
-      data.boletas = purgeResult.survivingBoletas;
-      data.paidBoletas = purgeResult.survivingPaidBoletas;
-      data.clients = purgeResult.updatedClients;
-      data.config = {
-        ...data.config,
-        totalPurgedBoletasCount: (data.config.totalPurgedBoletasCount || 0) + purgeResult.totalPurged,
-        lastRetentionPurgeDate: new Date().toISOString().split('T')[0],
-      };
-      saveTenantData(tenantId, data);
-      console.log(`[RETENCIÓN 30 DÍAS] Purgadas ${purgeResult.totalPurged} boletas (>30 días) para distribuidora ${tenantId}. Clientes problemáticos actualizados.`);
-    }
-  }
+  // La regla de retención de 30 días ahora corre en el servidor (run_retention_purge en Supabase).
 
   return data;
 }
@@ -731,53 +603,198 @@ export function saveTenantData(tenantId: string, data: TenantData): void {
   }
 }
 
-// USER AUTHENTICATION & MULTI-TENANT RESOLVER
-export function authenticateUser(
+// USER AUTHENTICATION & MULTI-TENANT RESOLVER (Supabase Auth)
+export interface AuthResult {
+  success: boolean;
+  user?: PlatformUser;
+  tenant?: Tenant;
+  error?: string;
+  pendingConfirmation?: boolean;
+}
+
+const PENDING_REGISTRATION_PREFIX = 'rf_pending_registration_';
+
+function translateAuthError(message?: string): string {
+  const m = (message || '').toLowerCase();
+  if (m.includes('invalid login') || m.includes('invalid credentials')) return 'Usuario o contraseña incorrectos.';
+  if (m.includes('email not confirmed')) return 'Todavía no confirmaste tu email. Revisá tu correo (y la carpeta de spam).';
+  if (m.includes('already registered') || m.includes('already been registered') || m.includes('user already exists')) {
+    return 'Ese email ya tiene una cuenta. Probá iniciar sesión o recuperar tu clave.';
+  }
+  if (m.includes('password') && (m.includes('6') || m.includes('short') || m.includes('weak'))) {
+    return 'La contraseña es muy corta: usá al menos 6 caracteres.';
+  }
+  if (m.includes('rate limit') || m.includes('too many')) return 'Demasiados intentos. Esperá unos minutos y volvé a probar.';
+  if (m.includes('failed to fetch') || m.includes('network')) return 'Sin conexión a internet. Revisá tu conexión y volvé a intentar.';
+  return message ? `No se pudo iniciar sesión: ${message}` : 'No se pudo iniciar sesión. Intentá nuevamente.';
+}
+
+/** Después de autenticar en Supabase: carga perfil y datos, y devuelve usuario + comercio */
+async function finishLogin(userId: string, email: string | null, tenantCodeInput?: string): Promise<AuthResult> {
+  const supabase = getSupabaseClient()!;
+  let profile = await loadProfileForUser(userId);
+
+  // Alta de prueba que quedó esperando la confirmación del email
+  if (!profile && email) {
+    const pendingRaw = dbGetItem(`${PENDING_REGISTRATION_PREFIX}${email.toLowerCase()}`);
+    if (pendingRaw) {
+      const pending = JSON.parse(pendingRaw);
+      await createTrialBusinessOnServer(pending);
+      dbRemoveItem(`${PENDING_REGISTRATION_PREFIX}${email.toLowerCase()}`);
+      profile = await loadProfileForUser(userId);
+      if (profile) {
+        await startCloudSession(profile);
+        if (pending.tenantData && profile.businessId) saveTenantData(profile.businessId, pending.tenantData);
+        await flushSupabaseSync();
+        return buildLoginResult(profile);
+      }
+    }
+  }
+
+  if (!profile) {
+    await supabase.auth.signOut().catch(() => null);
+    return { success: false, error: 'Tu usuario no tiene un comercio asignado. Contactá al administrador.' };
+  }
+  if (!profile.active) {
+    await supabase.auth.signOut().catch(() => null);
+    return { success: false, error: 'Tu usuario está desactivado. Contactá al dueño o al administrador.' };
+  }
+
+  await startCloudSession(profile);
+  const result = buildLoginResult(profile);
+  const cleanCode = tenantCodeInput?.trim().toUpperCase();
+  if (result.success && cleanCode && profile.role !== 'superadmin' && result.tenant?.tenantCode?.toUpperCase() !== cleanCode) {
+    await endCloudSession();
+    return { success: false, error: `El usuario no pertenece a la empresa ${cleanCode}.` };
+  }
+  return result;
+}
+
+function buildLoginResult(profile: { userId: string; role: PlatformUser['role']; businessId: string | null; legacyUserId: string | null; fullName: string; email: string | null; username: string | null; phone: string | null }): AuthResult {
+  const visibleId = profile.legacyUserId || profile.userId;
+  const user =
+    loadPlatformUsers().find((u) => u.id === visibleId) ||
+    ({
+      id: visibleId,
+      username: profile.username || '',
+      password: '',
+      fullName: profile.fullName,
+      email: profile.email || '',
+      phone: profile.phone || '',
+      role: profile.role,
+      tenantId: profile.businessId || 'all',
+      createdAt: new Date().toISOString().slice(0, 10),
+      active: true,
+    } as PlatformUser);
+  if (profile.role === 'superadmin') return { success: true, user };
+  const tenant = loadTenants().find((t) => t.id === profile.businessId);
+  if (!tenant) return { success: false, error: 'No encontramos la empresa asignada a tu usuario.' };
+  return { success: true, user, tenant };
+}
+
+/**
+ * Inicio de sesión: con email, o con usuario + código de empresa.
+ * (Permite entrar aunque la empresa esté pausada para que App muestre la pantalla de reactivación.)
+ */
+export async function authenticateUser(
   usernameOrEmail: string,
   pass: string,
   tenantCodeInput?: string
-): { success: boolean; user?: PlatformUser; tenant?: Tenant; error?: string } {
+): Promise<AuthResult> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !isSupabaseConfigured()) {
+    return { success: false, error: 'La app no está conectada a Supabase. Revisá las variables VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY.' };
+  }
+  const identifier = usernameOrEmail.trim();
+  const password = pass.trim();
+  try {
+    let userId: string | undefined;
+    let email: string | null = null;
+    if (identifier.includes('@')) {
+      const { data, error } = await supabase.auth.signInWithPassword({ email: identifier.toLowerCase(), password });
+      if (error) return { success: false, error: translateAuthError(error.message) };
+      userId = data.user?.id;
+      email = data.user?.email || null;
+    } else {
+      // Usuario + código de empresa: lo resuelve el servidor sin exponer emails
+      const { data, error } = await supabase.functions.invoke('auth-login', {
+        body: { username: identifier, tenantCode: tenantCodeInput?.trim() || '', password },
+      });
+      if (error || !data?.access_token) {
+        let message = data?.error;
+        try {
+          const ctx = (error as any)?.context;
+          if (!message && ctx && typeof ctx.json === 'function') message = (await ctx.json())?.error;
+        } catch {
+          // ignore
+        }
+        return { success: false, error: message || translateAuthError(error?.message) };
+      }
+      const { data: sess, error: sessErr } = await supabase.auth.setSession({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+      });
+      if (sessErr) return { success: false, error: translateAuthError(sessErr.message) };
+      userId = sess.user?.id;
+      email = sess.user?.email || null;
+    }
+    if (!userId) return { success: false, error: 'No se pudo iniciar sesión. Intentá nuevamente.' };
+    return await finishLogin(userId, email, tenantCodeInput);
+  } catch (err) {
+    return { success: false, error: describeCloudError(err) };
+  }
+}
+
+/**
+ * Al abrir la app con una sesión de Supabase ya guardada: deja el usuario de la app
+ * alineado con el perfil real (o lo borra si no hay sesión).
+ */
+export function restoreSessionUserFromCloud(): void {
+  const cloud = getCloudSession();
+  if (!cloud) {
+    setCurrentSessionUser(null);
+    return;
+  }
+  const visible = loadPlatformUsers().find((u) => u.id === (getAuthUserVisibleId(cloud.userId) || cloud.userId));
+  if (visible) {
+    setCurrentSessionUser(visible);
+    if (cloud.businessId) setActiveTenantId(cloud.businessId);
+  }
+}
+
+function getAuthUserVisibleId(authId: string): string | undefined {
+  // El id visible es el legacy_user_id si existe; se busca en la lista cargada
   const users = loadPlatformUsers();
-  const tenants = loadTenants();
-
-  const cleanUser = usernameOrEmail.trim().toLowerCase();
-  const cleanPass = pass.trim();
-  const cleanCode = tenantCodeInput?.trim().toUpperCase();
-
-  const matchedUser = users.find(
-    (u) =>
-      u.active &&
-      (u.username.toLowerCase() === cleanUser || u.email.toLowerCase() === cleanUser) &&
-      u.password === cleanPass
-  );
-
-  if (!matchedUser) {
-    return { success: false, error: 'Usuario o contraseña incorrectos.' };
+  for (const u of users) {
+    if (getAuthUserIdForPlatformUser(u.id) === authId) return u.id;
   }
+  return undefined;
+}
 
-  // Superadmin doesn't need tenant code
-  if (matchedUser.role === 'superadmin') {
-    return { success: true, user: matchedUser };
-  }
+/** Cierra sesión en Supabase y limpia los datos de la memoria */
+export async function logoutUser(): Promise<void> {
+  setCurrentSessionUser(null);
+  await endCloudSession();
+}
 
-  // Find tenant by user's assigned tenantId or tenantCode
-  let tenant = tenants.find((t) => t.id === matchedUser.tenantId || t.tenantCode === matchedUser.tenantCode);
+/** Envía el email de recuperación de contraseña (Supabase Auth) */
+export async function requestPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { success: false, error: 'La app no está conectada a Supabase.' };
+  const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/?recuperar=1` : undefined;
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), { redirectTo });
+  if (error) return { success: false, error: translateAuthError(error.message) };
+  return { success: true };
+}
 
-  // If user provided a specific tenant code, verify it matches
-  if (cleanCode && tenant && tenant.tenantCode !== cleanCode) {
-    return { success: false, error: `El usuario no pertenece a la distribuidora ${cleanCode}.` };
-  }
-
-  if (!tenant && cleanCode) {
-    tenant = tenants.find((t) => t.tenantCode === cleanCode);
-  }
-
-  if (!tenant) {
-    return { success: false, error: 'Distribuidora no encontrada o inactiva.' };
-  }
-
-  // Permitimos iniciar sesión aunque esté pausada para que App.tsx muestre la pantalla de Cuenta Pausada con botón de Pago/Reactivación
-  return { success: true, user: matchedUser, tenant };
+/** Guarda la nueva contraseña cuando el usuario vuelve desde el link del email */
+export async function completePasswordReset(newPassword: string): Promise<{ success: boolean; error?: string }> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { success: false, error: 'La app no está conectada a Supabase.' };
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) return { success: false, error: translateAuthError(error.message) };
+  await supabase.auth.signOut().catch(() => null);
+  return { success: true };
 }
 
 export interface SelfTrialRegistrationInput {
@@ -801,9 +818,9 @@ export interface SelfTrialRegistrationInput {
  * Autoregistro público de una nueva distribuidora con prueba gratuita de 30 días.
  * Se incorpora instantáneamente a la gestión del SuperAdmin en la pestaña "A Prueba".
  */
-export function registerSelfServiceTrialTenant(
+function buildTrialRegistration(
   input: SelfTrialRegistrationInput
-): { success: boolean; user?: PlatformUser; tenant?: Tenant; error?: string } {
+): { success: boolean; user?: PlatformUser; tenant?: Tenant; tenantData?: TenantData; error?: string } {
   const companyName = input.companyName.trim();
   const ownerName = input.ownerName.trim();
   const cleanUsername = input.username.trim().toLowerCase();
@@ -825,50 +842,24 @@ export function registerSelfServiceTrialTenant(
     };
   }
 
-  if (cleanPassword.length < 4) {
+  if (cleanPassword.length < 6) {
     return {
       success: false,
-      error: 'La contraseña debe tener al menos 4 caracteres.',
+      error: 'La contraseña debe tener al menos 6 caracteres.',
     };
   }
 
-  if (cleanEmail && !cleanEmail.includes('@')) {
+  if (!cleanEmail || !cleanEmail.includes('@')) {
     return {
       success: false,
-      error: 'El correo electrónico ingresado no es válido.',
+      error: 'Ingresá un correo electrónico válido: lo vas a necesitar para confirmar la cuenta y recuperar tu clave.',
     };
   }
 
-  const users = loadPlatformUsers();
-  const tenants = loadTenants();
-
-  if (users.some((u) => u.username.toLowerCase() === cleanUsername)) {
-    return {
-      success: false,
-      error: `El usuario "${cleanUsername}" ya está registrado. Elegí otro nombre de usuario.`,
-    };
-  }
-
-  if (cleanEmail && users.some((u) => u.email && u.email.toLowerCase() === cleanEmail)) {
-    return {
-      success: false,
-      error: `El correo "${cleanEmail}" ya tiene una cuenta asociada. Probá iniciar sesión o recuperar tu clave.`,
-    };
-  }
-
+  // El código de empresa lo valida el servidor (único); si no se eligió, se genera uno al azar.
   let tenantCode = (input.optionalTenantCode || '').trim().toUpperCase();
   if (!tenantCode) {
-    // Generar próximo código secuencial DIST-00X disponible
-    let seq = tenants.length + 1;
-    do {
-      tenantCode = `DIST-${String(seq).padStart(3, '0')}`;
-      seq++;
-    } while (tenants.some((t) => t.tenantCode.toUpperCase() === tenantCode));
-  } else if (tenants.some((t) => t.tenantCode.toUpperCase() === tenantCode)) {
-    return {
-      success: false,
-      error: `El código de empresa "${tenantCode}" ya está en uso.`,
-    };
+    tenantCode = `EMP-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
   }
 
   const now = new Date();
@@ -974,8 +965,8 @@ export function registerSelfServiceTrialTenant(
         ]
       : [];
 
-  // Inicializar espacio privado limpio con el dueño cargado para cierres del día y alertas
-  saveTenantData(newTenantId, {
+  // Espacio privado inicial con el dueño cargado para cierres del día y alertas
+  const tenantData: TenantData = {
     config: newConfig,
     clients: [],
     salespeople: initialSalespeople,
@@ -1020,12 +1011,93 @@ export function registerSelfServiceTrialTenant(
     catalogLoyaltyAccounts: [],
     catalogAbandonedCarts: [],
     catalogGiftCards: [],
+  };
+
+  return { success: true, user: newUser, tenant: newTenant, tenantData };
+}
+
+async function createTrialBusinessOnServer(payload: {
+  tenant: Tenant;
+  tenantData: TenantData;
+  user: PlatformUser;
+}): Promise<string> {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('La app no está conectada a Supabase.');
+  const { data, error } = await supabase.rpc('register_trial_business', {
+    p_business: payload.tenant,
+    p_settings: { config: payload.tenantData.config, catalogSettings: payload.tenantData.catalogSettings },
+    p_profile: { username: payload.user.username, fullName: payload.user.fullName, phone: payload.user.phone },
   });
+  if (error) throw error;
+  return String(data);
+}
 
-  saveTenants([...tenants, newTenant]);
-  savePlatformUsers([...users, newUser]);
+/**
+ * Autoregistro público de una nueva empresa con prueba gratuita de 30 días.
+ * Crea la cuenta en Supabase Auth y el comercio en el servidor.
+ * Si Supabase pide confirmar el email, el comercio se crea en el primer inicio de sesión.
+ */
+export async function registerSelfServiceTrialTenant(input: SelfTrialRegistrationInput): Promise<AuthResult> {
+  const supabase = getSupabaseClient();
+  if (!supabase || !isSupabaseConfigured()) {
+    return { success: false, error: 'La app no está conectada a Supabase.' };
+  }
+  const built = buildTrialRegistration(input);
+  if (!built.success || !built.tenant || !built.user || !built.tenantData) {
+    return { success: false, error: built.error };
+  }
+  const email = built.user.email.toLowerCase();
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: input.password.trim(),
+      options: {
+        emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+        data: { username: built.user.username, full_name: built.user.fullName },
+      },
+    });
+    if (error) return { success: false, error: translateAuthError(error.message) };
 
-  return { success: true, user: newUser, tenant: newTenant };
+    const payload = { tenant: built.tenant, tenantData: built.tenantData, user: built.user };
+    if (!data.session || !data.user) {
+      dbSetItem(`${PENDING_REGISTRATION_PREFIX}${email}`, JSON.stringify(payload));
+      return {
+        success: false,
+        pendingConfirmation: true,
+        error: `Te enviamos un correo a ${email}. Confirmá tu email y después iniciá sesión: tu empresa se crea en ese momento.`,
+      };
+    }
+
+    let attempts = 0;
+    for (;;) {
+      try {
+        await createTrialBusinessOnServer(payload);
+        break;
+      } catch (err: any) {
+        attempts += 1;
+        const msg = String(err?.message || '');
+        if (attempts < 3 && msg.includes('código de empresa') && !input.optionalTenantCode) {
+          payload.tenant = { ...payload.tenant, tenantCode: `EMP-${Math.random().toString(36).slice(2, 7).toUpperCase()}` };
+          continue;
+        }
+        return { success: false, error: msg || 'No se pudo crear la empresa.' };
+      }
+    }
+    return await finishLoginAfterRegistration(data.user.id, payload.tenantData);
+  } catch (err) {
+    return { success: false, error: describeCloudError(err) };
+  }
+}
+
+async function finishLoginAfterRegistration(userId: string, tenantData: TenantData): Promise<AuthResult> {
+  const profile = await loadProfileForUser(userId);
+  if (!profile) return { success: false, error: 'La cuenta se creó, pero no se pudo cargar el perfil. Iniciá sesión.' };
+  await startCloudSession(profile);
+  if (profile.businessId) {
+    saveTenantData(profile.businessId, { ...tenantData, config: { ...tenantData.config, tenantId: profile.businessId } });
+    await flushSupabaseSync();
+  }
+  return buildLoginResult(profile);
 }
 
 // UPDATE USER PROFILE & CREDENTIALS
@@ -1098,32 +1170,6 @@ export function syncUserProfileWithTenantAdmins(user: PlatformUser): void {
   } catch (e) {
     console.error('Error syncing user with tenant admins:', e);
   }
-}
-
-// FIND USER BY EMAIL (FOR PASSWORD RECOVERY)
-export function findUserByEmail(email: string): PlatformUser | undefined {
-  const users = loadPlatformUsers();
-  const cleanEmail = email.trim().toLowerCase();
-  return users.find((u) => u.email.toLowerCase() === cleanEmail && u.active);
-}
-
-// RESET PASSWORD BY EMAIL
-export function resetUserPasswordByEmail(email: string, newPassword: string): boolean {
-  const users = loadPlatformUsers();
-  const cleanEmail = email.trim().toLowerCase();
-  const user = users.find((u) => u.email.toLowerCase() === cleanEmail && u.active);
-  if (!user) return false;
-
-  user.password = newPassword.trim();
-  savePlatformUsers(users);
-
-  // If currently logged in, update session too
-  const current = getCurrentSessionUser();
-  if (current && current.id === user.id) {
-    setCurrentSessionUser(user);
-  }
-
-  return true;
 }
 
 /**

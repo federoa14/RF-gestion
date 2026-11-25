@@ -290,7 +290,7 @@ async function renderClientStatementCanvas(
   ctx.fillStyle = '#64748B';
   ctx.font = '600 13px "Plus Jakarta Sans", system-ui, sans-serif';
   ctx.fillText(
-    sortedPending.length === 1 ? '1 factura/cuota pendiente' : `${sortedPending.length} facturas/cuotas`,
+    sortedPending.length === 1 ? '1 boleta/cuota pendiente' : `${sortedPending.length} boletas/cuotas`,
     kpi2X + 18,
     cursorY + 96
   );

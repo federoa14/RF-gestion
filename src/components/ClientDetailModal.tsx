@@ -24,7 +24,7 @@ import { Boleta, Client, DistributorConfig } from '../types';
 import { formatCurrency, formatDateEs } from '../utils/alerts';
 import { analyzeClientPurchaseInsights } from '../utils/clientInsights';
 import { getBusinessLabels } from '../utils/businessMode';
-import { createWhatsAppUrl } from '../utils/whatsapp';
+import { createWhatsAppUrl, hasUsablePhone } from '../utils/whatsapp';
 import { createClientPaymentLink, buildClientPaymentWhatsAppHref } from '../utils/clientPaymentLinks';
 
 interface ClientDetailModalProps {
@@ -148,10 +148,15 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     <span>{client.address ? `${client.address} (${client.zone})` : client.zone}</span>
                   </span>
                 )}
-                {client.phone && (
+                {hasUsablePhone(client.phone) ? (
                   <span className="inline-flex items-center gap-1 font-mono text-[#CBD5E1]">
                     <Phone className="w-3 h-3" />
                     <span>{client.phone}</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 italic text-[#94A3B8]">
+                    <Phone className="w-3 h-3" />
+                    <span>Sin teléfono</span>
                   </span>
                 )}
               </div>
@@ -241,7 +246,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
               </button>
             )}
 
-            {client.phone && (
+            {hasUsablePhone(client.phone) && (
               <a
                 href={createWhatsAppUrl(
                   client.phone,

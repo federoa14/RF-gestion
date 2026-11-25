@@ -56,7 +56,7 @@ export const QuickGuideModal: React.FC<QuickGuideModalProps> = ({
       },
     },
     {
-      title: 'Revisar el fiado vencido en rojo (+5 días)',
+      title: 'Revisar el fiado vencido en rojo',
       description:
         'Abrí la burbuja prioritaria con todo el dinero vencido en la calle que ya debería haberse cobrado.',
       buttonLabel: 'Abrir Burbuja de Vencidos',

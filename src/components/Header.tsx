@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
+  ChevronDown,
+  UserCircle2,
   Clock,
   AlertTriangle,
   Flame,
@@ -17,6 +19,7 @@ import { calculateAlertStatus, formatCurrency } from '../utils/alerts';
 import { getTenantSubscriptionStatus } from '../utils/tenantSubscription';
 import { getBusinessLabels } from '../utils/businessMode';
 import { BrandMark } from './BrandMark';
+import { getAlertThresholds } from '../utils/alertThresholds';
 
 interface HeaderProps {
   config: DistributorConfig;
@@ -43,7 +46,7 @@ const TAB_META: Record<string, { section: string; title: string; subtitle: strin
   boletas: {
     section: 'Cobranzas',
     title: 'Panel de Boletas',
-    subtitle: 'Control diario de facturas fiadas, vencimientos y cobros',
+    subtitle: 'Control diario de boletas fiadas, vencimientos y pagos',
   },
   impagas: {
     section: 'Cobranzas',
@@ -125,8 +128,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenUserProfile,
   onOpenSubscriptionPayModal,
 }) => {
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
-  const graceDays = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  const alertThresholds = getAlertThresholds(config);
+  const graceDays = alertThresholds.overdueGraceDays;
 
   const alertStats = pendingBoletas.reduce(
     (acc, b) => {
@@ -163,14 +168,15 @@ export const Header: React.FC<HeaderProps> = ({
   const urgentAlertsCount = alertStats.overdue + alertStats.adminAlert;
   const tabInfo = TAB_META[activeTab] || TAB_META.boletas;
   const subEval = currentTenant ? getTenantSubscriptionStatus(currentTenant) : null;
+  const showAbonoPending = Boolean(onOpenSubscriptionPayModal && subEval && !subEval.isPaidForCurrentMonth);
   const labels = getBusinessLabels(config);
 
   return (
     <header className="bg-[#0B1933] text-[#F1F5F9] border-b border-[#B6C2D2]/20 sticky top-0 z-30">
       {/* Main Top Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-16 py-2.5 flex items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-16 py-2.5 flex flex-wrap items-center justify-between gap-3">
         {/* Left Zone: Mobile Menu + Breadcrumb */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1 basis-56">
           {onOpenMobileMenu && (
             <button
               type="button"
@@ -202,48 +208,23 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="hidden sm:inline text-xs font-medium text-[#8D9CB0]">
                 {tabInfo.section} /
               </span>
-              <h1 className="text-sm sm:text-base font-bold tracking-tight text-white truncate">
+              <h1 className="text-sm sm:text-base font-bold tracking-tight text-white break-words">
                 {tabInfo.title}
               </h1>
               {activeAdmin && (
-                <span className="hidden md:inline-block text-[11px] font-medium text-[#CBD5E1] bg-[#13264A] border border-[#B6C2D2]/20 px-2 py-0.5 rounded-md">
+                <span className="hidden md:inline-block whitespace-nowrap text-[11px] font-medium text-[#CBD5E1] bg-[#13264A] border border-[#B6C2D2]/20 px-2 py-0.5 rounded-md">
                   Operador: {activeAdmin.name.split(' ')[0]}
                 </span>
               )}
-              {onOpenUserProfile ? (
-                <button
-                  type="button"
-                  onClick={onOpenUserProfile}
-                  title="Cambiar de rubro sobre la marcha o editar mi usuario"
-                  className="hidden sm:inline-flex items-center gap-1.5 text-[11px] font-mono font-bold text-[#E2E8F0] bg-[#162E59] hover:bg-[#1E3A6D] border border-[#B6C2D2]/30 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
-                >
-                  <span>Rubro: {labels.shortLabel}</span>
-                </button>
-              ) : (
-                <span className="hidden sm:inline-block text-[11px] font-mono font-bold text-[#CBD5E1] bg-[#13264A] border border-[#B6C2D2]/20 px-2 py-0.5 rounded-md">
-                  {labels.shortLabel}
-                </span>
-              )}
             </div>
-            <p className="hidden sm:block text-xs text-[#94A3B8] truncate">
+            <p className="hidden sm:block text-xs leading-snug text-[#94A3B8]">
               {tabInfo.subtitle}
             </p>
           </div>
         </div>
 
         {/* Right Zone: Primary CTAs & Account Controls */}
-        <div className="flex items-center gap-2 shrink-0">
-          {onOpenQuickGuide && (
-            <button
-              type="button"
-              onClick={onOpenQuickGuide}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-[#13264A] hover:bg-[#1B3566] text-[#CBD5E1] hover:text-white border border-[#B6C2D2]/25 transition-colors cursor-pointer"
-              title="Abrir guía rápida para saber dónde hacer cada gestión"
-            >
-              <HelpCircle className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">¿Dónde ingreso?</span>
-            </button>
-          )}
+        <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
 
           <button
             type="button"
@@ -270,45 +251,66 @@ export const Header: React.FC<HeaderProps> = ({
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#E2E8F0] hover:bg-white text-[#091428] rounded-lg text-xs font-bold border border-white/60 transition-colors cursor-pointer shadow-xs"
           >
             <PlusCircle className="w-3.5 h-3.5 text-[#0B1933]" />
-            <span>Cargar {labels.saleSingular}</span>
+            <span className="sm:hidden">Cargar</span>
+            <span className="hidden sm:inline">Cargar {labels.saleSingular.toLowerCase()}</span>
           </button>
 
-          {currentUser && (
-            <div className="flex items-center gap-1.5 border-l border-[#B6C2D2]/20 pl-2">
-              {onOpenSubscriptionPayModal && subEval && !subEval.isPaidForCurrentMonth && (
-                <button
-                  type="button"
-                  onClick={onOpenSubscriptionPayModal}
-                  title="Ver estado de abono mensual y pagar"
-                  className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold bg-[#162E59] hover:bg-[#1E3A6D] text-[#E2E8F0] border border-[#B6C2D2]/35 transition-colors cursor-pointer"
-                >
-                  <CreditCard className="w-3.5 h-3.5" />
-                  <span>Abono</span>
-                </button>
-              )}
-
-              {onOpenUserProfile && (
-                <button
-                  type="button"
-                  onClick={onOpenUserProfile}
-                  title="Editar mi usuario, cambiar contraseña o cambiar de rubro"
-                  className="p-2 sm:px-2.5 sm:py-2 rounded-lg bg-[#13264A] hover:bg-[#1B3566] text-[#CBD5E1] hover:text-white border border-[#B6C2D2]/20 transition-colors inline-flex items-center gap-1.5 text-xs font-medium cursor-pointer"
-                >
-                  <KeyRound className="w-3.5 h-3.5" />
-                  <span className="hidden xl:inline">Perfil / Rubro</span>
-                </button>
-              )}
-
-              {onLogout && (
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  title="Cerrar sesión"
-                  className="p-2 sm:px-2.5 sm:py-2 rounded-lg bg-[#13264A] hover:bg-[#7F1D1D]/60 text-[#CBD5E1] hover:text-white border border-[#B6C2D2]/20 transition-colors inline-flex items-center gap-1.5 text-xs font-medium cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span className="hidden xl:inline">Salir</span>
-                </button>
+          {(currentUser || onOpenQuickGuide) && (
+            <div className="relative border-l border-[#B6C2D2]/20 pl-2">
+              <button
+                type="button"
+                onClick={() => setIsAccountMenuOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={isAccountMenuOpen}
+                title="Mi cuenta"
+                className="relative inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg bg-[#13264A] hover:bg-[#1B3566] text-[#E2E8F0] border border-[#B6C2D2]/25 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <UserCircle2 className="w-4 h-4" />
+                <span className="hidden md:inline">Mi cuenta</span>
+                <ChevronDown className="w-3.5 h-3.5 hidden md:inline" />
+                {showAbonoPending && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 border border-[#0B1933]" aria-label="Abono pendiente" />
+                )}
+              </button>
+              {isAccountMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" aria-hidden="true" onClick={() => setIsAccountMenuOpen(false)} />
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-full mt-1.5 z-50 w-60 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-800 shadow-2xl"
+                  >
+                    {currentUser && (
+                      <div className="px-3 py-2 border-b border-slate-100">
+                        <div className="text-xs font-bold truncate">{currentUser.fullName || currentUser.username}</div>
+                        <div className="text-[11px] text-slate-500 truncate">Rubro: {labels.shortLabel}</div>
+                      </div>
+                    )}
+                    {showAbonoPending && (
+                      <button type="button" role="menuitem" onClick={() => { setIsAccountMenuOpen(false); onOpenSubscriptionPayModal?.(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50 cursor-pointer">
+                        <CreditCard className="w-4 h-4" />
+                        Pagar el abono del mes
+                      </button>
+                    )}
+                    {onOpenUserProfile && (
+                      <button type="button" role="menuitem" onClick={() => { setIsAccountMenuOpen(false); onOpenUserProfile(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-slate-50 cursor-pointer">
+                        <KeyRound className="w-4 h-4 text-slate-500" />
+                        Mi perfil, contraseña y rubro
+                      </button>
+                    )}
+                    {onOpenQuickGuide && (
+                      <button type="button" role="menuitem" onClick={() => { setIsAccountMenuOpen(false); onOpenQuickGuide(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-slate-50 cursor-pointer">
+                        <HelpCircle className="w-4 h-4 text-slate-500" />
+                        ¿Dónde hago cada cosa?
+                      </button>
+                    )}
+                    {onLogout && (
+                      <button type="button" role="menuitem" onClick={() => { setIsAccountMenuOpen(false); onLogout(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 border-t border-slate-100 mt-1 cursor-pointer">
+                        <LogOut className="w-4 h-4" />
+                        Cerrar sesión
+                      </button>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -317,8 +319,9 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Compact Silver-Lined Status Ticker Strip */}
       <div className="bg-[#081224] border-t border-[#B6C2D2]/15 px-4 sm:px-6 lg:px-8 py-2 text-xs">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-[#CBD5E1]">
-          <div className="flex items-center gap-4 sm:gap-5 flex-wrap">
+        {/* En celular: una sola línea que se desliza, para no ocupar media pantalla */}
+        <div className="max-w-7xl mx-auto flex md:flex-wrap items-center justify-between gap-3 text-[#CBD5E1] overflow-x-auto no-scrollbar whitespace-nowrap">
+          <div className="flex items-center gap-4 sm:gap-5 md:flex-wrap">
             <div className="flex items-center gap-1.5">
               <span className="text-[#8D9CB0]">En la calle:</span>
               <span className="font-mono tabular-nums font-bold text-white text-sm">
@@ -336,12 +339,12 @@ export const Header: React.FC<HeaderProps> = ({
 
             <div className="flex items-center gap-1.5 text-amber-300 tabular-nums">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-              <span className="font-medium">{alertStats.adminAlert} alerta dueños ({config.adminAlertDays}+d)</span>
+              <span className="font-medium" title={`Boletas con ${alertThresholds.adminAlertDays} o más días desde la venta`}>{alertStats.adminAlert} aviso a dueños</span>
             </div>
 
             <div className="hidden md:flex items-center gap-1.5 text-[#94A3B8] tabular-nums">
               <Clock className="w-3.5 h-3.5 text-[#CBD5E1]" />
-              <span>{alertStats.vendedorReminder} recordatorio ({config.vendedorReminderDays}d)</span>
+              <span title={`Boletas con ${alertThresholds.vendedorReminderDays} o más días desde la venta`}>{alertStats.vendedorReminder} recordatorios</span>
             </div>
 
             {alertStats.criticalOverdue > 0 && onOpenCriticalBubble && (
@@ -353,7 +356,7 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Flame className="w-3 h-3 text-amber-300" />
                 <span>
-                  Vencido (+{graceDays}d): {formatCurrency(alertStats.criticalOverdueAmount, config.currencySymbol)}
+                  Vencido ({graceDays}+ días de mora): {formatCurrency(alertStats.criticalOverdueAmount, config.currencySymbol)}
                 </span>
               </button>
             )}

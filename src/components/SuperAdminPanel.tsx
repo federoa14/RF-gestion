@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Bug,
   Building2,
   Users,
   PlusCircle,
@@ -90,6 +91,7 @@ import {
 } from '../utils/multiTenantStorage';
 import { DEFAULT_CONFIG } from '../utils/storage';
 import { BrandMark } from './BrandMark';
+import { AppErrorsPanel } from './AppErrorsPanel';
 import {
   getCurrentMonthInfo,
   getTenantSubscriptionStatus,
@@ -156,7 +158,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   showToast,
   onOpenUserProfile,
 }) => {
-  const [activeTab, setActiveTab] = useState<'tenants' | 'billing' | 'users' | 'support' | 'announcements'>('tenants');
+  const [activeTab, setActiveTab] = useState<'tenants' | 'billing' | 'users' | 'support' | 'announcements' | 'errors'>('tenants');
 
   const [tenants, setTenants] = useState<Tenant[]>(loadTenants);
   const [users, setUsers] = useState<PlatformUser[]>(loadPlatformUsers);
@@ -368,12 +370,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   // Initial user credentials
   const [createInitialUser, setCreateInitialUser] = useState(true);
   const [initialUsername, setInitialUsername] = useState('');
-  const [initialPassword, setInitialPassword] = useState('1234');
+  const [initialPassword, setInitialPassword] = useState('');
   const [initialOwnerName, setInitialOwnerName] = useState('');
 
   // Form states for New User Modal
   const [userFormUsername, setUserFormUsername] = useState('');
-  const [userFormPassword, setUserFormPassword] = useState('1234');
+  const [userFormPassword, setUserFormPassword] = useState('');
   const [userFormFullName, setUserFormFullName] = useState('');
   const [userFormRole, setUserFormRole] = useState<'dueño' | 'administrador' | 'vendedor'>('dueño');
   const [userFormTenantId, setUserFormTenantId] = useState<string>(tenants[0]?.id || '');
@@ -417,8 +419,8 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       return;
     }
 
-    if (createInitialUser && (!initialUsername.trim() || !initialPassword.trim())) {
-      showToast('Por favor defina el usuario y contraseña de acceso para esta empresa.');
+    if (createInitialUser && (!initialUsername.trim() || initialPassword.trim().length < 6)) {
+      showToast('Definí el usuario y una contraseña de al menos 6 caracteres para esta empresa.');
       return;
     }
 
@@ -559,7 +561,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       const newUser: PlatformUser = {
         id: `usr-${Date.now()}`,
         username: initialUsername.trim().toLowerCase(),
-        password: initialPassword.trim() || '1234',
+        password: initialPassword.trim(),
         fullName: initialOwnerName.trim() || `${tenantFormName} (Titular)`,
         email: tenantFormEmail.trim(),
         phone: tenantFormPhone.trim(),
@@ -591,7 +593,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     setTenantFormInitialPlan('trial');
     setTenantFormPlanTier('web');
     setInitialUsername('');
-    setInitialPassword('1234');
+    setInitialPassword('');
     setInitialOwnerName('');
 
     showToast(
@@ -1278,7 +1280,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       `🔑 DATOS DE ACCESO:\n` +
       `• ID / Código: ${tenant.tenantCode}\n` +
       `• Usuario: ${tenantUser.username}\n` +
-      `• Contraseña: ${tenantUser.password}\n\n` +
+      `• Contraseña: ${tenantUser.password || 'la que te pasamos al crear la cuenta (si no la tenés, usá “¿Olvidaste tu contraseña?”)'}\n\n` +
       `Ingresá desde el navegador y colocá tus datos para acceder a tu panel privado.`;
 
     navigator.clipboard.writeText(text);
@@ -1302,7 +1304,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
       `🔑 DATOS DE ACCESO:\n` +
       `• ID / Código de Empresa: ${tenant.tenantCode}\n` +
       `• Usuario: ${tenantUser.username}\n` +
-      `• Contraseña: ${tenantUser.password}\n\n` +
+      `• Contraseña: ${tenantUser.password || 'la que te pasamos al crear la cuenta (si no la tenés, usá “¿Olvidaste tu contraseña?”)'}\n\n` +
       `Podés ingresar directamente con tu usuario y contraseña. Tus datos de ventas y cobranzas son 100% privados de tu empresa.`;
 
     const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
@@ -1312,8 +1314,8 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   // Handle Create User
   const handleCreateUser = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userFormUsername.trim() || !userFormPassword.trim()) {
-      showToast('Por favor complete usuario y contraseña.');
+    if (!userFormUsername.trim() || userFormPassword.trim().length < 6) {
+      showToast('Completá el usuario y una contraseña de al menos 6 caracteres.');
       return;
     }
 
@@ -1355,7 +1357,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
     setIsNewUserModalOpen(false);
     setUserFormUsername('');
-    setUserFormPassword('1234');
+    setUserFormPassword('');
     setUserFormFullName('');
     setUserFormPhone('');
     setUserFormEmail('');
@@ -1831,7 +1833,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       type="button"
                       onClick={() => {
                         setPlanSectionFilter(isActiveSection ? 'all' : def.tier);
-                        if (activeTab === 'users' || activeTab === 'support' || activeTab === 'announcements') {
+                        if (activeTab === 'users' || activeTab === 'support' || activeTab === 'announcements' || activeTab === 'errors') {
                           setActiveTab('tenants');
                         }
                       }}
@@ -1933,6 +1935,19 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             >
               <Headphones className="w-4 h-4" />
               <span>Canales de Contacto</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('errors')}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+                activeTab === 'errors'
+                  ? 'bg-[#E2E8F0] text-[#091428]'
+                  : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
+              }`}
+            >
+              <Bug className="w-4 h-4" />
+              <span>Errores de la app</span>
             </button>
 
             <button
@@ -2453,7 +2468,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                             <span className="text-slate-400 text-[11px]">Contraseña:</span>
                             <div className="flex items-center gap-2">
                               <span className="font-mono text-amber-300 font-bold bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                                {isPasswordVisible ? tenantOwnerUser.password : '••••••••'}
+                                {isPasswordVisible ? tenantOwnerUser.password || 'No se guarda (segura en Supabase)' : '••••••••'}
                               </span>
                               <button
                                 type="button"
@@ -2881,7 +2896,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     Cuota Base Mensual ($ ARS):
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="500"
                     value={billingDefaultFeeInput}
@@ -2910,7 +2925,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     Descuento Plan Anual (% · 12M):
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     max="50"
                     step="1"
@@ -2974,7 +2989,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                   <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl p-1.5 shrink-0">
                     <span className="text-[11px] font-bold text-slate-300 px-1.5">Ajustar %:</span>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       step="1"
                       value={bulkPercentInput}
                       onChange={(e) => setBulkPercentInput(Number(e.target.value))}
@@ -3025,7 +3040,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           Importe Mensual ($ ARS):
                         </label>
                         <input
-                          type="number"
+                          type="number" inputMode="decimal"
                           min="0"
                           step="500"
                           value={billingPricesInput[def.tier]}
@@ -3041,7 +3056,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       <div className="pt-1 flex items-center gap-1.5">
                         <span className="text-[10px] text-slate-400 shrink-0">Ajuste %:</span>
                         <input
-                          type="number"
+                          type="number" inputMode="decimal"
                           step="1"
                           value={perTierPercentInput[def.tier]}
                           onChange={(e) => {
@@ -3681,7 +3696,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2 font-mono">
                               <span className="bg-slate-900 px-2 py-1 rounded-md border border-slate-700 text-amber-300 font-bold">
-                                {isPasswordVisible ? user.password : '••••••••'}
+                                {isPasswordVisible ? user.password || 'No se guarda (segura en Supabase)' : '••••••••'}
                               </span>
                               <button
                                 type="button"
@@ -3783,6 +3798,10 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
         )}
 
         {/* TAB 4: CANALES DE CONTACTO Y ASISTENCIA TÉCNICA */}
+        {activeTab === 'errors' && (
+          <AppErrorsPanel tenantNames={Object.fromEntries(tenants.map((t) => [t.id, t.name]))} />
+        )}
+
         {activeTab === 'support' && (
           <div className="space-y-6">
             <form
@@ -5278,11 +5297,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1">
-                  Contraseña / Clave: *
+                  Nueva contraseña (opcional)
                 </label>
                 <input
                   type="text"
-                  required
+                  minLength={6}
+                  placeholder="Dejala vacía para no cambiarla (mín. 6 caracteres)"
                   value={editingUser.password}
                   onChange={(e) => setEditingUser({ ...editingUser, password: e.target.value })}
                   className="w-full px-3.5 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-amber-300 font-mono font-bold"
@@ -5397,7 +5417,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                   Monto mensual a cobrar ($ ARS):
                 </label>
                 <input
-                  type="number"
+                  type="number" inputMode="decimal"
                   min="0"
                   step="500"
                   required
@@ -5507,7 +5527,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 <div>
                   <label className="block font-bold text-slate-300 mb-1">Cuota Mensual ($ ARS):</label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="500"
                     value={billingDefaultFeeInput}
@@ -5518,7 +5538,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 <div>
                   <label className="block font-bold text-emerald-300 mb-1">Desc. Plan Anual (%):</label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     max="50"
                     step="1"
@@ -5726,7 +5746,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 <div>
                   <label className="block font-bold text-slate-300 mb-1">Importe a Cobrar ($ ARS):</label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     step="500"
                     value={paymentGenAmountInput}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   FileText,
   AlertCircle,
@@ -11,7 +11,6 @@ import {
   Sparkles,
   Settings,
   Flame,
-  HelpCircle,
   X,
   ChevronRight,
   CreditCard,
@@ -21,11 +20,14 @@ import {
   Store,
   ShoppingBag,
   ArrowLeftRight,
+  UserCog,
+  ChevronDown,
 } from 'lucide-react';
 import { DistributorConfig, Boleta } from '../types';
 import { calculateAlertStatus, formatCurrency } from '../utils/alerts';
 import { getBusinessLabels } from '../utils/businessMode';
 import { BrandMark } from './BrandMark';
+import { getAlertThresholds } from '../utils/alertThresholds';
 
 interface SidebarNavProps {
   activeTab: string;
@@ -45,6 +47,7 @@ interface SidebarNavProps {
   currentDateRef?: string;
   catalogEnabled?: boolean;
   webOrdersCount?: number;
+  ordersToPrepareCount?: number; // pedidos web nuevos sin preparar
   featureAccess?: {
     canAccessWebCatalog: boolean;
     canAccessFullFeatures: boolean;
@@ -82,13 +85,14 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   currentDateRef,
   catalogEnabled = true,
   webOrdersCount = 0,
+  ordersToPrepareCount = 0,
   featureAccess,
   planSectionLabel,
 }) => {
   const canShowWebCatalog = featureAccess ? featureAccess.canAccessWebCatalog : catalogEnabled !== false;
   const canShowFullSuite = featureAccess ? featureAccess.canAccessFullFeatures : true;
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
-  const graceDays = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  const graceDays = getAlertThresholds(config).overdueGraceDays;
   const refDate = currentDateRef || new Date().toISOString().split('T')[0];
 
   let criticalCount = 0;
@@ -110,7 +114,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
 
   const navGroups: NavGroup[] = [
     {
-      title: `Cobranzas y ${labels.salePlural}`,
+      title: `Cobranza y ${labels.salePlural.toLowerCase()}`,
       items: [
         {
           id: 'boletas',
@@ -130,7 +134,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
         },
         {
           id: 'impagas',
-          label: `${labels.salePlural} Impagas`,
+          label: `${labels.salePlural} impagas`,
           hint: 'Detalle completo y prórrogas',
           icon: AlertCircle,
           badge: criticalCount > 0 ? criticalCount : undefined,
@@ -210,6 +214,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                 label: 'Catálogo Online',
                 hint: 'Productos y pedidos WhatsApp',
                 icon: Store,
+                badge: ordersToPrepareCount > 0 ? ordersToPrepareCount : undefined,
+                badgeTone: 'crimson' as const,
               },
               {
                 id: 'ventas_web',
@@ -239,6 +245,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
     },
   ];
 
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const hasAccountActions = Boolean(onOpenSubscriptionPay || onOpenChangePlan || onOpenContactChannels);
+
   const handleSelectTab = (tabId: string) => {
     setActiveTab(tabId);
     onCloseMobile();
@@ -264,14 +273,14 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             size="md"
           />
           <div className="min-w-0">
-            <p className="text-sm font-bold text-white truncate group-hover:text-[#CBD5E1] transition-colors">
+            <p className="text-sm font-bold text-white break-words leading-tight group-hover:text-[#CBD5E1] transition-colors">
               {config.distributorName}
             </p>
-            <p className="text-[11px] font-mono text-[#94A3B8] truncate">
+            <p className="text-[11px] font-mono text-[#94A3B8] break-words leading-snug">
               {labels.shortLabel} · {config.tenantCode || 'ACTIVA'} · {config.defaultTermDays}d
             </p>
             {planSectionLabel && (
-              <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-[#13264A] border border-sky-400/30 text-[10px] font-bold text-sky-300 truncate max-w-full">
+              <span className="inline-block mt-1 px-1.5 py-0.5 rounded bg-[#13264A] border border-sky-400/30 text-[10px] font-bold text-sky-300 break-words max-w-full">
                 {planSectionLabel}
               </span>
             )}
@@ -317,11 +326,11 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                       }`}
                     />
                     <div className="min-w-0">
-                      <span className="block text-[13px] font-semibold leading-tight truncate">
+                      <span className="block text-[13px] font-semibold leading-tight break-words">
                         {item.label}
                       </span>
                       <span
-                        className={`block text-[11px] truncate ${
+                        className={`block text-[11px] leading-snug break-words ${
                           isActive ? 'text-[#CBD5E1]' : 'text-[#7A8BA3]'
                         }`}
                       >
@@ -366,7 +375,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
             <div className="flex items-center justify-between text-xs font-bold">
               <span className="flex items-center gap-1.5">
                 <Flame className="w-3.5 h-3.5 text-amber-300" />
-                <span>Fiado Vencido (+{graceDays}d)</span>
+                <span>Fiado vencido ({graceDays}+ días de mora)</span>
               </span>
               <ChevronRight className="w-3.5 h-3.5 opacity-80" />
             </div>
@@ -376,75 +385,77 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
           </button>
         )}
 
-        {onOpenSubscriptionPay && (
-          <button
-            type="button"
-            onClick={() => {
-              onOpenSubscriptionPay();
-              onCloseMobile();
-            }}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
-              isPaidCurrentMonth
-                ? 'bg-[#0F2142] hover:bg-[#162E59] text-[#CBD5E1] border-[#B6C2D2]/20'
-                : 'bg-[#132C56] hover:bg-[#1B3A70] text-white border-[#CBD5E1]/35'
-            }`}
-          >
-            <span className="flex items-center gap-2">
-              <CreditCard className="w-3.5 h-3.5 text-[#CBD5E1]" />
-              <span>{isPaidCurrentMonth ? 'Abono Mensual: Al Día' : 'Pagar Abono Mensual'}</span>
-            </span>
-            <ChevronRight className="w-3.5 h-3.5 text-[#8D9CB0]" />
-          </button>
-        )}
+        {hasAccountActions && (
+          <div className="rounded-lg border border-[#B6C2D2]/20 bg-[#0F2142]/70">
+            <button
+              type="button"
+              onClick={() => setIsAccountMenuOpen((open) => !open)}
+              aria-expanded={isAccountMenuOpen}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-[#E2E8F0] hover:bg-[#162E59] transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <UserCog className="w-3.5 h-3.5 shrink-0 text-[#CBD5E1]" />
+                <span className="whitespace-nowrap">Cuenta y plan</span>
+                {onOpenSubscriptionPay && !isPaidCurrentMonth && (
+                  <span
+                    className="w-2 h-2 rounded-full bg-amber-400 shrink-0"
+                    title="Abono mensual pendiente"
+                    aria-label="Abono mensual pendiente"
+                  />
+                )}
+              </span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 shrink-0 text-[#8D9CB0] transition-transform ${
+                  isAccountMenuOpen ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
 
-        {onOpenChangePlan && (
-          <button
-            type="button"
-            onClick={() => {
-              onOpenChangePlan();
-              onCloseMobile();
-            }}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#0F2142] hover:bg-[#162E59] text-amber-200 hover:text-amber-100 border border-amber-400/25 text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <span className="flex items-center gap-2">
-              <ArrowLeftRight className="w-3.5 h-3.5 text-amber-300" />
-              <span>Cambiar de Plan (1 ↔ 2 ↔ 3)</span>
-            </span>
-            <ChevronRight className="w-3.5 h-3.5 text-[#8D9CB0]" />
-          </button>
+            {isAccountMenuOpen && (
+              <div className="px-1.5 pb-1.5 space-y-1">
+                {onOpenSubscriptionPay && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenSubscriptionPay();
+                      onCloseMobile();
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left text-[#CBD5E1] hover:text-white hover:bg-[#162E59] transition-colors cursor-pointer"
+                  >
+                    <CreditCard className="w-3.5 h-3.5 shrink-0 text-[#CBD5E1]" />
+                    <span>{isPaidCurrentMonth ? 'Abono mensual: al día' : 'Pagar abono mensual'}</span>
+                  </button>
+                )}
+                {onOpenChangePlan && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenChangePlan();
+                      onCloseMobile();
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left text-amber-200 hover:text-amber-100 hover:bg-[#162E59] transition-colors cursor-pointer"
+                  >
+                    <ArrowLeftRight className="w-3.5 h-3.5 shrink-0 text-amber-300" />
+                    <span>Cambiar de plan</span>
+                  </button>
+                )}
+                {onOpenContactChannels && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenContactChannels();
+                      onCloseMobile();
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left text-[#E2E8F0] hover:text-white hover:bg-[#162E59] transition-colors cursor-pointer"
+                  >
+                    <Headphones className="w-3.5 h-3.5 shrink-0 text-sky-400" />
+                    <span>Canales de contacto</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         )}
-
-        {onOpenContactChannels && (
-          <button
-            type="button"
-            onClick={() => {
-              onOpenContactChannels();
-              onCloseMobile();
-            }}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#0F2142] hover:bg-[#162E59] text-[#E2E8F0] hover:text-white border border-sky-400/25 text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <span className="flex items-center gap-2">
-              <Headphones className="w-3.5 h-3.5 text-sky-400" />
-              <span>Canales de Contacto</span>
-            </span>
-            <ChevronRight className="w-3.5 h-3.5 text-[#8D9CB0]" />
-          </button>
-        )}
-
-        <button
-          type="button"
-          onClick={() => {
-            onOpenQuickGuide();
-            onCloseMobile();
-          }}
-          className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-[#0F2142]/70 hover:bg-[#162E59] text-[#CBD5E1] hover:text-white border border-[#B6C2D2]/15 text-xs font-medium transition-colors cursor-pointer"
-        >
-          <span className="flex items-center gap-2">
-            <HelpCircle className="w-3.5 h-3.5 text-[#94A3B8]" />
-            <span>¿Dónde ingreso? (Guía)</span>
-          </span>
-          <ChevronRight className="w-3.5 h-3.5 text-[#8D9CB0]" />
-        </button>
       </div>
     </div>
   );

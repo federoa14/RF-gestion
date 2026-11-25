@@ -80,8 +80,12 @@ import {
   saveRendiciones,
   resetOperationalData,
 } from './utils/storage';
-import { purgeExpiredBoletas, ensureClientCreditHistory, getDaysElapsed } from './utils/retentionPurge';
+import { ensureClientCreditHistory, getDaysElapsed } from './utils/retentionPurge';
+import { getSupabaseClient } from './utils/supabaseClient';
+import { describeCloudError, flushSupabaseSync } from './utils/supabaseSync';
+import { CloudSyncStatusBanner } from './components/CloudSyncStatusBanner';
 import { calculateAlertStatus, formatCurrency, addDaysToDate, formatDateEs, getBoletaBalance } from './utils/alerts';
+import { getAlertThresholds } from './utils/alertThresholds';
 import { createWhatsAppUrl, generateUserSignedReminder } from './utils/whatsapp';
 import {
   ExcessPaymentAllocationPlan,
@@ -96,6 +100,7 @@ import { Header } from './components/Header';
 import { SidebarNav } from './components/SidebarNav';
 import { QuickGuideModal } from './components/QuickGuideModal';
 import { EditBrandModal } from './components/EditBrandModal';
+import { OnboardingChecklist, type OnboardingStep } from './components/OnboardingChecklist';
 import { BoletaCard } from './components/BoletaCard';
 import type { BasketCheckoutPayload } from './components/NewBoletaModal';
 import { MarkAsPaidModal } from './components/MarkAsPaidModal';
@@ -183,6 +188,7 @@ const LazyViewFallback = () => (
 );
 import {
   getCurrentSessionUser,
+  logoutUser,
   setCurrentSessionUser,
   loadTenants,
   saveTenants,
@@ -199,6 +205,7 @@ import {
   fetchPlatformBillingConfigFromServer,
 } from './utils/multiTenantStorage';
 import { SUPABASE_SYNC_EVENT } from './utils/supabaseSync';
+import { countOrdersToPrepare, isNewOrderSoundEnabled, playNewOrderChime } from './utils/newOrderAlerts';
 import { ensureCloudHydrated } from './utils/localInternalDb';
 import {
   fetchCatalogAbandonedCartsForTenantFromSupabase,
@@ -220,11 +227,7 @@ import {
   verifyAndRecordTenantPaymentInSupabase,
   verifyCatalogTransferReceiptViaServer,
 } from './utils/supabaseServices';
-import {
-  executeBlockedChargeAlertDirect,
-  executeDailyAlertsDirect,
-  executeDailyClosingDirect,
-} from './utils/clientDispatchEngine';
+import { executeBlockedChargeAlertDirect } from './utils/clientDispatchEngine';
 import {
   getTenantSubscriptionStatus,
   getCurrentMonthInfo,
@@ -457,6 +460,47 @@ export default function App() {
 
   // Active Navigation Tab
   const [activeTab, setActiveTab] = useState<string>('boletas');
+
+  // Aviso de pedidos nuevos del catálogo (llegan por tiempo real o al sincronizar)
+  const [newOrderNotice, setNewOrderNotice] = useState<CatalogPickupOrder | null>(null);
+  const [catalogFocusRequest, setCatalogFocusRequest] = useState<
+    { subTab: 'pedidos' | 'productos' | 'configuracion'; n: number } | undefined
+  >(undefined);
+  const openCatalogSubTab = (subTab: 'pedidos' | 'productos' | 'configuracion') => {
+    handleSelectTab('catalogo');
+    setCatalogFocusRequest((prev) => ({ subTab, n: (prev?.n || 0) + 1 }));
+  };
+  const knownOrderIdsRef = useRef<{ tenantId: string | null; ids: Set<string> }>({ tenantId: null, ids: new Set() });
+  useEffect(() => {
+    const tenantId = selectedTenant?.id || null;
+    const known = knownOrderIdsRef.current;
+    const currentIds = new Set(catalogOrders.map((o) => o.id));
+    if (known.tenantId !== tenantId) {
+      // Primera carga de este comercio: se toma como punto de partida, sin avisar
+      knownOrderIdsRef.current = { tenantId, ids: currentIds };
+      return;
+    }
+    const recentLimit = Date.now() - 24 * 60 * 60 * 1000;
+    const fresh = catalogOrders.filter(
+      (o) =>
+        !known.ids.has(o.id) &&
+        o.status === 'pendiente_retiro' &&
+        Date.parse(o.createdAt || '') >= recentLimit
+    );
+    knownOrderIdsRef.current = { tenantId, ids: currentIds };
+    if (fresh.length === 0 || !currentUser || currentUser.role === 'superadmin') return;
+    const newest = [...fresh].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+    setNewOrderNotice(newest);
+    if (isNewOrderSoundEnabled()) playNewOrderChime();
+  }, [catalogOrders, selectedTenant?.id, currentUser]);
+
+  const ordersToPrepareCount = countOrdersToPrepare(catalogOrders);
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\)\s+/, '');
+    document.title = ordersToPrepareCount > 0 && currentUser && currentUser.role !== 'superadmin'
+      ? `(${ordersToPrepareCount}) ${base}`
+      : base;
+  }, [ordersToPrepareCount, currentUser]);
 
   // Si cambia a un rubro distinto de Distribuidora/Mayorista mientras estaba en Rendición, volver a Boletas
   useEffect(() => {
@@ -1005,101 +1049,8 @@ export default function App() {
     }
   }, [selectedTenant, currentUser?.role]);
 
-  // Background automated dispatch check on mount (client engine persisted to Supabase)
-  useEffect(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (config.autoDispatchEnabled && config.lastAutoDispatchDate !== todayStr && boletas.length > 0) {
-      executeDailyAlertsDirect({
-        boletas,
-        clients,
-        salespeople,
-        admins,
-        config,
-      })
-        .then((data) => {
-          if (data.logs?.length > 0) {
-            const updatedConfig = { ...config, lastAutoDispatchDate: todayStr };
-            setConfig(updatedConfig);
-            saveConfig(updatedConfig);
-            const updated = [...data.logs, ...autoLogs];
-            setAutoLogs(updated);
-            saveAutoDispatchLogs(updated);
-            if (selectedTenant) {
-              const cur = loadTenantData(selectedTenant.id);
-              cur.config = updatedConfig;
-              cur.autoLogs = [...data.logs, ...(cur.autoLogs || [])];
-              saveTenantData(selectedTenant.id, cur);
-            }
-            showToast(`🤖 Despacho automático matutino: ${data.logs.length} alertas generadas y guardadas en Supabase.`);
-          }
-        })
-        .catch((err) => {
-          console.error('Error en despacho automático en segundo plano:', err);
-        });
-    }
-  }, []);
-
-  // Automatic End-of-Day Closing WhatsApp Summary to Owner (persisted to Supabase)
-  useEffect(() => {
-    if (!selectedTenant || currentUser?.role === 'superadmin') return;
-    if (config.dailyClosingEnabled === false) return;
-
-    const checkAndDispatchClosing = () => {
-      const now = new Date();
-      const todayStr = now.toISOString().split('T')[0];
-      const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const closingTime = config.dailyClosingTime || '19:00';
-      const attemptKey = `${selectedTenant.id}::${todayStr}`;
-
-      if (
-        config.lastDailyClosingDate !== todayStr &&
-        currentHHMM >= closingTime &&
-        lastAutoClosingAttemptRef.current !== attemptKey &&
-        (boletas.length > 0 || paidBoletas.length > 0)
-      ) {
-        lastAutoClosingAttemptRef.current = attemptKey;
-        executeDailyClosingDirect({
-          boletas,
-          paidBoletas,
-          admins,
-          config,
-          targetDateStr: todayStr,
-        })
-          .then((data) => {
-            if (Array.isArray(data.logs) && data.logs.length > 0) {
-              const updatedConfig = { ...config, lastDailyClosingDate: todayStr };
-              setConfig(updatedConfig);
-              saveConfig(updatedConfig);
-              const curData = loadTenantData(selectedTenant.id);
-              const updatedLogs = [...data.logs, ...(curData.autoLogs || autoLogs)];
-              curData.config = updatedConfig;
-              curData.autoLogs = updatedLogs;
-              saveTenantData(selectedTenant.id, curData);
-
-              setAutoLogs(updatedLogs);
-              saveAutoDispatchLogs(updatedLogs);
-              showToast(`📊 Cierre del día automático generado y guardado en Supabase (${data.logs.length} WhatsApp).`);
-            }
-          })
-          .catch((err) => {
-            console.warn('Error generando resumen de cierre diario:', err);
-          });
-      }
-    };
-
-    checkAndDispatchClosing();
-    const timer = setInterval(checkAndDispatchClosing, 60000);
-    return () => clearInterval(timer);
-  }, [
-    selectedTenant?.id,
-    currentUser?.role,
-    config.dailyClosingEnabled,
-    config.dailyClosingTime,
-    config.lastDailyClosingDate,
-    boletas,
-    paidBoletas,
-    admins,
-  ]);
+  // Los envíos automáticos de WhatsApp (matutino 08:00 y cierre 19:00) ya NO corren en el navegador:
+  // los hace el servidor con la WhatsApp Business Cloud API (Edge Function whatsapp-dispatch + pg_cron).
 
   const handlePauseOwnTenant = (reason: string, pausedBy: 'tenant' | 'trial_expired') => {
     if (!selectedTenant) return;
@@ -1141,6 +1092,7 @@ export default function App() {
     setCurrentUser(null);
     setCurrentSessionUser(null);
     setSelectedTenant(null);
+    void logoutUser();
     showToast('Sesión cerrada correctamente.');
   };
 
@@ -1273,6 +1225,8 @@ export default function App() {
       pickupHours: nextSettings.pickupHours || 'Lunes a Sábado · 9:00 a 19:00 hs',
       pickupInstructions: nextSettings.pickupInstructions,
       paymentNote: nextSettings.paymentNote,
+      paymentMethods: nextSettings.paymentMethods,
+      storeTheme: isFullFeatures ? nextSettings.storeTheme : undefined,
       merchantPaymentAlias: cfg.merchantPaymentAlias,
       merchantPaymentCvu: cfg.merchantPaymentCvu,
       merchantPaymentBank: cfg.merchantPaymentBank,
@@ -1918,7 +1872,7 @@ export default function App() {
 
   const handleBillCatalogOrder = (order: CatalogPickupOrder) => {
     if (order.linkedBoletaNumber) {
-      showToast(`Este pedido ya fue facturado en la boleta #${order.linkedBoletaNumber}.`);
+      showToast(`Este pedido ya tiene la boleta #${order.linkedBoletaNumber}.`);
       return;
     }
 
@@ -2054,7 +2008,7 @@ export default function App() {
     handleSaveCatalogOrders(updatedOrders);
 
     showToast(
-      `Boleta #${newBoleta.boletaNumber} facturada desde pedido #${order.orderNumber}. Ya podés cobrarla o enviarla por WhatsApp.`
+      `Boleta #${newBoleta.boletaNumber} generada desde el pedido #${order.orderNumber}. Ya podés cobrarla o enviarla por WhatsApp.`
     );
   };
 
@@ -2241,11 +2195,6 @@ export default function App() {
     const { merchantMpAccessToken: _stripped, ...cleanUpdated } = updated;
     if (rawMpToken && selectedTenant) {
       void saveMerchantMpAccessTokenSecret(selectedTenant.id, rawMpToken);
-      void fetch('/api/merchant/mp-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId: selectedTenant.id, mpAccessToken: rawMpToken }),
-      }).catch(() => {});
     }
     const normalizedConfig: DistributorConfig = {
       ...cleanUpdated,
@@ -2773,24 +2722,26 @@ export default function App() {
     showToast(`¡Boleta #${target.boletaNumber} cobrada y archivada en el historial!`);
   };
 
-  // Depuración manual / periódica de 30 días
-  const handleExecuteRetentionPurge = () => {
-    const purgeResult = purgeExpiredBoletas(boletas, paidBoletas, clients, 30);
-    if (purgeResult.totalPurged > 0) {
-      handleSaveBoletas(purgeResult.survivingBoletas);
-      handleSavePaidBoletas(purgeResult.survivingPaidBoletas);
-      handleSaveClients(purgeResult.updatedClients);
-      const updatedConfig = {
-        ...config,
-        totalPurgedBoletasCount: (config.totalPurgedBoletasCount || 0) + purgeResult.totalPurged,
-        lastRetentionPurgeDate: new Date().toISOString().split('T')[0],
-      };
-      handleSaveConfig(updatedConfig);
+  // Depuración de 30 días: corre en el servidor (todas las noches y también a pedido).
+  // Solo borra boletas PAGADAS hace más de 30 días; las impagas nunca se borran.
+  const handleExecuteRetentionPurge = async () => {
+    if (!selectedTenant) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    try {
+      await flushSupabaseSync();
+      const { data, error } = await supabase.rpc('run_retention_purge', { p_business_id: selectedTenant.id });
+      if (error) throw error;
+      const purged = Number((data as any)?.purgedTotal || 0);
+      await syncTenantDataFromSupabase(selectedTenant.id);
+      loadDataForTenant(selectedTenant.id);
       showToast(
-        `🧹 Depuración de 30 días: Se eliminaron ${purgeResult.totalPurged} boletas del sistema (${purgeResult.purgedPendingCount} impagas / ${purgeResult.purgedPaidCount} archivadas). El historial y reputación de cada cliente quedó guardado de por vida.`
+        purged > 0
+          ? `🧹 Depuración de 30 días: se archivaron definitivamente ${purged} boleta(s) pagada(s). La ficha de cada cliente (confiable / problemático) se conserva.`
+          : '✨ No hay boletas pagadas hace más de 30 días. La base de datos está al día.'
       );
-    } else {
-      showToast('✨ Todas las boletas registradas tienen menos de 30 días. La base de datos está al día.');
+    } catch (err) {
+      showToast(describeCloudError(err));
     }
   };
 
@@ -3295,6 +3246,7 @@ export default function App() {
   // Filter pending boletas
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
 
+  const alertThresholds = getAlertThresholds(config);
   const filteredBoletas = pendingBoletas.filter((b) => {
     const status = calculateAlertStatus(b, config, currentDateRef);
 
@@ -3308,8 +3260,8 @@ export default function App() {
       selectedSalespersonFilter === 'all' || b.salespersonId === selectedSalespersonFilter;
 
     let matchesStatus = true;
-    if (statusFilter === 'urgent_10d') matchesStatus = status.daysElapsed >= 10;
-    else if (statusFilter === 'overdue') matchesStatus = status.isOverdueOrToday || status.daysElapsed >= 10;
+    if (statusFilter === 'urgent_10d') matchesStatus = status.daysElapsed >= alertThresholds.alertModeDays;
+    else if (statusFilter === 'overdue') matchesStatus = status.isOverdueOrToday || status.daysElapsed >= alertThresholds.alertModeDays;
     else if (statusFilter === 'admin_alert') matchesStatus = status.category === 'admin_6d' || status.category === 'admin_alert';
     else if (statusFilter === 'vendedor_3dias') matchesStatus = status.category === 'vendedor_2d' || status.category === 'vendedor_reminder';
     else if (statusFilter === 'normal') matchesStatus = status.category === 'normal';
@@ -3317,25 +3269,25 @@ export default function App() {
     return matchesSearch && matchesSeller && matchesStatus;
   });
 
-  // Sort boletas: Prioriza automáticamente las boletas con 10 o más días en PRIMER LUGAR (Modo Alerta Roja)
+  // Sort boletas: Prioriza automáticamente las boletas en "modo alerta" (días desde la venta ≥ alertModeDays)
   // ordenadas por las más antiguas primero, sin importar la fecha ni el ordenamiento seleccionado abajo.
   const sortedBoletas = [...filteredBoletas].sort((a, b) => {
     const statusA = calculateAlertStatus(a, config, currentDateRef);
     const statusB = calculateAlertStatus(b, config, currentDateRef);
 
-    const isUrgent10A = statusA.daysElapsed >= 10;
-    const isUrgent10B = statusB.daysElapsed >= 10;
+    const isUrgent10A = statusA.daysElapsed >= alertThresholds.alertModeDays;
+    const isUrgent10B = statusB.daysElapsed >= alertThresholds.alertModeDays;
 
-    // 1. Si pasaron 10 días, van PRIMERAS COMO PRIORITARIAS (urgente)
+    // 1. Si están en modo alerta, van PRIMERAS COMO PRIORITARIAS (urgente)
     if (isUrgent10A && !isUrgent10B) return -1;
     if (!isUrgent10A && isUrgent10B) return 1;
 
-    // 2. Entre las de 10+ días, suben las más viejas primero (15d, 14d, 13d...)
+    // 2. Entre las que están en modo alerta, suben las más viejas primero
     if (isUrgent10A && isUrgent10B) {
       return statusB.daysElapsed - statusA.daysElapsed;
     }
 
-    // 3. Para las demás (< 10 días), se respeta el ordenamiento seleccionado:
+    // 3. Para las demás, se respeta el ordenamiento seleccionado:
     if (sortBy === 'days_desc') {
       return statusB.daysElapsed - statusA.daysElapsed;
     }
@@ -3352,8 +3304,8 @@ export default function App() {
   const counts = pendingBoletas.reduce(
     (acc, b) => {
       const status = calculateAlertStatus(b, config, currentDateRef);
-      if (status.daysElapsed >= 10) acc.urgent10d++;
-      if (status.isOverdueOrToday || status.daysElapsed >= 10) acc.overdue++;
+      if (status.daysElapsed >= alertThresholds.alertModeDays) acc.urgent10d++;
+      if (status.isOverdueOrToday || status.daysElapsed >= alertThresholds.alertModeDays) acc.overdue++;
       if (status.category === 'admin_6d' || status.category === 'admin_alert') acc.adminAlert++;
       if (status.category === 'vendedor_2d' || status.category === 'vendedor_reminder') acc.vendedorReminder++;
       if (status.category === 'normal') acc.normal++;
@@ -3391,14 +3343,14 @@ export default function App() {
 
   const urgent10dDebt = pendingBoletas.reduce((acc, b) => {
     const st = calculateAlertStatus(b, config, currentDateRef);
-    if (st.daysElapsed >= 10) {
+    if (st.daysElapsed >= alertThresholds.alertModeDays) {
       return acc + getBoletaBalance(b).balanceDue;
     }
     return acc;
   }, 0);
 
-  // Fiado Vencido Crítico (+5 días posteriores al vencimiento pactado)
-  const graceThreshold = config.overdueGraceDays !== undefined ? config.overdueGraceDays : 5;
+  // Fiado Vencido Crítico (días de mora ≥ overdueGraceDays)
+  const graceThreshold = alertThresholds.overdueGraceDays;
   const criticalOverdueBoletas = pendingBoletas.filter((b) => {
     const st = calculateAlertStatus(b, config, currentDateRef);
     return st.daysPastDueDate >= graceThreshold;
@@ -3745,6 +3697,62 @@ export default function App() {
       };
   const planDefinitions = getSubscriptionPlanDefinitions(platformBillingCfg);
 
+  // Primeros pasos del comercio (se muestran en el Panel de Boletas hasta completarlos)
+  const onboardingSteps: OnboardingStep[] = [
+    {
+      id: 'logo',
+      label: 'Subí el logo de tu comercio',
+      hint: 'Aparece en la tienda, los comprobantes y los mensajes.',
+      done: Boolean((config.distributorLogoUrl || selectedTenant?.logoUrl || '').trim()),
+      actionLabel: 'Subir',
+      onAction: () => setIsEditBrandModalOpen(true),
+    },
+    {
+      id: 'whatsapp',
+      label: 'Cargá tu WhatsApp',
+      hint: 'Ahí te llegan los pedidos y las alertas.',
+      done: Boolean((catalogSettings.whatsappPhone || config.senderPhone || config.distributorPhone || '').trim()),
+      actionLabel: 'Cargar',
+      onAction: () => handleSelectTab('administradores'),
+    },
+    {
+      id: 'cliente',
+      label: 'Cargá tu primer cliente',
+      hint: 'Para empezar a registrar boletas fiadas.',
+      done: clients.length > 0,
+      actionLabel: 'Ir',
+      onAction: () => handleSelectTab('clientes'),
+    },
+    {
+      id: 'vendedor',
+      label: 'Sumá un vendedor',
+      hint: 'Recibe su hoja de ruta y ve sus clientes.',
+      done: salespeople.length > 0,
+      actionLabel: 'Ir',
+      onAction: () => handleSelectTab('vendedores'),
+    },
+    ...(tenantFeatureAccess.canAccessWebCatalog
+      ? [
+          {
+            id: 'alias',
+            label: 'Cargá tu alias o CVU',
+            hint: 'Para cobrar por transferencia en la tienda.',
+            done: Boolean((config.merchantPaymentAlias || config.merchantPaymentCvu || '').trim()),
+            actionLabel: 'Cargar',
+            onAction: () => openCatalogSubTab('configuracion'),
+          },
+          {
+            id: 'producto',
+            label: 'Publicá tu primer producto',
+            hint: 'Con foto y precio, para que lo vean en tu tienda.',
+            done: catalogProducts.length > 0,
+            actionLabel: 'Agregar',
+            onAction: () => openCatalogSubTab('productos'),
+          },
+        ]
+      : []),
+  ];
+
   // 3 & 3B. If Company is Paused (or suspended) OR 30-Day Trial Expired -> Show the 3 Plan Tiers (Plan 1, Plan 2, Plan 3) with amounts + feature comparison & direct pay redirect
   if (
     selectedTenant &&
@@ -4066,6 +4074,46 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F4F6F9] dark:bg-[#071021] text-slate-800 dark:text-[#E2E8F0] font-sans flex">
       {/* Toast Notification */}
+      {newOrderNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-4 right-4 left-4 sm:left-auto sm:w-96 z-[60] bg-white border border-emerald-300 shadow-2xl rounded-2xl p-4 flex items-start gap-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
+            <ShoppingBag className="w-5 h-5 text-emerald-700" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-bold text-slate-900">¡Entró un pedido nuevo!</div>
+            <div className="text-xs text-slate-600 break-words">
+              #{newOrderNotice.orderNumber} · {newOrderNotice.customerName} ·{' '}
+              <span className="font-mono font-semibold">
+                {formatCurrency(Number(newOrderNotice.totalAmount) || 0, newOrderNotice.currencySymbol || config.currencySymbol || '$')}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setNewOrderNotice(null);
+                  openCatalogSubTab('pedidos');
+                }}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Ver pedido
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewOrderNotice(null)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toastMessage && (
         <div className="fixed bottom-5 right-5 z-50 bg-[#0B1933] text-white border border-[#B6C2D2]/30 dark:bg-[#E2E8F0] dark:text-[#091428] px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 dark:text-emerald-600 shrink-0" />
@@ -4103,6 +4151,7 @@ export default function App() {
         currentDateRef={currentDateRef}
         catalogEnabled={tenantFeatureAccess.canAccessWebCatalog}
         webOrdersCount={paidWebOrders.length}
+        ordersToPrepareCount={ordersToPrepareCount}
         featureAccess={{
           canAccessWebCatalog: tenantFeatureAccess.canAccessWebCatalog,
           canAccessFullFeatures: tenantFeatureAccess.canAccessFullFeatures,
@@ -4132,6 +4181,17 @@ export default function App() {
           onLogout={handleLogout}
           onOpenUserProfile={() => setIsUserProfileOpen(true)}
           onOpenSubscriptionPayModal={() => setIsSubscriptionPayOpen(true)}
+        />
+
+        {/* Estado de la conexión con Supabase y datos viejos del dispositivo */}
+        <CloudSyncStatusBanner
+          businessId={selectedTenant?.id || null}
+          canImportLegacy={currentUser?.role === 'dueño' || currentUser?.role === 'administrador'}
+          onLegacyImported={() => {
+            if (selectedTenant) {
+              syncTenantDataFromSupabase(selectedTenant.id).then(() => loadDataForTenant(selectedTenant.id));
+            }
+          }}
         />
 
         {/* SAAS MONTHLY SUBSCRIPTION & 30-DAY TRIAL WARNING BANNERS (NAVY / SILVER / CRIMSON) */}
@@ -4393,6 +4453,9 @@ export default function App() {
           {/* TAB 1: PENDING BOLETAS */}
           {activeTab === 'boletas' && (
             <div className="space-y-5">
+              {selectedTenant && currentUser.role !== 'vendedor' && (
+                <OnboardingChecklist tenantId={selectedTenant.id} steps={onboardingSteps} />
+              )}
               {/* Executive KPI Summary Dashboard */}
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
                 {/* Card 1: Total Fiado en la Calle */}
@@ -4404,7 +4467,7 @@ export default function App() {
                     </div>
                   </div>
                   <div className="mt-2">
-                    <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#0B1933] dark:text-white tracking-tight">
+                    <span className="text-lg sm:text-2xl font-black font-mono whitespace-nowrap tabular-nums text-[#0B1933] dark:text-white tracking-tight">
                       {formatCurrency(totalPendingDebt, config.currencySymbol)}
                     </span>
                     <span className="block text-[11px] text-slate-500 dark:text-[#8D9CB0] font-medium mt-0.5 tabular-nums">
@@ -4422,11 +4485,11 @@ export default function App() {
                       ? 'bg-rose-50/90 dark:bg-rose-950/35 border-[#B91C1C] hover:bg-rose-100/80 dark:hover:bg-rose-950/50'
                       : 'bg-white dark:bg-[#0B1933] border-[#CBD5E1] dark:border-[#B6C2D2]/20 hover:border-[#94A3B8]'
                   }`}
-                  title="Abrir la burbuja de fiado vencido crítico (+5 días posteriores al vencimiento)"
+                  title={`Abrir la burbuja de fiado vencido crítico (${graceThreshold} o más días de mora)`}
                 >
                   <div className="flex items-center justify-between text-xs font-semibold w-full">
                     <span className={criticalGraceOverdueDebt > 0 ? 'text-[#991B1B] dark:text-rose-300 font-bold' : 'text-slate-500 dark:text-[#94A3B8]'}>
-                      Fiado Vencido (+{graceThreshold}d)
+                      Fiado vencido ({graceThreshold}+ días de mora)
                     </span>
                     <div
                       className={`p-1.5 rounded-lg ${
@@ -4440,7 +4503,7 @@ export default function App() {
                   </div>
                   <div className="mt-2 w-full">
                     <span
-                      className={`text-xl sm:text-2xl font-black font-mono tabular-nums tracking-tight ${
+                      className={`text-lg sm:text-2xl font-black font-mono whitespace-nowrap tabular-nums tracking-tight ${
                         criticalGraceOverdueDebt > 0
                           ? 'text-[#991B1B] dark:text-rose-400'
                           : 'text-[#0B1933] dark:text-white'
@@ -4476,7 +4539,7 @@ export default function App() {
                     </div>
                   </div>
                   <div className="mt-2">
-                    <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400 tracking-tight">
+                    <span className="text-lg sm:text-2xl font-black font-mono whitespace-nowrap tabular-nums text-emerald-700 dark:text-emerald-400 tracking-tight">
                       {formatCurrency(totalCollectedHistorical, config.currencySymbol)}
                     </span>
                     <span className="block text-[11px] text-slate-500 dark:text-[#8D9CB0] font-medium mt-0.5 tabular-nums">
@@ -4500,7 +4563,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="mt-2 w-full">
-                      <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#0B1933] dark:text-sky-300 tracking-tight">
+                      <span className="text-lg sm:text-2xl font-black font-mono whitespace-nowrap tabular-nums text-[#0B1933] dark:text-sky-300 tracking-tight">
                         {formatCurrency(totalWebSalesRevenue, config.currencySymbol)}
                       </span>
                       <div className="flex items-center justify-between gap-1 mt-0.5">
@@ -4531,7 +4594,7 @@ export default function App() {
                   </div>
                   <div className="mt-2">
                     <div className="flex items-baseline gap-1.5 tabular-nums">
-                      <span className="text-xl sm:text-2xl font-black font-mono text-[#0B1933] dark:text-white tracking-tight">
+                      <span className="text-lg sm:text-2xl font-black font-mono whitespace-nowrap text-[#0B1933] dark:text-white tracking-tight">
                         {config.totalPurgedBoletasCount || 0}
                       </span>
                       <span className="text-xs text-slate-500 dark:text-[#8D9CB0]">depuradas</span>
@@ -4757,7 +4820,7 @@ export default function App() {
                     }`}
                   >
                     <Flame className="w-3.5 h-3.5" />
-                    <span>Prioridad +10d ({counts.urgent10d})</span>
+                    <span>Prioridad: {alertThresholds.alertModeDays}+ días desde la venta ({counts.urgent10d})</span>
                   </button>
 
                   <button
@@ -4782,7 +4845,7 @@ export default function App() {
                     }`}
                   >
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    <span>Alerta Dueños ({config.adminAlertDays}+d) ({counts.adminAlert})</span>
+                    <span>Aviso a dueños ({alertThresholds.adminAlertDays}+ días desde la venta) ({counts.adminAlert})</span>
                   </button>
 
                   <button
@@ -4795,7 +4858,7 @@ export default function App() {
                     }`}
                   >
                     <Clock className="w-3.5 h-3.5" />
-                    <span>Aviso Vendedor ({config.vendedorReminderDays}d) ({counts.vendedorReminder})</span>
+                    <span>Recordatorio vendedor ({alertThresholds.vendedorReminderDays}+ días desde la venta) ({counts.vendedorReminder})</span>
                   </button>
 
                   <button
@@ -4821,7 +4884,7 @@ export default function App() {
                     </div>
                     <div>
                       <h4 className="text-xs sm:text-sm font-bold tracking-wide tabular-nums">
-                        Prioridad de Cobro: {counts.urgent10d} boleta(s) superaron los 10 días sin cancelarse
+                        Prioridad de cobro: {counts.urgent10d} boleta(s) superaron los {alertThresholds.alertModeDays} días desde la venta sin cancelarse
                       </h4>
                       <p className="text-[11px] sm:text-xs text-rose-100 mt-0.5">
                         Se ordenan automáticamente arriba para facilitar el seguimiento de cobro o registrar una prórroga.
@@ -4833,7 +4896,7 @@ export default function App() {
                     onClick={() => setStatusFilter('urgent_10d')}
                     className="px-3.5 py-1.5 bg-white text-[#991B1B] hover:bg-rose-50 text-xs font-bold rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
-                    Ver solo las +10 días
+                    Ver solo las de {alertThresholds.alertModeDays}+ días
                   </button>
                 </div>
               )}
@@ -5330,6 +5393,7 @@ export default function App() {
         {activeTab === 'catalogo' && (
           <Suspense fallback={<LazyViewFallback />}>
             <CatalogManager
+              focusRequest={catalogFocusRequest}
               config={config}
               tenant={selectedTenant}
               settings={catalogSettings}

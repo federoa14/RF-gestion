@@ -1,3 +1,4 @@
+import { AutoBackupsPanel } from './AutoBackupsPanel';
 import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
@@ -8,6 +9,7 @@ import {
   Trash2,
   Settings,
   Bell,
+  AlertTriangle,
   Clock,
   Building,
   Save,
@@ -36,6 +38,7 @@ import {
 } from 'lucide-react';
 import { Administrator, DistributorConfig, BusinessRubro } from '../types';
 import { RUBRO_PROFILES, getRubroProfile, applyRubroProfileToConfig } from '../utils/businessMode';
+import { getAlertThresholds, validateAlertThresholds } from '../utils/alertThresholds';
 import {
   getInternalDatabaseStatus,
   downloadInternalDatabaseBackup,
@@ -93,7 +96,9 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
   const activeAdmin =
     admins.find((a) => a.id === currentConfig.activeAdminId) ||
     admins.find((a) => a.isGeneralAdmin || a.role === 'dueño') ||
-    admins[0];
+    admins[0] ||
+    // Comercio sin administradores cargados (por ejemplo, migrado): no romper la pantalla
+    ({ id: '', name: currentConfig.distributorName || 'Administrador', role: 'dueño', phone: '', email: '', receiveAdminAlerts: true } as Administrator);
 
   const handleOpenNewAdmin = () => {
     setEditingAdmin({
@@ -122,9 +127,30 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
     setEditingAdmin(null);
   };
 
+  const [thresholdError, setThresholdError] = useState<string | null>(null);
+  // Valores efectivos (con los valores por defecto del rubro) para mostrar en los campos
+  const draftThresholds = getAlertThresholds(currentConfig);
+
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
-    let updatedCfg = { ...currentConfig };
+    const rawThresholds = {
+      vendedorReminderDays: Number(currentConfig.vendedorReminderDays) || 0,
+      adminAlertDays: Number(currentConfig.adminAlertDays) || 0,
+      alertModeDays: Number(currentConfig.saleAlertModeDays ?? draftThresholds.alertModeDays) || 0,
+      criticalSaleDays: Number(currentConfig.saleCriticalDays ?? draftThresholds.criticalSaleDays) || 0,
+      overdueGraceDays: Number(currentConfig.overdueGraceDays) || 0,
+    };
+    const validationError = validateAlertThresholds(rawThresholds);
+    if (validationError) {
+      setThresholdError(validationError);
+      return;
+    }
+    setThresholdError(null);
+    let updatedCfg = {
+      ...currentConfig,
+      saleAlertModeDays: rawThresholds.alertModeDays,
+      saleCriticalDays: rawThresholds.criticalSaleDays,
+    };
     if (merchantMpTokenInput.trim()) {
       updatedCfg = {
         ...updatedCfg,
@@ -332,7 +358,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Controla si esta empresa tiene permitido enviar recordatorios de facturas vencidas directamente al WhatsApp del cliente.
+                Controla si esta empresa tiene permitido enviar recordatorios de boletas vencidas directamente al WhatsApp del cliente.
               </p>
             </div>
           </div>
@@ -387,7 +413,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <span>Función Habilitada: Los clientes pueden recibir recordatorios de boletas vencidas</span>
               </p>
               <p className="text-[11px] text-emerald-700 dark:text-emerald-300/80">
-                Tanto en las tarjetas de boletas como en el despacho matutino se permitirá notificar al cliente sobre su factura vencida. Puedes personalizar la plantilla de texto a continuación.
+                Tanto en las tarjetas de boletas como en el despacho matutino se permitirá notificar al cliente sobre su boleta vencida. Puedes personalizar la plantilla de texto a continuación.
               </p>
             </div>
           ) : (
@@ -409,10 +435,10 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  Plantilla de Mensaje para el Cliente (Factura Vencida)
+                  Plantilla de Mensaje para el Cliente (boleta vencida)
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  Personalizá el mensaje formal que recibirá el cliente para informarle de su factura vencida.
+                  Personalizá el mensaje formal que recibirá el cliente para informarle de su boleta vencida.
                 </p>
               </div>
 
@@ -422,7 +448,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   setCurrentConfig((prev) => ({
                     ...prev,
                     customClientOverdueTemplate:
-                      'Hola {cliente}, le informamos desde {distribuidora} que la boleta/factura #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!',
+                      'Hola {cliente}, le informamos desde {distribuidora} que la boleta #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!',
                   }));
                 }}
                 className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 font-semibold"
@@ -435,7 +461,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             {/* Quick Tag Insert Buttons for Client */}
             <div>
               <span className="text-[11px] font-semibold text-slate-400 block mb-1">
-                Insertar datos dinámicos del cliente y factura:
+                Insertar datos dinámicos del cliente y la boleta:
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {[
@@ -466,7 +492,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
               <textarea
                 value={
                   currentConfig.customClientOverdueTemplate ||
-                  'Hola {cliente}, le informamos desde {distribuidora} que la boleta/factura #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!'
+                  'Hola {cliente}, le informamos desde {distribuidora} que la boleta #{boleta} por un monto de {monto} venció el {vencimiento} ({dias} días). Le solicitamos tener preparado el importe para cuando pase nuestro vendedor {vendedor} o coordinar transferencia. ¡Muchas gracias!'
                 }
                 onChange={(e) =>
                   setCurrentConfig({
@@ -486,7 +512,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   Incluir a clientes en el despacho automático matutino (08:00 AM)
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Si se activa, el sistema enviará también el mensaje de recordatorio a los clientes con facturas vencidas que tengan teléfono cargado.
+                  Si se activa, el sistema enviará también el mensaje de recordatorio a los clientes con boletas vencidas que tengan teléfono cargado.
                 </p>
               </div>
               <input
@@ -652,129 +678,219 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         </div>
 
         <form onSubmit={handleSaveConfig} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="p-3.5 rounded-xl border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50/40 dark:bg-yellow-950/20 space-y-1.5">
-              <label className="text-xs font-bold text-yellow-900 dark:text-yellow-300 flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-yellow-600" />
-                <span>Recordatorio Vendedor:</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="30"
-                  value={currentConfig.vendedorReminderDays}
-                  onChange={(e) =>
-                    setCurrentConfig({
-                      ...currentConfig,
-                      vendedorReminderDays: parseInt(e.target.value) || 2,
-                    })
-                  }
-                  className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-yellow-300 dark:border-yellow-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                />
-                <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días venta</span>
+          {/* 1. Plazos */}
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-bold text-slate-700 dark:text-slate-200">Plazos</legend>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900/40 bg-blue-50/40 dark:bg-blue-950/20 space-y-1.5">
+                <label htmlFor="cfg-defaultTermDays" className="text-xs font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-blue-600" />
+                  <span>Vencimiento habitual</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="cfg-defaultTermDays"
+                    type="number" inputMode="decimal"
+                    min="1"
+                    max="90"
+                    value={currentConfig.defaultTermDays}
+                    onChange={(e) =>
+                      setCurrentConfig({
+                        ...currentConfig,
+                        defaultTermDays: parseInt(e.target.value) || 7,
+                      })
+                    }
+                    className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-blue-300 dark:border-blue-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días de plazo</span>
+                </div>
+                <p className="text-[10px] text-slate-500">Plazo pactado al fiar.</p>
               </div>
-              <p className="text-[10px] text-slate-500">Recordarle al vendedor.</p>
+              <div className="p-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-1.5">
+                <label htmlFor="cfg-defaultExtensionDays" className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-indigo-600" />
+                  <span>Prórroga rápida</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="cfg-defaultExtensionDays"
+                    type="number" inputMode="decimal"
+                    min="1"
+                    max="60"
+                    value={currentConfig.defaultExtensionDays || 3}
+                    onChange={(e) =>
+                      setCurrentConfig({
+                        ...currentConfig,
+                        defaultExtensionDays: parseInt(e.target.value) || 3,
+                      })
+                    }
+                    className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-indigo-300 dark:border-indigo-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días extra</span>
+                </div>
+                <p className="text-[10px] text-slate-500">Días que se suman al prorrogar.</p>
+              </div>
             </div>
+          </fieldset>
 
-            <div className="p-3.5 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 space-y-1.5">
-              <label className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
-                <Bell className="w-4 h-4 text-amber-600" />
-                <span>Alerta a Dueños:</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="30"
-                  value={currentConfig.adminAlertDays}
-                  onChange={(e) =>
-                    setCurrentConfig({
-                      ...currentConfig,
-                      adminAlertDays: parseInt(e.target.value) || 6,
-                    })
-                  }
-                  className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                />
-                <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días venta</span>
+          {/* 2. Avisos por días desde la venta */}
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-bold text-slate-700 dark:text-slate-200">
+              Avisos según los días desde la venta
+            </legend>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Se cuentan desde la fecha de la venta, haya vencido o no. Deben ir en orden creciente.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="p-3.5 rounded-xl border border-yellow-200 dark:border-yellow-900/40 bg-yellow-50/40 dark:bg-yellow-950/20 space-y-1.5">
+                <label htmlFor="cfg-vendedorReminderDays" className="text-xs font-bold text-yellow-900 dark:text-yellow-300 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-yellow-600" />
+                  <span>Recordatorio al vendedor</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="cfg-vendedorReminderDays"
+                    type="number" inputMode="decimal"
+                    min="1"
+                    max="60"
+                    value={currentConfig.vendedorReminderDays}
+                    onChange={(e) =>
+                      setCurrentConfig({
+                        ...currentConfig,
+                        vendedorReminderDays: parseInt(e.target.value) || 2,
+                      })
+                    }
+                    className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-yellow-300 dark:border-yellow-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días desde la venta</span>
+                </div>
+                <p className="text-[10px] text-slate-500">Aviso preventivo solo al vendedor.</p>
               </div>
-              <p className="text-[10px] text-slate-500">Aviso a los dueños.</p>
+              <div className="p-3.5 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/40 dark:bg-amber-950/20 space-y-1.5">
+                <label htmlFor="cfg-adminAlertDays" className="text-xs font-bold text-amber-900 dark:text-amber-300 flex items-center gap-1.5">
+                  <Bell className="w-4 h-4 text-amber-600" />
+                  <span>Aviso a dueños</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="cfg-adminAlertDays"
+                    type="number" inputMode="decimal"
+                    min="1"
+                    max="90"
+                    value={currentConfig.adminAlertDays}
+                    onChange={(e) =>
+                      setCurrentConfig({
+                        ...currentConfig,
+                        adminAlertDays: parseInt(e.target.value) || 6,
+                      })
+                    }
+                    className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días desde la venta</span>
+                </div>
+                <p className="text-[10px] text-slate-500">Aviso al vendedor y a los dueños.</p>
+              </div>
+              <div className="p-3.5 rounded-xl border border-orange-200 dark:border-orange-900/40 bg-orange-50/40 dark:bg-orange-950/20 space-y-1.5">
+                <label htmlFor="cfg-saleAlertModeDays" className="text-xs font-bold text-orange-900 dark:text-orange-300 flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-orange-600" />
+                  <span>Modo alerta</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="cfg-saleAlertModeDays"
+                    type="number" inputMode="decimal"
+                    min="1"
+                    max="120"
+                    value={currentConfig.saleAlertModeDays ?? draftThresholds.alertModeDays}
+                    onChange={(e) =>
+                      setCurrentConfig({
+                        ...currentConfig,
+                        saleAlertModeDays: parseInt(e.target.value) || 10,
+                      })
+                    }
+                    className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-orange-300 dark:border-orange-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días desde la venta</span>
+                </div>
+                <p className="text-[10px] text-slate-500">Pasa a prioridad de cobro.</p>
+              </div>
+              <div className="p-3.5 rounded-xl border border-red-200 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/20 space-y-1.5">
+                <label htmlFor="cfg-saleCriticalDays" className="text-xs font-bold text-red-900 dark:text-red-300 flex items-center gap-1.5">
+                  <Flame className="w-4 h-4 text-red-600" />
+                  <span>Alerta crítica</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="cfg-saleCriticalDays"
+                    type="number" inputMode="decimal"
+                    min="1"
+                    max="180"
+                    value={currentConfig.saleCriticalDays ?? draftThresholds.criticalSaleDays}
+                    onChange={(e) =>
+                      setCurrentConfig({
+                        ...currentConfig,
+                        saleCriticalDays: parseInt(e.target.value) || 15,
+                      })
+                    }
+                    className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-red-300 dark:border-red-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días desde la venta</span>
+                </div>
+                <p className="text-[10px] text-slate-500">Prioridad máxima a dueños y vendedor.</p>
+              </div>
             </div>
+          </fieldset>
 
-            <div className="p-3.5 rounded-xl border border-blue-200 dark:border-blue-900/40 bg-blue-50/40 dark:bg-blue-950/20 space-y-1.5">
-              <label className="text-xs font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-blue-600" />
-                <span>Vencimiento Habitual:</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="90"
-                  value={currentConfig.defaultTermDays}
-                  onChange={(e) =>
-                    setCurrentConfig({
-                      ...currentConfig,
-                      defaultTermDays: parseInt(e.target.value) || 7,
-                    })
-                  }
-                  className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-blue-300 dark:border-blue-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                />
-                <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días plazo</span>
+          {/* 3. Mora: días después del vencimiento */}
+          <fieldset className="space-y-2">
+            <legend className="text-xs font-bold text-slate-700 dark:text-slate-200">
+              Mora (días después del vencimiento)
+            </legend>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-3.5 rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/40 dark:bg-rose-950/20 space-y-1.5">
+                <label htmlFor="cfg-overdueGraceDays" className="text-xs font-bold text-rose-900 dark:text-rose-300 flex items-center gap-1.5">
+                  <Flame className="w-4 h-4 text-rose-600" />
+                  <span>Rojo crítico (fiado vencido)</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="cfg-overdueGraceDays"
+                    type="number" inputMode="decimal"
+                    min="1"
+                    max="60"
+                    value={currentConfig.overdueGraceDays ?? draftThresholds.overdueGraceDays}
+                    onChange={(e) =>
+                      setCurrentConfig({
+                        ...currentConfig,
+                        overdueGraceDays: parseInt(e.target.value) || 5,
+                      })
+                    }
+                    className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-rose-300 dark:border-rose-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días de mora</span>
+                </div>
+                <p className="text-[10px] text-slate-500">A los {draftThresholds.overdueGraceDays} días de mora la boleta pasa a rojo crítico.</p>
               </div>
-              <p className="text-[10px] text-slate-500">Plazo pactado al fiar.</p>
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 text-[11px] text-slate-600 dark:text-slate-300 space-y-1">
+                <div className="font-bold text-slate-800 dark:text-white">Así queda con estos valores</div>
+                <p>
+                  Una boleta con plazo de {currentConfig.defaultTermDays} días vence el día{' '}
+                  {currentConfig.defaultTermDays} desde la venta y pasa a rojo el día{' '}
+                  {currentConfig.defaultTermDays + draftThresholds.overdueGraceDays} desde la venta.
+                </p>
+                <p>
+                  Avisos: vendedor a los {draftThresholds.vendedorReminderDays} días, dueños a los {draftThresholds.adminAlertDays},
+                  modo alerta desde los {draftThresholds.alertModeDays} y alerta crítica desde los {draftThresholds.criticalSaleDays}.
+                </p>
+              </div>
             </div>
+          </fieldset>
 
-            {/* Configuración de Prórroga por Defecto */}
-            <div className="p-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-1.5">
-              <label className="text-xs font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-indigo-600" />
-                <span>Prórroga Rápida:</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={currentConfig.defaultExtensionDays || 3}
-                  onChange={(e) =>
-                    setCurrentConfig({
-                      ...currentConfig,
-                      defaultExtensionDays: parseInt(e.target.value) || 3,
-                    })
-                  }
-                  className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-indigo-300 dark:border-indigo-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                />
-                <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días extra</span>
-              </div>
-              <p className="text-[10px] text-slate-500">Días al prorrogar.</p>
+          {thresholdError && (
+            <div role="alert" className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs font-semibold text-rose-800 dark:text-rose-200">
+              {thresholdError}
             </div>
-
-            {/* Días Posteriores para Rojo Crítico */}
-            <div className="p-3.5 rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/40 dark:bg-rose-950/20 space-y-1.5">
-              <label className="text-xs font-bold text-rose-900 dark:text-rose-300 flex items-center gap-1.5">
-                <Flame className="w-4 h-4 text-rose-600" />
-                <span>Rojo Post-Vencimiento:</span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="30"
-                  value={currentConfig.overdueGraceDays !== undefined ? currentConfig.overdueGraceDays : 5}
-                  onChange={(e) =>
-                    setCurrentConfig({
-                      ...currentConfig,
-                      overdueGraceDays: parseInt(e.target.value) || 5,
-                    })
-                  }
-                  className="w-16 text-center font-black text-base p-1.5 rounded-lg border border-rose-300 dark:border-rose-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
-                />
-                <span className="text-[11px] text-slate-600 dark:text-slate-400 font-medium">días post</span>
-              </div>
-              <p className="text-[10px] text-slate-500">A los 5d en rojo crítico.</p>
-            </div>
-          </div>
+          )}
 
           {/* Tope de Fiado Sugerido para Nuevos Clientes */}
           <div className="p-4 rounded-xl bg-[#F4F6F9] dark:bg-[#091428] border border-[#CBD5E1] dark:border-[#B6C2D2]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -789,7 +905,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-xs font-mono font-bold text-slate-500">{currentConfig.currencySymbol}</span>
               <input
-                type="number"
+                type="number" inputMode="decimal"
                 min="0"
                 step="1000"
                 placeholder="0 = sin tope"
@@ -872,8 +988,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   {getRubroProfile(currentConfig.businessRubro || 'distribuidora').description}
                 </p>
                 <div className="font-mono text-[10px] text-slate-500 dark:text-[#94A3B8] pt-1">
-                  Plazo: {currentConfig.defaultTermDays}d · Alertas: {currentConfig.vendedorReminderDays}d /{' '}
-                  {currentConfig.adminAlertDays}d · Tope sugerido:{' '}
+                  Plazo: {currentConfig.defaultTermDays}d · Avisos desde la venta: {draftThresholds.vendedorReminderDays}d /{' '}
+                  {draftThresholds.adminAlertDays}d / {draftThresholds.alertModeDays}d / {draftThresholds.criticalSaleDays}d · Rojo: {draftThresholds.overdueGraceDays}d de mora · Tope sugerido:{' '}
                   {currentConfig.defaultClientCreditLimit
                     ? `${currentConfig.currencySymbol}${currentConfig.defaultClientCreditLimit.toLocaleString('es-AR')}`
                     : 'Sin tope'}
@@ -1038,7 +1154,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </label>
                 <div className="flex items-center gap-2">
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     max="200"
                     step="0.5"
@@ -1081,7 +1197,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-slate-600 dark:text-[#CBD5E1]">Recargo sugerido:</span>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       max="100"
                       step="0.5"
@@ -1101,7 +1217,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-slate-600 dark:text-[#CBD5E1]">Aplicar tras:</span>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="1"
                       max="120"
                       disabled={!currentConfig.lateSurchargeEnabled}
@@ -1142,8 +1258,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
 
       {/* Regla de Retención de 30 Días para Optimización de Almacenamiento / Base de Datos */}
       <div className="bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-950/60 rounded-2xl p-5 shadow-xs">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1 basis-72">
             <div className="p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 mt-0.5">
               <Database className="w-5 h-5" />
             </div>
@@ -1157,7 +1273,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 max-w-2xl">
-                Para que la base de datos interna del dispositivo (IndexedDB) no acumule espacio ni sature memoria:
+                La depuración corre sola todas las noches en el servidor (no hace falta abrir la app):
                 <strong> Las boletas impagas NO se borran nunca</strong> (aunque tengan 45 o 60 días de atraso, asegurando el cobro en la calle).
                 El plazo de 30 días corre <strong>exclusivamente desde el momento en que se marcan como pagadas</strong>, momento a partir del cual se depuran del historial.
               </p>
@@ -1167,7 +1283,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   <strong>Memoria Permanente de Clientes Problemáticos vs Confiables:</strong> El sistema evalúa continuamente a cada cliente en base a sus boletas activas y pagos tardíos, manteniendo su ficha de riesgo y calificación actualizada sin importar las depuraciones de espacio.
                 </span>
               </div>
-              <div className="mt-3 flex items-center gap-4 text-xs text-slate-500">
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
                 <span>
                   Boletas purgadas históricamente: <strong className="text-indigo-600 font-bold">{config.totalPurgedBoletasCount || 0}</strong>
                 </span>
@@ -1193,24 +1309,24 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         </div>
       </div>
 
-      {/* Base de Datos Interna del Dispositivo (IndexedDB) y Copia de Seguridad Local */}
+      {/* Datos en la nube (Supabase) y copia de seguridad descargable */}
       <div className="bg-white dark:bg-[#0B1933] border border-[#CBD5E1] dark:border-[#B6C2D2]/25 rounded-2xl p-5 shadow-2xs space-y-4">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0 flex-1 basis-72">
             <div className="p-2.5 rounded-xl bg-[#0B1933] dark:bg-[#162E59] text-white shrink-0">
               <HardDrive className="w-5 h-5 text-sky-300" />
             </div>
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-sm font-bold text-[#0B1933] dark:text-white">
-                  Base de Datos Interna Local ({internalDbStatus?.engine || 'IndexedDB'})
+                  Datos en la nube (Supabase)
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                  100% EN TU DISPOSITIVO · SIN NUBE
+                  COMPARTIDOS ENTRE TODOS TUS DISPOSITIVOS
                 </span>
               </div>
               <p className="text-xs text-slate-600 dark:text-[#CBD5E1] max-w-2xl">
-                Tu usuario, empresa, clientes, boletas y rendiciones se guardan en una base interna dentro de este navegador/dispositivo. Podés descargar un archivo de respaldo para guardarlo en tu PC o pasarlo a otro equipo.
+                Clientes, boletas, rendiciones y catálogo se guardan en la nube: el dueño y los vendedores ven lo mismo desde cualquier dispositivo. Igual podés descargar un respaldo para guardarlo en tu PC. Al restaurar un respaldo solo se agrega lo que falta: no se pisa nada.
               </p>
               {internalDbStatus && (
                 <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] font-mono tabular-nums text-slate-500 dark:text-[#94A3B8]">
@@ -1232,7 +1348,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => {
@@ -1281,7 +1397,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 if (res.success) {
                   setBackupFeedback({
                     type: 'ok',
-                    text: `Base interna restaurada (${res.importedCount} registros, ${res.tenantsCount} empresa(s)). Recargando...`,
+                    text: `Respaldo importado: se agregaron ${res.importedCount} registro(s) que faltaban. Recargando...`,
                   });
                   setTimeout(() => window.location.reload(), 900);
                 } else {
@@ -1314,6 +1430,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             {backupFeedback.text}
           </div>
         )}
+
+        {currentConfig.tenantId && <AutoBackupsPanel businessId={currentConfig.tenantId} />}
       </div>
 
       {/* Danger Zone */}
@@ -1387,7 +1505,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="+54 9 11 3290-8811"
+                  placeholder="Ej. 11 2345-6789"
                   value={editingAdmin.phone || ''}
                   onChange={(e) => setEditingAdmin({ ...editingAdmin, phone: e.target.value })}
                   className="w-full text-xs p-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"

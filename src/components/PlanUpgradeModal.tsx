@@ -169,7 +169,7 @@ export const PlanUpgradeModal: React.FC<PlanUpgradeModalProps> = ({
             <div className="min-w-0">
               <div className="text-[11px] font-bold uppercase tracking-wider text-amber-300">
                 {step === 'overview'
-                  ? 'Gestión de Planes · Cambio Bidireccional (Plan 1 ↔ 2 ↔ 3)'
+                  ? 'Cambiar de plan'
                   : `Paso Final · Términos y Condiciones (v${TERMS_VERSION})`}
               </div>
               <h3 className="text-base sm:text-lg font-bold tracking-tight truncate">

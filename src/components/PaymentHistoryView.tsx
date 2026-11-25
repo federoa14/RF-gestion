@@ -249,8 +249,8 @@ export const PaymentHistoryView: React.FC<PaymentHistoryViewProps> = ({
 
       {/* Table of Paid Boletas */}
       <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto rt-cards-scroll">
+          <table className="rt-cards w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="px-4 py-3">N° Boleta</th>
@@ -277,10 +277,10 @@ export const PaymentHistoryView: React.FC<PaymentHistoryViewProps> = ({
                     key={b.id}
                     className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
                   >
-                    <td className="px-4 py-3.5 font-mono font-bold text-slate-800 dark:text-slate-200">
+                    <td className="px-4 py-3.5 font-mono font-bold text-slate-800 dark:text-slate-200" data-label="N° Boleta">
                       #{b.boletaNumber}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5" data-label="Cliente">
                       <span className="font-bold text-slate-900 dark:text-white block">
                         {b.clientName}
                       </span>
@@ -288,16 +288,16 @@ export const PaymentHistoryView: React.FC<PaymentHistoryViewProps> = ({
                         <span className="text-[11px] text-slate-400">{b.clientAddress}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-slate-700 dark:text-slate-300">
+                    <td className="px-4 py-3.5 text-slate-700 dark:text-slate-300" data-label="Vendedor">
                       <span className="inline-flex items-center gap-1 font-medium">
                         <Bike className="w-3.5 h-3.5 text-indigo-500" />
                         <span>{b.salespersonName}</span>
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-slate-500">
+                    <td className="px-4 py-3.5 text-slate-500" data-label="Fecha Venta">
                       {formatDateEs(b.saleDate)}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5" data-label="Fecha Cobro">
                       <span className="font-semibold text-emerald-600 dark:text-emerald-400 block">
                         {formatDateEs(b.paidAt || b.saleDate)}
                       </span>
@@ -313,7 +313,7 @@ export const PaymentHistoryView: React.FC<PaymentHistoryViewProps> = ({
                           : 'Cancelado'}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-right font-black text-slate-900 dark:text-white text-sm font-mono tabular-nums">
+                    <td className="px-4 py-3.5 text-right font-black text-slate-900 dark:text-white text-sm font-mono tabular-nums" data-label="Monto Cobrado">
                       {(() => {
                         const { net, creditNotesTotal } = getNetCashCollected(b);
                         return (
@@ -329,7 +329,7 @@ export const PaymentHistoryView: React.FC<PaymentHistoryViewProps> = ({
                         );
                       })()}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5" data-label="Medio de Pago">
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800 capitalize">
                         <CheckCircle className="w-3 h-3 text-emerald-500" />
                         <span>
@@ -339,7 +339,7 @@ export const PaymentHistoryView: React.FC<PaymentHistoryViewProps> = ({
                         </span>
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-slate-500 max-w-xs truncate">
+                    <td className="px-4 py-3.5 text-slate-500 max-w-xs truncate" data-label="Referencia / Notas">
                       {b.paymentReference && (
                         <span className="font-mono text-[11px] block text-slate-700 dark:text-slate-300">
                           Ref: {b.paymentReference}
@@ -352,7 +352,7 @@ export const PaymentHistoryView: React.FC<PaymentHistoryViewProps> = ({
                       )}
                     </td>
                     {(onRestoreBoleta || onOpenReceipt) && (
-                      <td className="px-4 py-3.5 text-right whitespace-nowrap">
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap" data-label="Acciones">
                         <div className="inline-flex items-center gap-1">
                           {onOpenReceipt && (
                             <button

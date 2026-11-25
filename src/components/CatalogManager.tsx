@@ -1,3 +1,5 @@
+import { isNewOrderSoundEnabled, playNewOrderChime, setNewOrderSoundEnabled } from '../utils/newOrderAlerts';
+import { StoreDesignEditor } from './StoreDesignEditor';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Store,
@@ -55,6 +57,7 @@ import {
   ShoppingCart,
   Lock,
   Crown,
+  MoreHorizontal,
 } from 'lucide-react';
 import {
   CatalogAbandonedCart,
@@ -76,6 +79,12 @@ import {
   Tenant,
 } from '../types';
 import { formatCurrency } from '../utils/alerts';
+import {
+  CATALOG_PAYMENT_OPTION_KEYS,
+  CATALOG_PAYMENT_OPTION_LABELS,
+  isPaymentOptionEnabled,
+  resolveEnabledPaymentOptions,
+} from '../utils/catalogPaymentOptions';
 import {
   CatalogOrderProcessStage,
   createWhatsAppUrl,
@@ -142,6 +151,8 @@ import { WebLoyaltyClientsPanel } from './WebLoyaltyClientsPanel';
 import { QrCodeSvg } from './QrCodeSvg';
 
 interface CatalogManagerProps {
+  // Al cambiar n, abre esa pestaña (por ejemplo 'pedidos' desde el aviso de pedido nuevo)
+  focusRequest?: { subTab: 'pedidos' | 'productos' | 'configuracion'; n: number };
   config: DistributorConfig;
   tenant: Tenant | null;
   settings: OnlineCatalogSettings;
@@ -275,6 +286,56 @@ async function compressBannerImageFile(file: File): Promise<string> {
   });
 }
 
+
+
+// Secciones del catálogo: cada una agrupa varias pestañas
+type CatalogSubTabKey =
+  | 'productos'
+  | 'pedidos'
+  | 'avisos_stock'
+  | 'carritos_abandonados'
+  | 'gift_cards'
+  | 'club_promos'
+  | 'clientes_web'
+  | 'estadisticas'
+  | 'configuracion';
+const CATALOG_TAB_GROUPS: Array<{ id: 'productos' | 'pedidos' | 'clientes' | 'config'; label: string; tabs: CatalogSubTabKey[] }> = [
+  { id: 'productos', label: 'Productos', tabs: ['productos', 'avisos_stock'] },
+  { id: 'pedidos', label: 'Pedidos y ventas', tabs: ['pedidos', 'carritos_abandonados', 'estadisticas'] },
+  { id: 'clientes', label: 'Clientes y promos', tabs: ['clientes_web', 'club_promos', 'gift_cards'] },
+  { id: 'config', label: 'Configuración', tabs: ['configuracion'] },
+];
+function catalogGroupOf(tab: CatalogSubTabKey) {
+  return (CATALOG_TAB_GROUPS.find((g) => g.tabs.includes(tab)) || CATALOG_TAB_GROUPS[0]).id;
+}
+
+// Filtros de la vista de pedidos del catálogo
+const ORDER_STATUS_FILTERS: Array<{ id: string; label: string; match?: (o: CatalogPickupOrder) => boolean }> = [
+  { id: 'todos', label: 'Todos' },
+  { id: 'nuevos', label: 'Por armar', match: (o) => o.status === 'pendiente_retiro' },
+  { id: 'listos', label: 'Listos', match: (o) => o.status === 'listo_para_retirar' },
+  { id: 'camino', label: 'En camino', match: (o) => o.status === 'en_camino' },
+  { id: 'entregados', label: 'Entregados', match: (o) => o.status === 'retirado' },
+  { id: 'cerrados', label: 'Cancelados / devueltos', match: (o) => o.status === 'cancelado' || o.status === 'devuelto' },
+];
+
+function getOrderStatusInfo(status: CatalogPickupOrder['status'], isDelivery: boolean): { label: string; className: string } {
+  switch (status) {
+    case 'pendiente_retiro':
+      return { label: 'Por armar', className: 'bg-amber-50 text-amber-800 border-amber-200' };
+    case 'listo_para_retirar':
+      return { label: isDelivery ? 'Listo para despachar' : 'Listo para retirar', className: 'bg-sky-50 text-sky-800 border-sky-200' };
+    case 'en_camino':
+      return { label: 'En camino', className: 'bg-indigo-50 text-indigo-800 border-indigo-200' };
+    case 'retirado':
+      return { label: isDelivery ? 'Entregado y pagado' : 'Retirado y pagado', className: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
+    case 'devuelto':
+      return { label: 'Devuelto', className: 'bg-rose-50 text-rose-800 border-rose-200' };
+    default:
+      return { label: 'Cancelado', className: 'bg-slate-100 text-slate-600 border-slate-200' };
+  }
+}
+
 export const CatalogManager: React.FC<CatalogManagerProps> = ({
   config,
   tenant,
@@ -310,6 +371,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   planFeatureAccess,
   onRequestUpgradePlan,
   showToast,
+  focusRequest,
 }) => {
   const [subTab, setSubTab] = useState<
     | 'productos'
@@ -321,7 +383,14 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     | 'clientes_web'
     | 'estadisticas'
     | 'configuracion'
-  >('productos');
+  >(() => focusRequest?.subTab || 'productos');
+  useEffect(() => {
+    if (focusRequest?.n) setSubTab(focusRequest.subTab);
+  }, [focusRequest?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [orderSoundOn, setOrderSoundOn] = useState(isNewOrderSoundEnabled);
+  // Muestra solo las pestañas de la sección activa
+  const catalogTabHiddenClass = (tab: CatalogSubTabKey) =>
+    catalogGroupOf(tab) === catalogGroupOf(subTab) ? '' : 'hidden!';
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [selectedSubfilter, setSelectedSubfilter] = useState<string>('Todos');
@@ -373,6 +442,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       settings.pickupInstructions ||
       'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
     paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
+    paymentMethods: settings.paymentMethods,
+    storeTheme: settings.storeTheme,
     defaultLowStockThreshold: settings.defaultLowStockThreshold ?? 2,
     cashOrTransferDiscountPercent: settings.cashOrTransferDiscountPercent ?? 0,
     coupons: settings.coupons || [],
@@ -428,6 +499,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         settings.pickupInstructions ||
         'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
       paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
+      paymentMethods: settings.paymentMethods,
+      storeTheme: settings.storeTheme,
       defaultLowStockThreshold: settings.defaultLowStockThreshold ?? 2,
       cashOrTransferDiscountPercent: settings.cashOrTransferDiscountPercent ?? 0,
       coupons: settings.coupons || [],
@@ -463,6 +536,12 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     merchantMpCheckoutLink: config.merchantMpCheckoutLink || '',
     merchantMpAccessToken: '',
   });
+  // Mercado Pago solo se puede ofrecer si el comercio lo tiene configurado (token o link de cobro)
+  const merchantMpAvailable = Boolean(
+    config.hasMerchantMpAccessToken ||
+      draftMerchantPayment.merchantMpAccessToken.trim() ||
+      draftMerchantPayment.merchantMpCheckoutLink.trim()
+  );
 
   useEffect(() => {
     setDraftMerchantPayment((prev) => ({
@@ -485,6 +564,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<CatalogProduct | null>(null);
   const [productName, setProductName] = useState('');
+  // Errores de validación del formulario de producto, mostrados junto a cada campo
+  const [productFormErrors, setProductFormErrors] = useState<{ name?: string; price?: string; stock?: string }>({});
   const [productSku, setProductSku] = useState('');
   const [productPrice, setProductPrice] = useState('');
   const [productStockQuantity, setProductStockQuantity] = useState('');
@@ -510,6 +591,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [productFeatured, setProductFeatured] = useState(false);
   const [isCompressingImage, setIsCompressingImage] = useState(false);
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState<CatalogPickupOrder | null>(null);
+  // Vista de pedidos: filtro por estado, búsqueda y menú "Más" de cada pedido
+  const [orderStatusFilter, setOrderStatusFilter] = useState<string>('todos');
+  const [orderSearch, setOrderSearch] = useState('');
+  const [openOrderMenuId, setOpenOrderMenuId] = useState<string | null>(null);
   const [verifyingOrderId, setVerifyingOrderId] = useState<string | null>(null);
 
   // Carritos Abandonados (#1) & Gift Cards QR (#3)
@@ -1005,6 +1090,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductLoyaltyPoints('');
     setProductAvailable(true);
     setProductFeatured(false);
+    setProductFormErrors({});
     setIsProductModalOpen(true);
   };
 
@@ -1060,6 +1146,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     );
     setProductAvailable(product.available);
     setProductFeatured(Boolean(product.featured));
+    setProductFormErrors({});
     setIsProductModalOpen(true);
   };
 
@@ -1121,6 +1208,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     }
   };
 
+  const visibleOrders = useMemo(() => {
+    const filter = ORDER_STATUS_FILTERS.find((f) => f.id === orderStatusFilter);
+    const q = orderSearch.trim().toLowerCase();
+    return orders
+      .filter((o) => (filter?.match ? filter.match(o) : true))
+      .filter(
+        (o) =>
+          !q ||
+          (o.customerName || '').toLowerCase().includes(q) ||
+          (o.customerPhone || '').replace(/\D/g, '').includes(q.replace(/\D/g, '') || '§') ||
+          (o.orderNumber || '').toLowerCase().includes(q)
+      )
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }, [orders, orderStatusFilter, orderSearch]);
+
   const handleSubmitProduct = (e: React.FormEvent) => {
     e.preventDefault();
     if (isBasicWebPlan && !editingProduct && rubroProducts.length >= PLAN_WEB_MAX_PRODUCTS) {
@@ -1132,14 +1234,25 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       );
       return;
     }
-    const cleanName = productName.trim();
+    const cleanName = productName.trim().replace(/\s+/g, ' ');
     const numericPrice = Number(String(productPrice).replace(',', '.'));
-    if (!cleanName) {
-      showToast('Ingresá el nombre del producto.');
-      return;
+    const formErrors: { name?: string; price?: string; stock?: string } = {};
+    if (cleanName.length < 2) formErrors.name = 'Ingresá el nombre del producto (mínimo 2 caracteres).';
+    else if (cleanName.length > 80) formErrors.name = 'El nombre es muy largo (máximo 80 caracteres).';
+    if (String(productPrice).trim() === '' || !Number.isFinite(numericPrice) || numericPrice <= 0) {
+      formErrors.price = 'Ingresá un precio mayor a 0.';
+    } else if (numericPrice > 100000000) {
+      formErrors.price = 'El precio parece demasiado alto. Revisalo.';
     }
-    if (!Number.isFinite(numericPrice) || numericPrice < 0) {
-      showToast('Ingresá un precio válido.');
+    if (productVariants.length === 0 && productStockQuantity.trim() !== '') {
+      const st = Number(productStockQuantity.trim().replace(',', '.'));
+      if (!Number.isFinite(st) || st < 0 || !Number.isInteger(st)) {
+        formErrors.stock = 'El stock tiene que ser un número entero (0 o más). Dejalo vacío para stock libre.';
+      }
+    }
+    setProductFormErrors(formErrors);
+    if (formErrors.name || formErrors.price || formErrors.stock) {
+      showToast(formErrors.name || formErrors.price || formErrors.stock || 'Revisá los datos del producto.');
       return;
     }
 
@@ -1150,8 +1263,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       let vStock: number | undefined = undefined;
       if (draftVar.stockQuantity.trim() !== '') {
         const num = Number(draftVar.stockQuantity.trim());
-        if (!Number.isFinite(num) || num < 0) {
-          showToast(`Stock inválido en variante "${lbl}". Usá 0 o mayor, o dejalo vacío.`);
+        if (!Number.isFinite(num) || num < 0 || !Number.isInteger(num)) {
+          showToast(`Stock inválido en variante "${lbl}". Usá un número entero (0 o más), o dejalo vacío.`);
           return;
         }
         vStock = Math.floor(num);
@@ -1513,6 +1626,22 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     e.preventDefault();
     if (draftSettings.allowPickup === false && draftSettings.allowDelivery === false) {
       showToast('Activá al menos una modalidad: Retiro en tienda o Envío a domicilio.');
+      return;
+    }
+    const enabledPayments = resolveEnabledPaymentOptions(draftSettings.paymentMethods, {
+      mercadoPagoAvailable: merchantMpAvailable,
+    });
+    if (enabledPayments.length === 0) {
+      showToast('Activá al menos un medio de pago para la tienda.');
+      return;
+    }
+    if (
+      draftSettings.paymentMethods &&
+      isPaymentOptionEnabled(draftSettings.paymentMethods, 'transferencia') &&
+      !draftMerchantPayment.merchantPaymentAlias.trim() &&
+      !draftMerchantPayment.merchantPaymentCvu.trim()
+    ) {
+      showToast('Para ofrecer Transferencia cargá tu alias o CVU (más abajo, en Cobros).');
       return;
     }
     const cleanRubroFilters = normalizeFilterList(draftSettings.rubroFilters);
@@ -2703,8 +2832,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     <div className="space-y-5">
       {/* Top Banner & Public Share Controls */}
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-start gap-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5 min-w-0 flex-1 basis-80">
             <BrandMark
               logoUrl={config.distributorLogoUrl || tenant?.logoUrl}
               icon={config.distributorIcon || tenant?.icon}
@@ -2746,7 +2875,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={handleTogglePublished}
@@ -2908,12 +3037,54 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         )}
 
         {/* KPI Row + Sub-navigation */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-fit overflow-x-auto">
+        <div className="space-y-2 pt-1">
+          {/* Secciones del catálogo */}
+          <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Secciones del catálogo">
+            {CATALOG_TAB_GROUPS.map((g) => {
+              const active = catalogGroupOf(subTab) === g.id;
+              const badge = g.id === 'pedidos' ? pendingPickupOrdersCount : 0;
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => {
+                    if (g.id === 'clientes' && isBasicWebPlan) {
+                      requestPlanUpgrade(
+                        'full_feature',
+                        'Clientes y promociones · Exclusivo Plan 3 · Full',
+                        'Clientes Web por DNI, SuperClub y Gift Cards QR están disponibles en Plan 3 · Full.'
+                      );
+                      return;
+                    }
+                    if (!active) setSubTab(g.tabs[0]);
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border cursor-pointer ${
+                    active
+                      ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {g.label}
+                  {badge > 0 && (
+                    <span className={`px-1.5 rounded text-[10px] font-mono tabular-nums ${active ? 'bg-white text-[#0B1933]' : 'bg-rose-600 text-white'}`}>
+                      {badge}
+                    </span>
+                  )}
+                  {g.id === 'clientes' && isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
+                </button>
+              );
+            })}
+          </div>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className={`flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-fit max-w-full ${
+            (CATALOG_TAB_GROUPS.find((g) => g.id === catalogGroupOf(subTab))?.tabs.length || 0) <= 1 ? 'hidden' : ''
+          }`}>
             <button
               type="button"
               onClick={() => setSubTab('productos')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`${catalogTabHiddenClass('productos')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 subTab === 'productos'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -2924,7 +3095,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             <button
               type="button"
               onClick={() => setSubTab('pedidos')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('pedidos')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'pedidos'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -2950,7 +3121,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 }
                 setSubTab('avisos_stock');
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('avisos_stock')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'avisos_stock'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -2979,7 +3150,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 setSubTab('carritos_abandonados');
                 void onRefreshAbandonedCarts?.();
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('carritos_abandonados')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'carritos_abandonados'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3009,7 +3180,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 setSubTab('gift_cards');
                 void onRefreshGiftCards?.();
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('gift_cards')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'gift_cards'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3032,7 +3203,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 }
                 setSubTab('club_promos');
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('club_promos')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'club_promos'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3057,7 +3228,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 void onRefreshOrders?.();
                 void onRefreshLoyaltyAccounts?.();
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('clientes_web')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'clientes_web'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3075,7 +3246,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   void onRefreshLoyaltyAccounts?.();
                 }
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('estadisticas')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'estadisticas'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3087,7 +3258,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             <button
               type="button"
               onClick={() => setSubTab('configuracion')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`${catalogTabHiddenClass('configuracion')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 subTab === 'configuracion'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3132,6 +3303,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               </strong>
             </span>
           </div>
+        </div>
         </div>
 
         {isBasicWebPlan && (
@@ -3185,7 +3357,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 />
               </div>
 
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {availableCategories.map((cat) => (
                   <button
                     key={cat}
@@ -3415,7 +3587,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     Porcentaje (% aumento o - descuento)
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     step="0.5"
                     value={bulkPercentInput}
                     onChange={(e) => setBulkPercentInput(e.target.value)}
@@ -3946,7 +4118,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
                             <div className="flex items-center gap-1.5">
                               <input
-                                type="number"
+                                type="number" inputMode="decimal"
                                 step="0.01"
                                 autoFocus
                                 value={quickPriceInput}
@@ -4073,9 +4245,23 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 Pedidos Registrados desde el Catálogo Online
               </h3>
               <p className="text-xs text-slate-500">
-                Además de llegarte al WhatsApp, cada pedido queda guardado aquí para facturarlo, enviarlo o avisar retiro y cobrar por WhatsApp.
+                Además de llegarte al WhatsApp, cada pedido queda guardado aquí para pasarlo a boleta, enviarlo o avisar retiro y cobrar por WhatsApp.
               </p>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={orderSoundOn}
+                onChange={(e) => {
+                  setOrderSoundOn(e.target.checked);
+                  setNewOrderSoundEnabled(e.target.checked);
+                  if (e.target.checked) playNewOrderChime();
+                }}
+                className="rounded border-slate-300"
+              />
+              Sonido al entrar un pedido
+            </label>
             {onRefreshOrders && (
               <button
                 type="button"
@@ -4094,6 +4280,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 <span>Actualizar pedidos</span>
               </button>
             )}
+            </div>
           </div>
 
           {orders.length === 0 ? (
@@ -4102,425 +4289,389 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
           ) : (
             <div className="space-y-3">
-              {orders.map((order) => {
+              {/* Filtros por estado + búsqueda */}
+              <div className="flex flex-col lg:flex-row lg:items-center gap-2">
+                <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Filtrar pedidos por estado">
+                  {ORDER_STATUS_FILTERS.map((f) => {
+                    const count = f.match ? orders.filter((o) => f.match!(o)).length : orders.length;
+                    const active = orderStatusFilter === f.id;
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setOrderStatusFilter(f.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer ${
+                          active
+                            ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {f.label} <span className={`tabular-nums ${active ? 'text-slate-300' : 'text-slate-400'}`}>({count})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="relative lg:ml-auto lg:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+                  <input
+                    type="search"
+                    value={orderSearch}
+                    onChange={(e) => setOrderSearch(e.target.value)}
+                    placeholder="Buscar cliente, teléfono o N.º"
+                    aria-label="Buscar pedidos"
+                    className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                  />
+                </div>
+              </div>
+
+              {visibleOrders.length === 0 && (
+                <div className="border border-dashed border-slate-200 rounded-xl p-6 text-center text-xs text-slate-500">
+                  No hay pedidos con ese filtro.
+                </div>
+              )}
+
+              {visibleOrders.map((order) => {
                 const isDelivery = order.deliveryMethod === 'envio';
                 const activePaymentKey =
                   order.confirmedPaymentMethod || order.preferredPaymentMethod || 'acordar';
-                const paymentMethodLabel = resolveOrderPaymentLabel(activePaymentKey, isDelivery);
+                const cur = order.currencySymbol || currency;
+                const isClosed = order.status === 'cancelado' || order.status === 'devuelto';
+                const itemsSubtotal = order.items.reduce((acc, it) => acc + (Number(it.subtotal) || 0), 0);
+                const discounts: Array<{ label: string; amount: number }> = [
+                  { label: 'Ahorro mayorista', amount: Number(order.wholesaleSavings) || 0 },
+                  { label: `Cupón ${order.couponCode || ''}`.trim(), amount: Number(order.couponDiscountAmount) || 0 },
+                  { label: `Bonificación por medio de pago (${order.paymentMethodDiscountPercent || 0}%)`, amount: Number(order.paymentMethodDiscountAmount) || 0 },
+                  { label: 'Descuento por puntos', amount: Number(order.loyaltyDiscountAmount) || 0 },
+                  { label: `Gift card ${order.giftCardCode || ''}`.trim(), amount: Number(order.giftCardDiscountAmount) || 0 },
+                  { label: 'Saldo a favor usado', amount: Number(order.storeCreditUsedAmount) || 0 },
+                ].filter((d) => d.amount > 0);
+                const finalTotal =
+                  order.status === 'devuelto'
+                    ? 0
+                    : Math.max(0, (Number(order.totalAmount) || 0) - (Number(order.returnedAmount) || 0));
+                const statusInfo = getOrderStatusInfo(order.status, isDelivery);
+                const canConfirmPayment =
+                  order.paymentStatus !== 'acreditado' &&
+                  !isClosed &&
+                  Boolean(
+                    order.transferReceiptImageUrl ||
+                      activePaymentKey === 'transferencia' ||
+                      activePaymentKey === 'mercadopago_dinero_cuenta' ||
+                      activePaymentKey === 'link_pago'
+                  );
+                const isMenuOpen = openOrderMenuId === order.id;
+                const menuActions: Array<{ key: string; label: string; onClick: () => void; disabled?: boolean }> = [];
+                if (!isClosed && order.customerPhone) {
+                  menuActions.push({ key: 'wa-armando', label: 'Avisar por WhatsApp: estamos armando tu pedido', onClick: () => void handleSendOrderProcessWhatsApp(order, 'en_proceso_armando') });
+                  menuActions.push({ key: 'wa-cobrar', label: 'Cobrar por WhatsApp (alias / link)', onClick: () => handleWhatsAppCustomerCollectPayment(order) });
+                  menuActions.push({ key: 'wa-comprobante', label: 'Enviar comprobante por WhatsApp', onClick: () => handleWhatsAppCustomerReady(order) });
+                }
+                menuActions.push({
+                  key: 'despacho',
+                  label: order.dispatchReceiptNumber ? 'Ver comprobante de despacho' : 'Despachar y generar comprobante',
+                  onClick: () => handleDispatchAndOpenReceipt(order),
+                });
+                if (onBillOrder) {
+                  menuActions.push({
+                    key: 'boleta',
+                    label: order.linkedBoletaNumber ? `Ya tiene la boleta #${order.linkedBoletaNumber}` : 'Generar boleta',
+                    onClick: () => onBillOrder(order),
+                    disabled: Boolean(order.linkedBoletaNumber),
+                  });
+                }
+                if (onOpenReturnModal && !isClosed) {
+                  menuActions.push({ key: 'devolucion', label: 'Cambio / devolución', onClick: () => onOpenReturnModal(order) });
+                }
 
                 return (
-                  <div
-                    key={order.id}
-                    className="border border-slate-200 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-50/50"
-                  >
-                    <div className="space-y-2 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-mono text-xs font-bold text-slate-900">
-                          #{order.orderNumber}
-                        </span>
-                        <span className="text-sm font-bold text-slate-900">
-                          {order.customerName}
-                        </span>
-                        <span className="text-xs font-mono text-slate-500">
-                          {order.customerPhone}
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold border ${
-                            isDelivery
-                              ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                              : 'bg-slate-100 text-slate-800 border-slate-200'
-                          }`}
-                        >
-                          {isDelivery ? (
+                  <article key={order.id} className="border border-slate-200 rounded-xl bg-white shadow-xs">
+                    {/* Encabezado: número, fecha, estado y total */}
+                    <header className="flex flex-wrap items-start justify-between gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200 rounded-t-xl">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-sm font-bold text-slate-900">#{order.orderNumber}</span>
+                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold border ${statusInfo.className}`}>
+                            {statusInfo.label}
+                          </span>
+                          {order.linkedBoletaNumber && (
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono">
+                              Boleta #{order.linkedBoletaNumber}
+                            </span>
+                          )}
+                          {order.dispatchReceiptNumber && (
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-sky-50 text-sky-800 border border-sky-200 font-mono">
+                              Comprobante {order.dispatchReceiptNumber}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-500 tabular-nums">
+                          {order.createdAt
+                            ? new Date(order.createdAt).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })
+                            : ''}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[11px] font-semibold text-slate-500">Total</div>
+                        <div className="text-lg font-black font-mono tabular-nums text-slate-900 whitespace-nowrap">
+                          {formatCurrency(finalTotal, cur)}
+                        </div>
+                      </div>
+                    </header>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4">
+                      {/* Cliente y entrega */}
+                      <section className="space-y-2 text-xs" aria-label="Cliente y entrega">
+                        <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Cliente</h4>
+                        <div className="text-sm font-bold text-slate-900 break-words">{order.customerName}</div>
+                        <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-slate-700">
+                          {order.customerPhone && (
                             <>
-                              <Truck className="w-3 h-3" />
-                              <span>Envío a domicilio</span>
-                            </>
-                          ) : (
-                            <>
-                              <Store className="w-3 h-3" />
-                              <span>Retiro en tienda</span>
+                              <dt className="text-slate-500">Teléfono</dt>
+                              <dd className="font-mono tabular-nums break-all">{order.customerPhone}</dd>
                             </>
                           )}
-                        </span>
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                            order.status === 'retirado'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : order.status === 'listo_para_retirar' || order.status === 'en_camino'
-                              ? 'bg-sky-50 text-sky-700 border border-sky-200'
-                              : order.status === 'cancelado'
-                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                              : 'bg-amber-50 text-amber-800 border border-amber-200'
-                          }`}
-                        >
-                          {order.status === 'pendiente_retiro'
-                            ? 'Pendiente de armado'
-                            : order.status === 'listo_para_retirar'
-                            ? isDelivery
-                              ? 'Listo para despachar'
-                              : 'Listo para retirar'
-                            : order.status === 'en_camino'
-                            ? 'En camino (Envío)'
-                            : order.status === 'retirado'
-                            ? 'Retirado / Pagado'
-                            : 'Cancelado'}
-                        </span>
-                        {order.linkedBoletaNumber && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono">
-                            <Receipt className="w-3 h-3" />
-                            <span>Facturado #{order.linkedBoletaNumber}</span>
-                          </span>
+                          {order.customerDni && (
+                            <>
+                              <dt className="text-slate-500">DNI</dt>
+                              <dd className="font-mono tabular-nums">{order.customerDni}</dd>
+                            </>
+                          )}
+                          <dt className="text-slate-500">Entrega</dt>
+                          <dd className="font-semibold inline-flex items-center gap-1">
+                            {isDelivery ? <Truck className="w-3.5 h-3.5 text-indigo-600" /> : <Store className="w-3.5 h-3.5 text-slate-500" />}
+                            {isDelivery ? 'Envío a domicilio' : 'Retiro en tienda'}
+                          </dd>
+                          {isDelivery && order.deliveryAddress && (
+                            <>
+                              <dt className="text-slate-500">Dirección</dt>
+                              <dd className="break-words">{order.deliveryAddress}</dd>
+                            </>
+                          )}
+                          {order.preferredPickupWindow && (
+                            <>
+                              <dt className="text-slate-500">{isDelivery ? 'Horario' : 'Retira'}</dt>
+                              <dd className="break-words">{order.preferredPickupWindow}</dd>
+                            </>
+                          )}
+                        </dl>
+                        {(order.customerSpecificRequest || order.notes) && (
+                          <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-slate-800">
+                            <div className="text-[11px] font-bold text-amber-900">Observaciones del cliente</div>
+                            <div className="break-words">{order.customerSpecificRequest || order.notes}</div>
+                          </div>
                         )}
-                        {order.dispatchReceiptNumber && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-sky-50 text-sky-800 border border-sky-200 font-mono">
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Comprobante {order.dispatchReceiptNumber}</span>
-                          </span>
-                        )}
-                      </div>
+                      </section>
 
-                      {isDelivery && order.deliveryAddress && (
-                        <div className="inline-flex items-center gap-1.5 text-xs text-slate-800 bg-white border border-slate-200 rounded-lg px-2.5 py-1">
-                          <MapPin className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                          <span>
-                            <strong>Dirección de envío:</strong> {order.deliveryAddress}
-                          </span>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => setSelectedOrderForDetail(order)}
-                        className="w-full text-left group space-y-1.5 pt-0.5 cursor-pointer rounded-lg hover:bg-white/90 p-1.5 -m-1.5 transition-colors"
-                        title="Clic para abrir la venta y ver fotos y códigos grandes"
-                      >
-                        {order.items.map((it, i) => {
-                          const matched =
-                            productMap.byId.get(it.productId) ||
-                            productMap.byName.get(it.productName.trim().toLowerCase());
-                          const thumb = matched?.imageUrl || it.imageUrl;
-                          const skuCode = (it.sku || matched?.sku || '').trim();
-                          return (
-                            <div key={`${order.id}-${i}`} className="flex items-center gap-2.5 text-xs text-slate-700">
-                              {thumb ? (
-                                <img
-                                  src={thumb}
-                                  alt={it.productName}
-                                  referrerPolicy="no-referrer"
-                                  className="w-9 h-9 rounded-lg object-cover border border-slate-200 bg-white shrink-0"
-                                />
-                              ) : (
-                                <div className="w-9 h-9 rounded-lg border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">
-                                  <ImageIcon className="w-4 h-4" />
-                                </div>
-                              )}
-                              <div className="min-w-0 tabular-nums">
-                                <span className="font-bold text-slate-900">
-                                  {it.quantity} × {it.productName}
-                                  {it.variantLabel ? ` (${it.variantLabel})` : ''}
-                                </span>
-                                {skuCode && (
-                                  <span className="ml-1.5 font-mono text-[11px] font-semibold text-[#0B1933] bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded">
-                                    Cód: {skuCode}
-                                  </span>
-                                )}{' '}
-                                <span className="text-slate-500">
-                                  ({formatCurrency(it.unitPrice, order.currencySymbol || currency)} c/u ={' '}
-                                  <strong className="text-slate-700">
-                                    {formatCurrency(it.subtotal, order.currencySymbol || currency)}
-                                  </strong>
-                                  )
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </button>
-
-                      {(order.customerSpecificRequest || order.notes) && (
-                        <div className="p-2.5 rounded-lg bg-amber-50/75 border border-amber-200 text-xs text-slate-800">
-                          <span className="font-bold text-slate-900">Observaciones / Pedido específico: </span>
-                          <span>{order.customerSpecificRequest || order.notes}</span>
-                        </div>
-                      )}
-
-                      {order.status === 'cancelado' && order.stockRestoredAt && (
-                        <div className="text-[11px] font-semibold text-emerald-700">
-                          Stock reintegrado automáticamente al catálogo ({new Date(order.stockRestoredAt).toLocaleString('es-AR')})
-                        </div>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 pt-0.5">
-                        {order.preferredPickupWindow && (
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            <span>
-                              {isDelivery ? 'Horario envío:' : 'Retiro estimado:'}{' '}
-                              {order.preferredPickupWindow}
-                            </span>
-                          </span>
-                        )}
-                        <span className="inline-flex items-center gap-1">
-                          <CreditCard className="w-3 h-3" />
-                          <span>Forma de pago: {paymentMethodLabel}</span>
-                        </span>
-                        {order.paymentStatus && (
-                          <span
-                            className={`font-semibold ${
-                              order.paymentStatus === 'acreditado'
-                                ? 'text-emerald-700'
-                                : order.paymentStatus === 'comprobante_en_revision'
-                                ? 'text-sky-700'
-                                : 'text-amber-700'
-                            }`}
+                      {/* Productos */}
+                      <section className="lg:col-span-2 space-y-3" aria-label="Productos del pedido">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                            Productos ({order.items.reduce((a, it) => a + (Number(it.quantity) || 0), 0)} u.)
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedOrderForDetail(order)}
+                            className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0B1933] hover:underline cursor-pointer"
                           >
-                            {order.paymentStatus === 'acreditado'
-                              ? '· Pago acreditado'
-                              : order.paymentStatus === 'comprobante_en_revision'
-                              ? '· Comprobante subido (para revisar)'
-                              : '· Pago en proceso'}
-                          </span>
-                        )}
-                      </div>
+                            <Eye className="w-3.5 h-3.5" />
+                            Ver fotos y códigos
+                          </button>
+                        </div>
+                        <div className="border border-slate-200 rounded-lg overflow-hidden">
+                          <table className="w-full text-xs">
+                            <thead className="bg-slate-50 text-slate-500 text-[11px]">
+                              <tr>
+                                <th className="text-left font-semibold px-3 py-2">Producto</th>
+                                <th className="text-right font-semibold px-3 py-2 hidden sm:table-cell">Cant.</th>
+                                <th className="text-right font-semibold px-3 py-2 hidden sm:table-cell">Precio</th>
+                                <th className="text-right font-semibold px-3 py-2">Subtotal</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {order.items.map((it, i) => {
+                                const matched =
+                                  productMap.byId.get(it.productId) ||
+                                  productMap.byName.get(it.productName.trim().toLowerCase());
+                                const thumb = matched?.imageUrl || it.imageUrl;
+                                const skuCode = (it.sku || matched?.sku || '').trim();
+                                return (
+                                  <tr key={`${order.id}-${i}`} className="align-top">
+                                    <td className="px-3 py-2">
+                                      <div className="flex items-start gap-2.5">
+                                        {thumb ? (
+                                          <img
+                                            src={thumb}
+                                            alt={it.productName}
+                                            referrerPolicy="no-referrer"
+                                            className="w-9 h-9 rounded-md object-cover border border-slate-200 bg-white shrink-0"
+                                          />
+                                        ) : (
+                                          <div className="w-9 h-9 rounded-md border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-500 font-bold shrink-0">
+                                            {(it.productName || '?').charAt(0).toUpperCase()}
+                                          </div>
+                                        )}
+                                        <div className="min-w-0">
+                                          <div className="font-semibold text-slate-900 break-words">{it.productName}</div>
+                                          {it.variantLabel && <div className="text-[11px] text-indigo-700 font-medium">{it.variantLabel}</div>}
+                                          {skuCode && <div className="text-[11px] font-mono text-slate-500">Cód: {skuCode}</div>}
+                                          <div className="sm:hidden text-[11px] text-slate-500 tabular-nums">
+                                            {it.quantity} × {formatCurrency(it.unitPrice, cur)}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-bold tabular-nums hidden sm:table-cell">{it.quantity}</td>
+                                    <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-600 whitespace-nowrap hidden sm:table-cell">
+                                      {formatCurrency(it.unitPrice, cur)}
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
+                                      {formatCurrency(it.subtotal, cur)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                          <dl className="border-t border-slate-200 bg-slate-50/70 px-3 py-2 text-xs space-y-1">
+                            <div className="flex justify-between gap-3">
+                              <dt className="text-slate-500">Subtotal</dt>
+                              <dd className="font-mono tabular-nums">{formatCurrency(order.subtotalBeforeDiscount || itemsSubtotal, cur)}</dd>
+                            </div>
+                            {discounts.map((d) => (
+                              <div key={d.label} className="flex justify-between gap-3 text-emerald-700">
+                                <dt>{d.label}</dt>
+                                <dd className="font-mono tabular-nums">-{formatCurrency(d.amount, cur)}</dd>
+                              </div>
+                            ))}
+                            {Number(order.returnedAmount || 0) > 0 && (
+                              <div className="flex justify-between gap-3 text-rose-700">
+                                <dt>Devolución{Number(order.returnedPointsDeducted || 0) > 0 ? ` (-${order.returnedPointsDeducted} pts)` : ''}</dt>
+                                <dd className="font-mono tabular-nums">-{formatCurrency(order.returnedAmount || 0, cur)}</dd>
+                              </div>
+                            )}
+                            <div className="flex justify-between gap-3 pt-1 border-t border-slate-200 text-sm font-bold text-slate-900">
+                              <dt>Total</dt>
+                              <dd className="font-mono tabular-nums">{formatCurrency(finalTotal, cur)}</dd>
+                            </div>
+                          </dl>
+                        </div>
 
-                      {order.transferReceiptImageUrl && (
-                        <div className="space-y-1.5">
+                        {/* Pago */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <label className="space-y-1">
+                            <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Medio de pago</span>
+                            <select
+                              value={activePaymentKey}
+                              disabled={order.status === 'devuelto'}
+                              onChange={(e) =>
+                                handleUpdateOrderPaymentMethod(
+                                  order.id,
+                                  e.target.value as NonNullable<CatalogPickupOrder['confirmedPaymentMethod']>
+                                )
+                              }
+                              className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer disabled:opacity-60"
+                            >
+                              <option value="acordar">A coordinar</option>
+                              <option value="transferencia">Transferencia / alias</option>
+                              <option value="mercadopago_dinero_cuenta">Mercado Pago (dinero en cuenta)</option>
+                              <option value="link_pago">Link de pago / Mercado Pago</option>
+                              <option value="efectivo">{isDelivery ? 'Efectivo contra entrega' : 'Efectivo en el local'}</option>
+                              <option value="fiado">Cuenta corriente / fiado</option>
+                            </select>
+                          </label>
+                          <div className="space-y-1">
+                            <span className="block text-[11px] font-bold uppercase tracking-wide text-slate-500">Estado del pago</span>
+                            <div
+                              className={`px-2.5 py-2 rounded-lg border font-semibold ${
+                                order.paymentStatus === 'acreditado'
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                  : order.paymentStatus === 'comprobante_en_revision'
+                                  ? 'bg-sky-50 border-sky-200 text-sky-800'
+                                  : 'bg-amber-50 border-amber-200 text-amber-800'
+                              }`}
+                            >
+                              {order.paymentStatus === 'acreditado'
+                                ? 'Pago acreditado'
+                                : order.paymentStatus === 'comprobante_en_revision'
+                                ? 'Comprobante subido: revisalo'
+                                : 'Pendiente de pago'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {order.transferReceiptImageUrl && (
                           <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
                               onClick={() => setSelectedOrderForDetail(order)}
                               className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white border border-sky-200 hover:bg-sky-50/60 text-left cursor-pointer"
-                              title="Clic para ampliar el comprobante de pago enviado por el cliente"
+                              title="Ver el comprobante grande"
                             >
                               <img
                                 src={order.transferReceiptImageUrl}
-                                alt="Comprobante cliente"
+                                alt="Comprobante del cliente"
                                 referrerPolicy="no-referrer"
                                 className="w-8 h-8 rounded object-cover border border-slate-200 shrink-0"
                               />
-                              <div className="text-[11px]">
-                                <div className="font-bold text-slate-900 flex items-center gap-1">
+                              <span className="text-[11px]">
+                                <span className="font-bold text-slate-900 flex items-center gap-1">
                                   <FileCheck2 className="w-3 h-3 text-emerald-600" />
-                                  <span>Comprobante de transferencia adjuntado</span>
-                                </div>
-                                <div className="text-[10px] text-sky-700">
-                                  Clic para ver grande
+                                  Comprobante de transferencia
+                                </span>
+                                <span className="text-sky-700">
+                                  Ver grande
                                   {order.transferOperationId || order.transferReference
                                     ? ` · Op: ${order.transferOperationId || order.transferReference}`
                                     : ''}
-                                </div>
-                              </div>
+                                </span>
+                              </span>
                             </button>
-
-                            {order.status !== 'cancelado' &&
-                              order.transferVerificationStatus !== 'verificado_auto' && (
-                                <button
-                                  type="button"
-                                  disabled={verifyingOrderId === order.id}
-                                  onClick={() => void handleVerifyOrderTransferReceipt(order)}
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-60 text-white cursor-pointer whitespace-nowrap"
-                                >
-                                  {verifyingOrderId === order.id ? (
-                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
-                                  )}
-                                  <span>
-                                    {verifyingOrderId === order.id
-                                      ? 'Verificando...'
-                                      : 'Verificar comprobante auto'}
-                                  </span>
-                                </button>
-                              )}
+                            {order.status !== 'cancelado' && order.transferVerificationStatus !== 'verificado_auto' && (
+                              <button
+                                type="button"
+                                disabled={verifyingOrderId === order.id}
+                                onClick={() => void handleVerifyOrderTransferReceipt(order)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-[#0B1933] hover:bg-[#13264A] disabled:opacity-60 text-white cursor-pointer"
+                              >
+                                {verifyingOrderId === order.id ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+                                )}
+                                {verifyingOrderId === order.id ? 'Verificando…' : 'Verificar comprobante'}
+                              </button>
+                            )}
+                            {order.transferVerificationSummary && (
+                              <div
+                                className={`w-full px-2.5 py-1.5 rounded-lg text-[11px] border ${
+                                  order.transferVerificationStatus === 'verificado_auto'
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                    : order.transferVerificationStatus === 'duplicado' || order.transferVerificationStatus === 'rechazado'
+                                    ? 'bg-rose-50 border-rose-200 text-rose-800'
+                                    : 'bg-slate-50 border-slate-200 text-slate-700'
+                                }`}
+                              >
+                                {order.transferVerificationSummary}
+                              </div>
+                            )}
                           </div>
+                        )}
 
-                          {order.transferVerificationSummary && (
-                            <div
-                              className={`px-2.5 py-1.5 rounded-lg text-[11px] border ${
-                                order.transferVerificationStatus === 'verificado_auto'
-                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                                  : order.transferVerificationStatus === 'duplicado' ||
-                                    order.transferVerificationStatus === 'rechazado'
-                                  ? 'bg-rose-50 border-rose-200 text-rose-800'
-                                  : 'bg-slate-50 border-slate-200 text-slate-700'
-                              }`}
-                            >
-                              {order.transferVerificationSummary}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                        {order.status === 'cancelado' && order.stockRestoredAt && (
+                          <div className="text-[11px] font-semibold text-emerald-700">
+                            Stock reintegrado al catálogo ({new Date(order.stockRestoredAt).toLocaleString('es-AR')})
+                          </div>
+                        )}
+                      </section>
                     </div>
 
-                    <div className="flex flex-col sm:flex-row lg:flex-col items-start sm:items-center lg:items-end gap-2 shrink-0">
-                      <div className="text-right space-y-0.5">
-                        {(Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) ||
-                          Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) ||
-                          Boolean(
-                            order.paymentMethodDiscountAmount &&
-                              order.paymentMethodDiscountAmount > 0
-                          )) && (
-                          <div className="text-[11px] font-medium text-emerald-700 space-y-0.5">
-                            {Boolean(order.wholesaleSavings && order.wholesaleSavings > 0) && (
-                              <div>
-                                Mayorista: -{formatCurrency(order.wholesaleSavings || 0, order.currencySymbol || currency)}
-                              </div>
-                            )}
-                            {Boolean(order.couponDiscountAmount && order.couponDiscountAmount > 0) && (
-                              <div>
-                                Cupón {order.couponCode}: -{formatCurrency(order.couponDiscountAmount || 0, order.currencySymbol || currency)}
-                              </div>
-                            )}
-                            {Boolean(
-                              order.paymentMethodDiscountAmount &&
-                                order.paymentMethodDiscountAmount > 0
-                            ) && (
-                              <div>
-                                Bonif. {order.paymentMethodDiscountPercent || 0}%: -
-                                {formatCurrency(
-                                  order.paymentMethodDiscountAmount || 0,
-                                  order.currencySymbol || currency
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        <div className="text-base font-bold font-mono tabular-nums text-slate-900">
-                          Valor final:{' '}
-                          {formatCurrency(
-                            order.status === 'devuelto'
-                              ? 0
-                              : Math.max(0, (Number(order.totalAmount) || 0) - (Number(order.returnedAmount) || 0)),
-                            order.currencySymbol || currency
-                          )}
-                        </div>
-                        {Number(order.returnedAmount || 0) > 0 && (
-                          <div className="text-[11px] font-semibold text-rose-700 font-mono tabular-nums">
-                            Devolución: -{formatCurrency(order.returnedAmount || 0, order.currencySymbol || currency)}
-                            {Number(order.returnedPointsDeducted || 0) > 0
-                              ? ` · -${order.returnedPointsDeducted} pts`
-                              : ''}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedOrderForDetail(order)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-[#0B1933]/30 bg-white hover:bg-slate-100 text-[#0B1933] cursor-pointer whitespace-nowrap"
-                          title="Abrir venta para ver fotos ampliadas, comprobante, códigos y tildar productos"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Abrir Venta (Fotos / Cód.)</span>
-                        </button>
-
-                        {order.paymentStatus !== 'acreditado' &&
-                          order.status !== 'cancelado' &&
-                          order.status !== 'devuelto' &&
-                          (order.transferReceiptImageUrl ||
-                            activePaymentKey === 'transferencia' ||
-                            activePaymentKey === 'mercadopago_dinero_cuenta' ||
-                            activePaymentKey === 'link_pago') && (
-                            <button
-                              type="button"
-                              onClick={() => handleConfirmOrderPayment(order)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white cursor-pointer whitespace-nowrap"
-                              title="Aprobar comprobante y marcar pago como acreditado"
-                            >
-                              <FileCheck2 className="w-3.5 h-3.5" />
-                              <span>Confirmar Pago</span>
-                            </button>
-                          )}
-
-                        {order.status !== 'retirado' &&
-                          order.status !== 'cancelado' &&
-                          order.status !== 'devuelto' && (
-                            <button
-                              type="button"
-                              onClick={() => handleMarkOrderPaidPickedUp(order)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
-                              title="Confirmar como retirado/entregado y pagado para sumarlo al dinero generado en la web"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>{isDelivery ? 'Entregado (Pagado)' : 'Marcar Retirado (Pagado)'}</span>
-                            </button>
-                          )}
-
-                        {onOpenReturnModal &&
-                          order.status !== 'cancelado' &&
-                          order.status !== 'devuelto' && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenReturnModal(order)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white cursor-pointer whitespace-nowrap"
-                              title="Gestionar cambio de talle o devolución (resta puntos al instante si corresponde y acredita saldo a favor)"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Cambio / Devolución</span>
-                            </button>
-                          )}
-
-                        {order.status !== 'cancelado' && order.status !== 'devuelto' && order.customerPhone && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void handleSendOrderProcessWhatsApp(order, 'en_proceso_armando')
-                              }
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white hover:bg-slate-100 text-slate-800 cursor-pointer whitespace-nowrap"
-                              title="Enviar WhatsApp: Pago en proceso y armando tu pedido"
-                            >
-                              <Send className="w-3 h-3 text-amber-600" />
-                              <span>WA: Armando</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                void handleSendOrderProcessWhatsApp(
-                                  order,
-                                  isDelivery ? 'en_camino' : 'listo_para_retirar'
-                                )
-                              }
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer whitespace-nowrap"
-                              title={
-                                isDelivery
-                                  ? 'Avisar por WhatsApp que el pedido ya salió y está en viaje al domicilio'
-                                  : 'Avisar por WhatsApp que el pedido ya está listo para pasar a buscar'
-                              }
-                            >
-                              <MessageCircle className="w-3.5 h-3.5 text-emerald-300" />
-                              <span>{isDelivery ? 'WA: En viaje a domicilio' : 'WA: Listo p/ buscar'}</span>
-                            </button>
-                          </>
-                        )}
-
+                    {/* Acciones */}
+                    <footer className="flex flex-wrap items-center gap-2 px-4 py-3 border-t border-slate-200">
+                      <label className="flex items-center gap-2 text-xs">
+                        <span className="font-semibold text-slate-600">Estado</span>
                         <select
-                          aria-label="Forma de pago del pedido"
-                          value={activePaymentKey}
-                          disabled={order.status === 'devuelto'}
-                          onChange={(e) =>
-                            handleUpdateOrderPaymentMethod(
-                              order.id,
-                              e.target.value as NonNullable<
-                                CatalogPickupOrder['confirmedPaymentMethod']
-                              >
-                            )
-                          }
-                          className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer disabled:opacity-60"
-                        >
-                          <option value="acordar">Pago: A coordinar</option>
-                          <option value="transferencia">Pago: Transferencia / Alias</option>
-                          <option value="mercadopago_dinero_cuenta">Pago: Mercado Pago (Dinero en cuenta)</option>
-                          <option value="link_pago">Pago: Link de Pago / MP</option>
-                          <option value="efectivo">
-                            {isDelivery ? 'Pago: Efectivo contra entrega' : 'Pago: Efectivo en local'}
-                          </option>
-                          <option value="fiado">Pago: Cuenta Corriente / Fiado</option>
-                        </select>
-
-                        <select
-                          aria-label="Estado de despacho del pedido"
                           value={order.status}
                           onChange={(e) => {
                             const nextSt = e.target.value as CatalogPickupOrder['status'];
@@ -4533,76 +4684,88 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer"
                         >
                           <option value="pendiente_retiro">Pendiente de armado</option>
-                          <option value="listo_para_retirar">
-                            {isDelivery ? 'Listo para despachar' : 'Listo para retirar'}
-                          </option>
-                          <option value="en_camino">En camino (Envío)</option>
-                          <option value="retirado">Retirado / Entregado (Pagado)</option>
+                          <option value="listo_para_retirar">{isDelivery ? 'Listo para despachar' : 'Listo para retirar'}</option>
+                          <option value="en_camino">En camino (envío)</option>
+                          <option value="retirado">{isDelivery ? 'Entregado y pagado' : 'Retirado y pagado'}</option>
                           <option value="devuelto">Devuelto</option>
                           <option value="cancelado">Cancelado</option>
                         </select>
+                      </label>
 
-                        {onBillOrder && (
+                      <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+                        {canConfirmPayment && (
                           <button
                             type="button"
-                            disabled={Boolean(order.linkedBoletaNumber)}
-                            onClick={() => onBillOrder(order)}
-                            title={
-                              order.linkedBoletaNumber
-                                ? `Ya facturado en Boleta #${order.linkedBoletaNumber}`
-                                : 'Generar cliente y boleta para facturar este pedido'
-                            }
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${
-                              order.linkedBoletaNumber
-                                ? 'bg-slate-100 text-slate-500 border border-slate-200 cursor-default'
-                                : 'bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer'
-                            }`}
+                            onClick={() => handleConfirmOrderPayment(order)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-700 text-white cursor-pointer"
                           >
-                            <Receipt className="w-3.5 h-3.5" />
-                            <span>
-                              {order.linkedBoletaNumber
-                                ? `Boleta #${order.linkedBoletaNumber}`
-                                : 'Facturar Pedido'}
-                            </span>
+                            <FileCheck2 className="w-3.5 h-3.5" />
+                            Confirmar pago
                           </button>
                         )}
-
-                        <button
-                          type="button"
-                          onClick={() => handleDispatchAndOpenReceipt(order)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer whitespace-nowrap"
-                          title="Generar comprobante visual y de WhatsApp con producto, precio, valor final y forma de pago"
-                        >
-                          <Receipt className="w-3.5 h-3.5 text-emerald-300" />
-                          <span>
-                            {order.dispatchReceiptNumber
-                              ? 'Comprobante Despacho'
-                              : 'Despachar y Comprobante'}
-                          </span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleWhatsAppCustomerCollectPayment(order)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sky-600 hover:bg-sky-700 text-white cursor-pointer whitespace-nowrap"
-                          title="Enviar Alias, Link de pago y detalle por WhatsApp para cobrarle"
-                        >
-                          <CreditCard className="w-3.5 h-3.5" />
-                          <span>Cobrar por WhatsApp</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleWhatsAppCustomerReady(order)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer whitespace-nowrap"
-                          title="Enviar el comprobante completo por WhatsApp al comprador"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5" />
-                          <span>Enviar Comprobante WA</span>
-                        </button>
+                        {!isClosed && order.customerPhone && order.status !== 'retirado' && (
+                          <button
+                            type="button"
+                            onClick={() => void handleSendOrderProcessWhatsApp(order, isDelivery ? 'en_camino' : 'listo_para_retirar')}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 bg-white hover:bg-slate-50 text-slate-800 cursor-pointer"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                            {isDelivery ? 'Avisar: va en camino' : 'Avisar: listo para retirar'}
+                          </button>
+                        )}
+                        {!isClosed && order.status !== 'retirado' && (
+                          <button
+                            type="button"
+                            onClick={() => handleMarkOrderPaidPickedUp(order)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {isDelivery ? 'Entregado y pagado' : 'Retirado y pagado'}
+                          </button>
+                        )}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setOpenOrderMenuId(isMenuOpen ? null : order.id)}
+                            aria-haspopup="menu"
+                            aria-expanded={isMenuOpen}
+                            aria-label={`Más acciones del pedido #${order.orderNumber}`}
+                            className={`inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                              isMenuOpen ? 'bg-slate-100 border-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50'
+                            } text-slate-800`}
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                            Más
+                          </button>
+                          {isMenuOpen && (
+                            <>
+                              <div className="fixed inset-0 z-30" aria-hidden="true" onClick={() => setOpenOrderMenuId(null)} />
+                              <div
+                                role="menu"
+                                className="absolute right-0 bottom-full mb-1 z-40 w-64 max-w-[85vw] py-1 rounded-lg border border-slate-200 bg-white shadow-xl"
+                              >
+                                {menuActions.map((a) => (
+                                  <button
+                                    key={a.key}
+                                    type="button"
+                                    role="menuitem"
+                                    disabled={a.disabled}
+                                    onClick={() => {
+                                      setOpenOrderMenuId(null);
+                                      a.onClick();
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:text-slate-400 disabled:cursor-default cursor-pointer"
+                                  >
+                                    {a.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    </footer>
+                  </article>
                 );
               })}
             </div>
@@ -5711,7 +5874,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700">Monto ({currency}) *</label>
                 <input
-                  type="number"
+                  type="number" inputMode="decimal"
                   min="1"
                   step="0.01"
                   required
@@ -6159,7 +6322,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               '',
               `Periodo,${statsRange}`,
               `Pedidos Activos,${activeOrders.length}`,
-              `Facturacion Neta,${netRevenue.toFixed(2)}`,
+              `Ingresos netos,${netRevenue.toFixed(2)}`,
               `Ticket Promedio,${avgTicket.toFixed(2)}`,
               `Unidades Vendidas,${totalUnitsSold}`,
               `Descuentos Otorgados,${totalDiscountsGranted.toFixed(2)}`,
@@ -6258,7 +6421,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-1">
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-                    Facturación Web Neta
+                    Ingresos web netos
                   </div>
                   <div className="text-2xl font-bold font-mono tabular-nums text-slate-900">
                     {formatCurrency(netRevenue, currency)}
@@ -6356,7 +6519,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Top 10 Productos Más Vendidos
                     </h4>
                     <p className="text-[11px] text-slate-500">
-                      Ordenados por volumen de unidades y facturación acumulada.
+                      Ordenados por volumen de unidades e ingresos acumulados.
                     </p>
                   </div>
 
@@ -6480,7 +6643,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     <p className="text-[11px] text-slate-500 mt-0.5">
                       {settings.enableLoyaltyProgram
                         ? `Programa activo: suma ${settings.loyaltyPointsPerUnit ?? 10} pts por prenda/unidad.`
-                        : 'El programa de puntos está desactivado. Podés habilitarlo en "Tienda, Envíos y Cobros".'}
+                        : 'El programa de puntos está desactivado. Podés habilitarlo en Configuración.'}
                     </p>
                   </div>
 
@@ -6747,7 +6910,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-700">
-                Formas de pago al retirar
+                Nota sobre los pagos (opcional)
               </label>
               <input
                 type="text"
@@ -6810,6 +6973,56 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   placeholder="Ej. Envíos en el día en zona centro. Te pasamos alias/link por WhatsApp para abonar."
                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
                 />
+              </div>
+            </div>
+
+            {/* Medios de pago que se ofrecen en la tienda */}
+            <div className="sm:col-span-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+              <div>
+                <div className="text-xs font-bold text-slate-800">Medios de pago que ofrecés</div>
+                <p className="text-[11px] text-slate-500">
+                  El comprador solo ve los que marques. Tiene que haber al menos uno.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {CATALOG_PAYMENT_OPTION_KEYS.map((key) => {
+                  const isMp = key === 'mercadopago';
+                  const disabled = isMp && !merchantMpAvailable;
+                  const checked = !disabled && isPaymentOptionEnabled(draftSettings.paymentMethods, key);
+                  return (
+                    <label
+                      key={key}
+                      className={`flex items-start gap-2.5 p-2.5 rounded-lg border bg-white text-xs ${
+                        disabled ? 'opacity-60 cursor-not-allowed border-slate-200' : 'cursor-pointer border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          setDraftSettings((prev) => {
+                            const base = prev.paymentMethods
+                              ? { ...prev.paymentMethods }
+                              : Object.fromEntries(
+                                  CATALOG_PAYMENT_OPTION_KEYS.map((k) => [k, k === 'mercadopago' ? merchantMpAvailable : true])
+                                );
+                            return { ...prev, paymentMethods: { ...base, [key]: e.target.checked } };
+                          })
+                        }
+                        className="mt-0.5 rounded border-slate-300"
+                      />
+                      <span>
+                        <span className="block font-semibold text-slate-800">{CATALOG_PAYMENT_OPTION_LABELS[key].title}</span>
+                        <span className="block text-[11px] text-slate-500">
+                          {disabled
+                            ? 'Configurá tu token o link de Mercado Pago (más abajo, en Cobros) para ofrecerlo.'
+                            : CATALOG_PAYMENT_OPTION_LABELS[key].hint}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
 
@@ -7331,7 +7544,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Descuento pagando en Efectivo / Transferencia (%)
                     </label>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       max="90"
                       step="1"
@@ -7356,7 +7569,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     Alerta de stock mínimo por defecto (unidades)
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="1"
                     value={draftSettings.defaultLowStockThreshold ?? 2}
@@ -7422,7 +7635,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     <option value="fixed">{currency} Monto fijo</option>
                   </select>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     step="0.01"
                     value={newCouponValue}
@@ -7432,7 +7645,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   />
                   <div className="col-span-2 sm:col-span-1 flex gap-1.5">
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       step="0.01"
                       value={newCouponMinPurchase}
@@ -8016,7 +8229,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           Puntos que suma cada prenda / unidad (por defecto)
                         </label>
                         <input
-                          type="number"
+                          type="number" inputMode="decimal"
                           min="1"
                           step="1"
                           value={draftSettings.loyaltyPointsPerUnit ?? 10}
@@ -8060,7 +8273,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             className="flex items-center gap-1.5 p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"
                           >
                             <input
-                              type="number"
+                              type="number" inputMode="decimal"
                               min="1"
                               value={tier.minPoints}
                               onChange={(e) => {
@@ -8077,7 +8290,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             />
                             <span className="text-[11px] text-slate-500">pts →</span>
                             <input
-                              type="number"
+                              type="number" inputMode="decimal"
                               min="1"
                               max="90"
                               value={tier.discountPercent}
@@ -8119,7 +8332,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
                     <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="1"
                         step="1"
                         value={newLoyaltyMinPoints}
@@ -8128,7 +8341,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         className="w-36 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
                       />
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="1"
                         max="90"
                         step="1"
@@ -8193,6 +8406,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               )}
             </div>
           </div>
+
+          <StoreDesignEditor
+            value={draftSettings.storeTheme}
+            onChange={(next) => setDraftSettings((prev) => ({ ...prev, storeTheme: next }))}
+            storeName={draftSettings.storeName || config.distributorName || 'Mi tienda'}
+            currencySymbol={currency}
+            locked={Boolean(planFeatureAccess && !planFeatureAccess.canAccessFullFeatures)}
+            onUpgrade={
+              onRequestUpgradePlan
+                ? () => requestPlanUpgrade('full_feature', 'Diseño de tu tienda')
+                : undefined
+            }
+          />
 
           <div className="pt-2 flex justify-end">
             <button
@@ -8380,11 +8606,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     required
+                    maxLength={80}
                     value={productName}
-                    onChange={(e) => setProductName(e.target.value)}
+                    onChange={(e) => {
+                      setProductName(e.target.value);
+                      if (productFormErrors.name) setProductFormErrors((p) => ({ ...p, name: undefined }));
+                    }}
                     placeholder={rubroPreset.productPlaceholder}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900"
+                    aria-invalid={Boolean(productFormErrors.name)}
+                    className={`w-full px-3 py-2 bg-slate-50 border rounded-xl text-xs text-slate-900 ${
+                      productFormErrors.name ? 'border-rose-400 ring-2 ring-rose-100' : 'border-slate-200'
+                    }`}
                   />
+                  {productFormErrors.name && <p className="text-[11px] font-medium text-rose-600">{productFormErrors.name}</p>}
                 </div>
 
                 <div className="space-y-1">
@@ -8394,13 +8628,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="number"
                     required
-                    min="0"
+                    min="0.01"
                     step="0.01"
+                    inputMode="decimal"
                     value={productPrice}
-                    onChange={(e) => setProductPrice(e.target.value)}
+                    onChange={(e) => {
+                      setProductPrice(e.target.value);
+                      if (productFormErrors.price) setProductFormErrors((p) => ({ ...p, price: undefined }));
+                    }}
                     placeholder="0.00"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                    aria-invalid={Boolean(productFormErrors.price)}
+                    className={`w-full px-3 py-2 bg-slate-50 border rounded-xl text-xs font-mono text-slate-900 ${
+                      productFormErrors.price ? 'border-rose-400 ring-2 ring-rose-100' : 'border-slate-200'
+                    }`}
                   />
+                  {productFormErrors.price && <p className="text-[11px] font-medium text-rose-600">{productFormErrors.price}</p>}
                 </div>
 
                 <div className="space-y-1">
@@ -8424,7 +8666,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       : 'Cantidad en stock'}
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="1"
                     disabled={productVariants.length > 0}
@@ -8440,14 +8682,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           : ''
                         : productStockQuantity
                     }
-                    onChange={(e) => setProductStockQuantity(e.target.value)}
+                    onChange={(e) => {
+                      setProductStockQuantity(e.target.value);
+                      if (productFormErrors.stock) setProductFormErrors((p) => ({ ...p, stock: undefined }));
+                    }}
                     placeholder={
                       productVariants.length > 0
                         ? 'Controlado por cada variante abajo'
                         : 'Vacío = stock libre'
                     }
-                    className="w-full px-3 py-2 bg-slate-50 disabled:opacity-70 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                    aria-invalid={Boolean(productFormErrors.stock)}
+                    className={`w-full px-3 py-2 bg-slate-50 disabled:opacity-70 border rounded-xl text-xs font-mono text-slate-900 ${
+                      productFormErrors.stock ? 'border-rose-400 ring-2 ring-rose-100' : 'border-slate-200'
+                    }`}
                   />
+                  {productFormErrors.stock && <p className="text-[11px] font-medium text-rose-600">{productFormErrors.stock}</p>}
                   {productVariants.length === 0 && (
                     <div className="flex flex-wrap items-center gap-1 pt-0.5">
                       <button
@@ -8568,7 +8817,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             className="col-span-5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-slate-900"
                           />
                           <input
-                            type="number"
+                            type="number" inputMode="decimal"
                             min="0"
                             step="1"
                             value={draftVar.stockQuantity}
@@ -8596,7 +8845,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             className="col-span-2 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-mono text-slate-900"
                           />
                           <input
-                            type="number"
+                            type="number" inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={draftVar.price}
@@ -8645,7 +8894,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     Alerta stock bajo (opcional)
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="1"
                     value={productLowStockThreshold}
@@ -8662,7 +8911,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       <span>Puntos por unidad (Programa DNI)</span>
                     </label>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       step="1"
                       value={productLoyaltyPoints}
@@ -8699,7 +8948,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Cant. mínima precio mayorista (opcional)
                     </label>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="2"
                       step="1"
                       value={productWholesaleMinQty}
@@ -8713,7 +8962,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Precio unitario mayorista ({currency})
                     </label>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       step="0.01"
                       value={productWholesalePrice}
@@ -8747,7 +8996,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         Precio Oferta Relámpago ({currency})
                       </label>
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="0"
                         step="0.01"
                         value={productFlashSalePrice}

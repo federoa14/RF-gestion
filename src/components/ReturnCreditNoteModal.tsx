@@ -277,7 +277,7 @@ export const ReturnCreditNoteModal: React.FC<ReturnCreditNoteModalProps> = ({
                 Monto a descontar ($):
               </label>
               <input
-                type="number"
+                type="number" inputMode="decimal"
                 step="0.01"
                 min="1"
                 max={totalPlanDebt}

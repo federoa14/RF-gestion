@@ -128,7 +128,7 @@ export const BoletaCard: React.FC<BoletaCardProps> = ({
     const msg = generateClientWhatsAppMessage(boleta, client, config);
     const phone = client?.phone || boleta.clientPhone || '';
     setPreviewData({
-      title: 'Aviso WhatsApp al Cliente (Recordatorio de Factura)',
+      title: 'Aviso WhatsApp al Cliente (recordatorio de boleta vencida)',
       recipientName: client?.name || boleta.clientName,
       recipientPhone: phone,
       messageText: msg,
