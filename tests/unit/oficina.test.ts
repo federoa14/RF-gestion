@@ -63,3 +63,12 @@ test('el interruptor de redes se pausa, se reanuda y valida el límite', () => {
   assert.equal(lib.ajustarRedes({ pausada: false }).pausada, false);
   assert.throws(() => lib.ajustarRedes({ limitePorDia: 500 }), /entre 0 y 20/);
 });
+
+test('escalar deja el caso esperando al Presidente con el aviso armado', () => {
+  const t = lib.escalar({ persona: 'Distribuidora Norte', motivo: 'pide reembolso', resumen: 'Cobraron dos veces.', sugerencia: 'definir el reembolso' });
+  assert.equal(t.estado, 'bloqueada');
+  assert.equal(t.departamento, 'soporte');
+  assert.match(t.descripcion, /Contactate con Distribuidora Norte para definir el reembolso/);
+  assert.throws(() => lib.escalar({ persona: '', motivo: 'x' }), /persona/);
+  assert.throws(() => lib.escalar({ persona: 'a', motivo: 'm'.repeat(200) }), /demasiado largo/);
+});

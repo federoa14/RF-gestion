@@ -71,3 +71,12 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Barreras:** solo material propio o de Diseño; veraz; sin precios/promos nuevas ni datos de clientes sin el Presidente; límite diario (2 por defecto); ante reclamo grave o tema legal se bloquea y se avisa. Interruptor de pausa de redes (oficina o `cli.mjs redes pausar`).
 - **Motivo:** el usuario los ve como ayudantes y quiere que sigan sin que él ordene cada cosa. Esto reemplaza la regla anterior de aprobación para publicar; el resto de acciones con efecto externo sigue requiriendo aprobación.
 - **Pendiente:** no hay cuentas de redes conectadas; sin eso no se publica de verdad. Falta definir con el usuario qué redes (Instagram, Facebook, WhatsApp Estados…) y conectarlas de forma segura.
+
+## 2026-11-25 — Asistencia al Cliente como primer filtro de WhatsApp
+- **Decisión:** el departamento de Asistencia al Cliente (ya existía como «Atención al Cliente») maneja el WhatsApp de asistencia: resuelve solo lo que su protocolo permite, pasa lo técnico a Actualización y escala al Presidente únicamente lo que necesita su decisión, con el aviso armado («X necesita…, contactate con Y para…»). Los casos escalados quedan en «esperan al Presidente» (`cli.mjs escalar`).
+- **Escala siempre:** dinero (reembolsos, descuentos), reclamos graves o legales, datos personales, cuentas grandes o ventas especiales, y todo lo dudoso.
+- **Autorización:** el Presidente autorizó responder clientes por WhatsApp sin aprobación previa (excepción al «no enviar mensajes»).
+- **Pendiente:** hoy el sistema solo envía WhatsApp; falta un receptor de mensajes entrantes (webhook de la API de Meta) y el número conectado. No hay conexión real todavía.
+
+## 2026-11-25 — Nombres de la oficina: discípulos de Jesús
+- **Decisión:** las personas a cargo de cada departamento llevan nombres de los discípulos: Pedro (Marketing), Mateo (Ventas), Juan (Diseño), Felipe (Gestión), Tomás (Actualización), Andrés (Evolución), Bartolomé (Asistencia), Simón el Zelote (Legal y Finanzas). Reserva en orden en `nombresReservados` (discípulos que faltan, luego personajes bíblicos trascendentes). Nunca Judas Iscariote.

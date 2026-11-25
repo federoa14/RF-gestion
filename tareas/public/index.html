@@ -452,6 +452,15 @@ function bloqueRedes() {
   };
   return { caja, pintar };
 }
+function listaDecision(tareas) {
+  return el('ul', { className: 'lista', style: 'gap:10px' }, ...tareas.map((t) => el('li', { style: 'padding-left:0' },
+    el('div', {}, '✋ ', el('b', { textContent: t.titulo })),
+    t.descripcion ? el('div', { className: 'aviso', style: 'white-space:pre-wrap', textContent: t.descripcion }) : null,
+    t.resultado ? el('div', { className: 'aviso', textContent: t.resultado }) : null,
+    el('div', { className: 'acc' },
+      el('button', { type: 'button', className: 'btn mini primario', textContent: '✔ Lo resolví', onclick: () => hacer(() => api('POST', `/api/tasks/${t.id}/completar`, { texto: 'Resuelto por Federico Roa.' })) }),
+      el('button', { type: 'button', className: 'btn mini', textContent: '↩ Devolver al departamento', onclick: () => hacer(() => api('PUT', `/api/tasks/${t.id}`, { estado: 'pendiente' })) })))));
+}
 function listaTareasPanel(tareas) {
   if (!tareas.length) return el('div', { className: 'vacio', textContent: 'Sin tareas todavía.' });
   return el('ul', { className: 'lista', style: 'gap:8px' }, ...tareas.map((t) => {
@@ -477,6 +486,12 @@ function abrirDepto(id) {
     el('section', {}, el('h3', { textContent: 'Sus funciones' }), el('ul', { className: 'lista' }, ...d.funciones.map((x) => el('li', { textContent: x })))),
     el('section', {}, el('h3', { textContent: 'Reglas que cumple' }), el('ul', { className: 'lista' }, ...d.reglas.map((x) => el('li', { textContent: x })))),
     el('section', {}, el('h3', { textContent: 'Lo que tiene prohibido' }), el('ul', { className: 'lista no' }, ...d.prohibido.map((x) => el('li', { textContent: x })))),
+    d.protocolo ? el('section', {}, el('h3', { textContent: 'Protocolo de filtro' }),
+      el('p', { className: 'aviso', style: 'margin:0 0 4px', textContent: 'Resuelve solo:' }), el('ul', { className: 'lista' }, ...d.protocolo.resuelveSola.map((x) => el('li', { textContent: x }))),
+      el('p', { className: 'aviso', style: 'margin:8px 0 4px', textContent: 'Pasa a Actualización:' }), el('ul', { className: 'lista' }, ...d.protocolo.derivaAActualizacion.map((x) => el('li', { textContent: x }))),
+      el('p', { className: 'aviso', style: 'margin:8px 0 4px', textContent: 'Te escala a vos:' }), el('ul', { className: 'lista' }, ...d.protocolo.escalaAlPresidente.map((x) => el('li', { textContent: x }))),
+      el('p', { className: 'aviso', style: 'margin:8px 0 0', textContent: `Cómo te avisa: ${d.protocolo.formatoAviso}` })) : null,
+    id === 'soporte' ? el('section', {}, el('h3', { textContent: 'WhatsApp de asistencia' }), el('div', { className: 'dialogo' }, el('p', { className: 'aviso', textContent: datos.redes.conectadas.includes('whatsapp-asistencia') ? '✅ Conectado: recibe y responde mensajes de clientes.' : 'Sin conectar todavía. Hoy el sistema solo envía WhatsApp (alertas); falta que reciba mensajes de clientes. Mientras tanto, los casos que le pasen se cargan acá y se filtran igual.' }))) : null,
     el('section', {}, el('h3', { textContent: 'Trabaja con' }), el('p', { className: 'aviso', style: 'margin:0', textContent: `Recibe pedidos de: ${d.recibeDe.map((x) => depto(x).nombre).join(', ') || '—'}. Entrega a: ${d.entregaA.map((x) => depto(x).nombre).join(', ') || '—'}.` })),
   );
   abrirPanel(cab, cuerpo, hex(d.color));
@@ -505,7 +520,7 @@ function abrirPresidente() {
   abierto.vivo = () => {
     redes.pintar();
     const b = datos.tareas.filter((t) => t.estado === 'bloqueada');
-    espera.replaceChildren(b.length ? listaTareasPanel(b) : el('div', { className: 'vacio', textContent: 'Nada espera tu decisión. 👌' }));
+    espera.replaceChildren(b.length ? listaDecision(b) : el('div', { className: 'vacio', textContent: 'Nada espera tu decisión. 👌' }));
   };
   abierto.vivo();
 }

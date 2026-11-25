@@ -113,6 +113,33 @@ export function agregar(datos, origen = 'presidente') {
   return t;
 }
 
+/**
+ * Escalada al Presidente: el caso queda en «Bloqueadas / esperan al Presidente» con el aviso armado.
+ * No se guardan teléfonos: el contacto queda en el chat de WhatsApp.
+ */
+export function escalar({ persona, motivo, resumen = '', sugerencia = '' }) {
+  const lim = (v, n, campo) => {
+    const x = String(v ?? '').trim();
+    if (x.length > n) throw new Error(`${campo} es demasiado largo (máx. ${n}).`);
+    return x;
+  };
+  persona = lim(persona, 80, 'La persona'); motivo = lim(motivo, 120, 'El motivo');
+  if (!persona || !motivo) throw new Error('Hacen falta la persona (o comercio) y el motivo.');
+  resumen = lim(resumen, 2000, 'El resumen'); sugerencia = lim(sugerencia, 300, 'La sugerencia');
+  const ahora = new Date().toISOString();
+  const t = {
+    id: randomUUID().slice(0, 8), titulo: `Para vos: ${persona} — ${motivo}`.slice(0, 200),
+    descripcion: [resumen, `Contactate con ${persona}${sugerencia ? ` para ${sugerencia}` : ' para resolverlo'}.`].filter(Boolean).join('\n'),
+    prioridad: 'alta', departamento: 'soporte', entregaA: null, origen: 'escalada',
+    escalada: { persona, motivo, sugerencia },
+    estado: 'bloqueada', resultado: `Esperando al Presidente: contactar a ${persona}${sugerencia ? ` para ${sugerencia}` : ''}.`,
+    creada: ahora, iniciada: null, completada: ahora,
+  };
+  guardar([...leerTareas(), t]);
+  log('ESCALADA', `${t.id} ${t.titulo}`);
+  return t;
+}
+
 /** Rutinas: cada departamento se genera solo sus tareas periódicas (sin esperar órdenes). */
 export function generarRutinas(ahora = new Date()) {
   if (!existsSync(RUTINAS_FILE)) return [];
