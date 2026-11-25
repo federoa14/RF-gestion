@@ -166,22 +166,11 @@ export interface TenantEffectiveFeatureAccess {
 
 export function getTenantEffectiveFeatureAccess(tenant: Tenant): TenantEffectiveFeatureAccess {
   const evalStatus = getTenantSubscriptionStatus(tenant);
-  const explicitTier = resolveTenantPlanTier(tenant);
-  const isTrialFullPreview = evalStatus.status === 'trial_active';
-
-  // Durante la prueba gratis de 30 días habilitamos todo salvo que el superadmin haya apagado la web manualmente
-  if (isTrialFullPreview) {
-    const webEnabled = tenant.catalogEnabled !== false;
-    return {
-      tier: explicitTier,
-      sectionLabel: explicitTier
-        ? `${getPlanDefinitionByTier(explicitTier).sectionBadge} · ${getPlanDefinitionByTier(explicitTier).shortName}`
-        : 'Prueba Gratis 30d (Acceso Full)',
-      isTrialFullPreview: true,
-      canAccessWebCatalog: webEnabled,
-      canAccessFullFeatures: true,
-    };
-  }
+  // La prueba gratis de 30 días se vive como Plan 2 (con sus límites de rubros y artículos),
+  // salvo que el superadmin le haya asignado otro plan de forma explícita.
+  const isTrialActive = evalStatus.status === 'trial_active';
+  const explicitTier = resolveTenantPlanTier(tenant) || (isTrialActive ? 'web' : undefined);
+  const isTrialFullPreview = false;
 
   if (explicitTier === 'basico') {
     return {
@@ -196,8 +185,8 @@ export function getTenantEffectiveFeatureAccess(tenant: Tenant): TenantEffective
   if (explicitTier === 'web') {
     return {
       tier: 'web',
-      sectionLabel: 'Plan 2 · Con Página Web',
-      isTrialFullPreview: false,
+      sectionLabel: isTrialActive ? 'Prueba Gratis 30d · Plan 2 · Con Página Web' : 'Plan 2 · Con Página Web',
+      isTrialFullPreview,
       canAccessWebCatalog: tenant.catalogEnabled !== false,
       canAccessFullFeatures: false,
     };
@@ -525,7 +514,7 @@ export function getTenantSubscriptionStatus(
         dayOfMonth: monthInfo.dayOfMonth,
         monthlyFee: sub.monthlyFee,
         daysPastWindow: 0,
-        actionNeededMessage: `Período de prueba gratis de 30 días vigente hasta el ${endStr}.`,
+        actionNeededMessage: `Período de prueba gratis de 30 días (con las condiciones del Plan 2) vigente hasta el ${endStr}.`,
       };
     }
 
@@ -549,7 +538,7 @@ export function getTenantSubscriptionStatus(
       dayOfMonth: monthInfo.dayOfMonth,
       monthlyFee: sub.monthlyFee,
       daysPastWindow: Math.max(1, Math.abs(daysRemaining)),
-      actionNeededMessage: `Tu prueba gratuita de 30 días finalizó el ${endStr}. Efectuá el pago para continuar operando o pausá tu cuenta.`,
+      actionNeededMessage: `Tu prueba gratuita de 30 días finalizó el ${endStr}. Elegí tu plan (bajar a Plan 1, mantener Plan 2 o subir a Plan 3) y efectuá el pago para continuar, o pausá tu cuenta.`,
     };
   }
 

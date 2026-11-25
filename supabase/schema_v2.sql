@@ -503,7 +503,7 @@ begin
     raise exception 'El código de empresa ya está en uso. Probá con otro.';
   end if;
 
-  -- La prueba gratis la define el servidor (no se puede falsear desde el navegador)
+  -- La prueba gratis la define el servidor (no se puede falsear desde el navegador): 30 días con el Plan 2
   v_business := jsonb_set(p_business, '{id}', to_jsonb(v_id));
   v_business := jsonb_set(v_business, '{status}', '"trial"');
   v_business := jsonb_set(v_business, '{subscription}',
@@ -512,6 +512,8 @@ begin
       || jsonb_build_object(
            'isPaused', false,
            'selfRegistered', true,
+           'planTier', 'web',
+           'planSelectedAt', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
            'trialDays', 30,
            'trialStartedAt', to_char(v_today, 'YYYY-MM-DD'),
            'trialEndsAt', to_char(v_today + 30, 'YYYY-MM-DD'),

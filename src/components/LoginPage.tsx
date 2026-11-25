@@ -450,7 +450,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   </span>
                 </div>
                 <p className="text-xs text-[#94A3B8] mt-1">
-                  Creá tu perfil al instante con acceso completo durante 30 días sin cargo. Al cumplirse los 30 días, se habilitará la opción para generar tu pago y continuar operando o pausar la cuenta.
+                  Creá tu perfil al instante y usá el Plan 2 (gestión + página web con hasta 5 rubros y 50 artículos) durante 30 días sin cargo. Al cumplirse los 30 días podés bajar al Plan 1, mantener el Plan 2 o subir al Plan 3, o pausar la cuenta.
                 </p>
               </div>
 

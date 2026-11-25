@@ -928,6 +928,9 @@ function buildTrialRegistration(
       trialEndsAt: trialEndsStr,
       trialDays: 30,
       selfRegistered: true,
+      // La prueba gratis es con el Plan 2 (límites de rubros y artículos incluidos)
+      planTier: 'web',
+      planSelectedAt: now.toISOString(),
       termsAccepted: true,
       termsAcceptedAt: input.termsAcceptedAt || now.toISOString(),
       termsVersion: input.termsVersion || '2026.1',
