@@ -3,159 +3,515 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dashboard de tareas</title>
+<title>Oficina virtual · RF Gestiones</title>
 <style>
   :root {
-    --bg: #f6f7f9; --card: #fff; --text: #1c2330; --muted: #657084; --line: #dfe3ea;
-    --accent: #2f5bea; --alta: #d93a3a; --media: #d98a1c; --baja: #2f8f5b; --ok: #2f8f5b; --block: #8a5cd6;
+    --bg: #eef0f4; --card: #ffffff; --text: #1c2330; --muted: #657084; --line: #dfe3ea; --accent: #2f5bea;
+    --floor: #e7dfd2; --floor-line: #d9cfbf; --wood: #c9a06a; --wood-dark: #a97f4b; --wall: #f7f4ee;
+    --alta: #d93a3a; --media: #d98a1c; --baja: #2f8f5b; --ok: #2f8f5b; --block: #8a5cd6; --shadow: 0 6px 18px rgba(20,30,50,.10);
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #14171d; --card: #1d222b; --text: #e8ebf1; --muted: #98a2b5; --line: #2d3441; --accent: #7b9bff; }
+    :root {
+      --bg: #12151b; --card: #1c212a; --text: #e8ebf1; --muted: #98a2b5; --line: #2d3441; --accent: #7b9bff;
+      --floor: #232832; --floor-line: #2b313d; --wood: #8a6a43; --wood-dark: #6d522f; --wall: #1a1e26; --shadow: 0 6px 18px rgba(0,0,0,.35);
+    }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
-  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 20px; grid-template-columns: 1fr 340px; }
-  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
-  h1 { grid-column: 1 / -1; margin: 0; font-size: 22px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
-  form.nueva { display: grid; gap: 8px; margin-bottom: 14px; }
-  input, textarea, select, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
-  textarea { resize: vertical; min-height: 56px; }
-  .fila { display: flex; gap: 8px; flex-wrap: wrap; }
-  .fila > input { flex: 1 1 200px; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button, input, select, textarea { font: inherit; color: inherit; }
   button { cursor: pointer; }
-  button.primario { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.peligro { color: var(--alta); }
-  .filtros { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 18px 16px 60px; }
+  header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  header.top h1 { margin: 0; font-size: 22px; letter-spacing: -.01em; }
+  header.top p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .resumen { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { background: var(--card); border: 1px solid var(--line); border-radius: 99px; padding: 4px 12px; font-size: 13px; }
+  .chip b { font-weight: 700; }
+  h2.sec { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 26px 0 10px; }
+
+  /* ---------- Oficina ---------- */
+  .oficina { background: var(--wall); border: 1px solid var(--line); border-radius: 20px; padding: 14px; box-shadow: var(--shadow); }
+  .piso {
+    border-radius: 14px; padding: 16px; display: grid; gap: 16px;
+    background-color: var(--floor);
+    background-image: linear-gradient(var(--floor-line) 1px, transparent 1px), linear-gradient(90deg, var(--floor-line) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .presidencia {
+    position: relative; display: grid; grid-template-columns: auto 1fr; gap: 14px 22px; align-items: end; cursor: pointer; text-align: left; width: 100%;
+    background: linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,.2)); background-color: var(--card);
+    border: 2px solid #d4af37; border-radius: 16px; padding: 14px 20px 14px 16px; box-shadow: var(--shadow);
+  }
+  @media (prefers-color-scheme: dark) { .presidencia { background: var(--card); } }
+  .presidencia .rotulo { position: absolute; top: -11px; left: 18px; background: #d4af37; color: #2b2208; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; padding: 2px 10px; border-radius: 99px; }
+  .presidencia h3 { margin: 0; font-size: 20px; }
+  .presidencia .cargo { color: var(--muted); font-size: 13px; }
+  .presidencia .hint { margin-top: 8px; font-size: 13px; color: var(--accent); }
+  .escritorios { display: grid; gap: 16px; grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 1020px) { .escritorios { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 760px) { .escritorios { grid-template-columns: repeat(2, 1fr); } .presidencia { grid-template-columns: 1fr; justify-items: center; text-align: center; } }
+  @media (max-width: 440px) { .escritorios { grid-template-columns: 1fr; } }
+
+  .desk {
+    --c: #777; position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px 10px 12px;
+    background: var(--card); border: 1px solid var(--line); border-top: 4px solid var(--c); border-radius: 14px; box-shadow: var(--shadow);
+    transition: transform .15s, box-shadow .15s; width: 100%;
+  }
+  .desk:hover, .desk:focus-visible { transform: translateY(-3px); box-shadow: 0 10px 24px rgba(20,30,50,.18); outline: none; }
+  .desk:focus-visible, .presidencia:focus-visible { box-shadow: 0 0 0 3px var(--accent); }
+  .burbuja {
+    position: relative; min-height: 44px; width: 100%; padding: 6px 9px; border-radius: 12px; font-size: 12.5px; line-height: 1.3;
+    background: color-mix(in srgb, var(--c) 12%, var(--card)); border: 1px solid color-mix(in srgb, var(--c) 35%, var(--line)); display: flex; align-items: center; justify-content: center;
+  }
+  .burbuja::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 12px; height: 12px; background: inherit; border: inherit; border-top: 0; border-left: 0; transform: translateX(-50%) rotate(45deg); }
+  .burbuja span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .escena { position: relative; width: 100%; height: 150px; margin-top: 6px; display: flex; justify-content: center; }
+  .escena .persona { position: absolute; bottom: 38px; width: 104px; height: 104px; }
+  .escena .persona svg, .presidencia .persona svg { width: 100%; height: 100%; display: block; }
+  .mesa { position: absolute; bottom: 0; left: 6%; right: 6%; height: 46px; border-radius: 10px 10px 8px 8px; background: linear-gradient(180deg, var(--wood), var(--wood-dark)); box-shadow: 0 3px 0 rgba(0,0,0,.12); }
+  .monitor { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); width: 64px; height: 42px; border-radius: 6px; background: #2a2f3a; border: 2px solid #1b1f27; display: grid; place-items: center; font-size: 18px; z-index: 2; }
+  .monitor::after { content: ""; position: absolute; bottom: -9px; width: 14px; height: 8px; background: #1b1f27; }
+  .teclado { position: absolute; bottom: 8px; left: 50%; transform: translateX(-60%); width: 40px; height: 8px; border-radius: 3px; background: #dfe3ea; z-index: 3; box-shadow: 0 1px 0 rgba(0,0,0,.2); }
+  .taza { position: absolute; bottom: 10px; right: 20%; width: 11px; height: 11px; border-radius: 2px 2px 5px 5px; background: #fff; border: 2px solid #c8ccd4; z-index: 3; }
+  .planta { position: absolute; bottom: 26px; left: 9%; z-index: 3; font-size: 20px; }
+  .trabajando .monitor { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 70%, transparent), 0 0 16px var(--c); }
+  .trabajando .persona { animation: teclear .7s ease-in-out infinite alternate; }
+  .libre .persona { animation: respirar 3.2s ease-in-out infinite alternate; }
+  @keyframes teclear { from { transform: translateY(0); } to { transform: translateY(-2.5px); } }
+  @keyframes respirar { from { transform: translateY(0); } to { transform: translateY(-1px); } }
+  @media (prefers-reduced-motion: reduce) { .trabajando .persona, .libre .persona { animation: none; } }
+  .placa { margin-top: 8px; }
+  .placa b { display: block; font-size: 14.5px; }
+  .placa small { display: block; color: var(--muted); font-size: 12px; line-height: 1.25; }
+  .depto { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--c); }
+  .punto { width: 9px; height: 9px; border-radius: 50%; background: #98a2b5; display: inline-block; }
+  .trabajando .punto { background: #2fb36b; box-shadow: 0 0 0 3px rgba(47,179,107,.22); }
+  .con_pendientes .punto { background: #e0a21f; }
+  .cuentas { display: flex; gap: 10px; justify-content: center; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .cuentas b { color: var(--text); }
+
+  /* ---------- Pizarra ---------- */
+  .pizarra { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px; box-shadow: var(--shadow); }
+  .rapida { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .rapida input { flex: 1 1 220px; }
+  input, select, textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+  textarea { width: 100%; resize: vertical; min-height: 58px; }
+  .btn { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 12px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primario { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.mini { padding: 2px 9px; font-size: 12.5px; }
+  .btn.peligro { color: var(--alta); }
+  .filtros { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .filtros button { border: 1px solid var(--line); background: var(--bg); border-radius: 99px; padding: 3px 11px; font-size: 13px; }
   .filtros button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
-  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-  li.tarea { border: 1px solid var(--line); border-left: 5px solid var(--media); border-radius: 8px; padding: 10px 12px; }
-  li.tarea.alta { border-left-color: var(--alta); } li.tarea.baja { border-left-color: var(--baja); }
-  li.tarea.completada { opacity: .75; } li.tarea.completada .titulo { text-decoration: line-through; }
-  .titulo { font-weight: 600; }
-  .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
-  .desc, .resultado { margin: 6px 0 0; white-space: pre-wrap; }
-  .resultado { color: var(--muted); border-top: 1px dashed var(--line); padding-top: 6px; }
-  .etiqueta { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); margin-left: 6px; }
-  .etiqueta.completada { color: var(--ok); } .etiqueta.bloqueada { color: var(--block); }
-  .acciones { display: flex; gap: 6px; margin-top: 8px; }
-  .acciones button { padding: 3px 10px; font-size: 13px; }
-  .editor { display: grid; gap: 8px; }
-  pre#log { margin: 0; max-height: 480px; overflow: auto; font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
-  .vacio, .error { color: var(--muted); text-align: center; padding: 18px 0; } .error { color: var(--alta); padding: 6px 0; text-align: left; }
-  h2 { margin: 0 0 10px; font-size: 16px; }
+  .cols { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); align-items: start; }
+  @media (max-width: 1020px) { .cols { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .cols { grid-template-columns: 1fr; } }
+  .col { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 10px; min-height: 120px; }
+  .col.sobre { outline: 2px dashed var(--accent); }
+  .col h3 { margin: 0 0 8px; font-size: 14px; display: flex; justify-content: space-between; }
+  .col h3 span { color: var(--muted); font-weight: 500; }
+  .col ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .tarjeta { --c: #777; background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--c); border-radius: 9px; padding: 8px 10px; }
+  .tarjeta[draggable="true"] { cursor: grab; }
+  .tarjeta .tit { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+  .completada .tit { text-decoration: line-through; color: var(--muted); }
+  .completada { opacity: .85; }
+  .tarjeta .pill { font-size: 11.5px; font-weight: 600; color: var(--c); }
+  .prio { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+  .prio.alta { background: var(--alta); } .prio.media { background: var(--media); } .prio.baja { background: var(--baja); }
+  .tarjeta p { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tarjeta .res { border-top: 1px dashed var(--line); padding-top: 4px; }
+  .tarjeta .entrega { font-size: 12px; color: var(--accent); margin-top: 4px; }
+  .acc { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; align-items: center; }
+  .acc select { padding: 1px 4px; font-size: 12px; max-width: 120px; }
+  .vacio { color: var(--muted); font-size: 13px; text-align: center; padding: 14px 0; }
+  .error { color: var(--alta); min-height: 1.2em; font-size: 13px; }
+  details.actividad { margin-top: 18px; }
+  details.actividad summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+  pre#log { margin: 8px 0 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px; max-height: 320px; overflow: auto; font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
+
+  /* ---------- Panel lateral ---------- */
+  .velo { position: fixed; inset: 0; background: rgba(10,14,22,.45); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 20; }
+  .velo.abierto { opacity: 1; pointer-events: auto; }
+  .panel {
+    position: fixed; top: 0; right: 0; height: 100%; width: min(480px, 100%); background: var(--card); border-left: 1px solid var(--line);
+    transform: translateX(105%); transition: transform .22s ease; z-index: 21; display: flex; flex-direction: column; box-shadow: -10px 0 30px rgba(0,0,0,.18);
+  }
+  .panel.abierto { transform: none; }
+  @media (prefers-reduced-motion: reduce) { .panel, .velo { transition: none; } }
+  .panel .cab { --c: #777; display: flex; gap: 14px; align-items: center; padding: 14px 16px; border-bottom: 4px solid var(--c); background: color-mix(in srgb, var(--c) 9%, var(--card)); }
+  .panel .cab .persona { width: 76px; height: 76px; flex: none; border-radius: 50%; overflow: hidden; background: color-mix(in srgb, var(--c) 18%, var(--card)); }
+  .panel .cab .persona svg { width: 100%; height: 100%; }
+  .panel .cab h2 { margin: 0; font-size: 18px; }
+  .panel .cab small { color: var(--muted); display: block; }
+  .panel .cab .cerrar { margin-left: auto; align-self: flex-start; font-size: 20px; line-height: 1; background: none; border: none; padding: 4px 8px; color: var(--muted); }
+  .panel .cuerpo { overflow-y: auto; padding: 14px 16px 30px; display: grid; gap: 16px; align-content: start; }
+  .panel h3 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .dialogo { background: color-mix(in srgb, var(--accent) 8%, var(--bg)); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .dialogo p { margin: 0 0 6px; } .dialogo p:last-child { margin: 0; }
+  .dialogo q { font-weight: 600; }
+  .orden { display: grid; gap: 8px; }
+  .orden .fila { display: flex; gap: 8px; flex-wrap: wrap; }
+  .orden .fila > * { flex: 1 1 120px; }
+  .lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .lista li { font-size: 13.5px; padding-left: 16px; position: relative; }
+  .lista li::before { content: "•"; position: absolute; left: 4px; color: var(--c, var(--accent)); }
+  .lista.no li::before { content: "×"; color: var(--alta); }
+  .aviso { font-size: 12.5px; color: var(--muted); }
+  .ok { color: var(--ok); font-size: 13px; min-height: 1.2em; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Dashboard de tareas</h1>
-  <section class="card">
-    <form class="nueva" id="form-nueva">
-      <div class="fila">
-        <input id="n-titulo" placeholder="Nueva tarea…" maxlength="200" required aria-label="Título">
-        <select id="n-prio" aria-label="Prioridad">
-          <option value="alta">Alta</option><option value="media" selected>Media</option><option value="baja">Baja</option>
-        </select>
-        <button class="primario" type="submit">Agregar</button>
-      </div>
-      <textarea id="n-desc" placeholder="Descripción / instrucciones (opcional)" aria-label="Descripción"></textarea>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>🏢 RF Gestiones · Oficina virtual</h1>
+      <p>Presidente: <b>Federico Roa</b> · tocá un escritorio para hablar con el departamento</p>
+    </div>
+    <div class="resumen" id="resumen" aria-live="polite"></div>
+  </header>
+
+  <section class="oficina" aria-label="Oficina">
+    <div class="piso">
+      <button class="presidencia" id="presidencia" type="button" aria-label="Despacho del presidente"></button>
+      <div class="escritorios" id="escritorios"></div>
+    </div>
+  </section>
+
+  <h2 class="sec">Pizarra de tareas</h2>
+  <section class="pizarra">
+    <form class="rapida" id="form-rapida">
+      <input id="r-titulo" placeholder="Nueva orden rápida…" maxlength="200" required aria-label="Título de la orden">
+      <select id="r-depto" aria-label="Departamento"></select>
+      <select id="r-prio" aria-label="Prioridad"><option value="alta">Alta</option><option value="media" selected>Media</option><option value="baja">Baja</option></select>
+      <button class="btn primario" type="submit">Dar la orden</button>
     </form>
     <div class="error" id="error" role="alert"></div>
     <div class="filtros" id="filtros"></div>
-    <ul id="lista"></ul>
+    <div class="cols" id="cols"></div>
   </section>
-  <aside class="card">
-    <h2>Actividad (tasks.log)</h2>
+
+  <details class="actividad">
+    <summary>Registro de actividad</summary>
     <pre id="log"></pre>
-  </aside>
-</main>
+  </details>
+</div>
+
+<div class="velo" id="velo"></div>
+<aside class="panel" id="panel" role="dialog" aria-modal="true" aria-labelledby="panel-titulo" aria-hidden="true"></aside>
+
 <script>
 const $ = (id) => document.getElementById(id);
-const PRIO = { alta: 1, media: 2, baja: 3 };
-let tareas = [], filtro = 'todas', editando = null;
+const COLS = [
+  ['pendiente', 'Por hacer'], ['en_curso', 'En curso'], ['completada', 'Hecho'], ['bloqueada', 'Bloqueadas / esperan al Presidente'],
+];
+const PRIO_ETQ = { alta: 'Alta', media: 'Media', baja: 'Baja' };
+let datos = null, firma = '', filtro = 'todos', abierto = null, arrastrando = false;
 
+/* ---------- utilidades ---------- */
 async function api(metodo, ruta, cuerpo) {
   const r = await fetch(ruta, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
   const d = await r.json();
   if (!r.ok) throw new Error(d.error || 'Error');
   return d;
 }
-function mostrarError(e) { $('error').textContent = e ? e.message : ''; }
 function el(tag, props = {}, ...hijos) {
-  const n = Object.assign(document.createElement(tag), props);
-  n.append(...hijos); return n;
+  const { dataset, attrs, ...resto } = props;
+  const n = Object.assign(document.createElement(tag), resto);
+  if (dataset) Object.assign(n.dataset, dataset);
+  if (attrs) for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  n.append(...hijos.filter((h) => h !== null && h !== undefined && h !== false)); return n;
 }
-const fecha = (iso) => new Date(iso).toLocaleString('es');
-
-async function cargar() {
-  tareas = await api('GET', '/api/tasks');
-  const lineas = await api('GET', '/api/log');
-  const log = $('log'); const abajo = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
-  log.textContent = lineas.join('\n') || 'Sin actividad todavía.';
-  if (abajo) log.scrollTop = log.scrollHeight;
-  pintar();
+const hex = (c) => (/^#[0-9a-f]{6}$/i.test(c) ? c : '#888888');
+function shade(c, amt) {
+  const n = parseInt(hex(c).slice(1), 16);
+  const f = (v) => Math.max(0, Math.min(255, v + amt));
+  return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => f(v).toString(16).padStart(2, '0')).join('');
 }
-
-function pintar() {
-  const filtros = $('filtros'); filtros.replaceChildren();
-  for (const f of ['todas', 'pendiente', 'completada', 'bloqueada']) {
-    const n = f === 'todas' ? tareas.length : tareas.filter((t) => t.estado === f).length;
-    const b = el('button', { type: 'button', textContent: `${f[0].toUpperCase() + f.slice(1)} (${n})` });
-    b.setAttribute('aria-pressed', String(filtro === f));
-    b.onclick = () => { filtro = f; pintar(); };
-    filtros.append(b);
-  }
-  const lista = $('lista'); lista.replaceChildren();
-  const vis = tareas.filter((t) => filtro === 'todas' || t.estado === filtro);
-  if (!vis.length) lista.append(el('li', { className: 'vacio', textContent: 'No hay tareas.' }));
-  for (const t of vis) lista.append(t.id === editando ? editor(t) : tarjeta(t));
+function hace(iso) {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+  if (m < 1) return 'hace un momento'; if (m < 60) return `hace ${m} min`;
+  const h = Math.round(m / 60); return h < 24 ? `hace ${h} h` : `hace ${Math.round(h / 24)} d`;
 }
+const depto = (id) => datos.departamentos.find((d) => d.id === id);
+const recortar = (s, n = 70) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 
-function tarjeta(t) {
-  const li = el('li', { className: `tarea ${t.prioridad} ${t.estado}` });
-  const cab = el('div', {}, el('span', { className: 'titulo', textContent: t.titulo }));
-  if (t.estado !== 'pendiente') cab.append(el('span', { className: `etiqueta ${t.estado}`, textContent: t.estado }));
-  li.append(cab, el('div', { className: 'meta', textContent: `Prioridad ${t.prioridad} · creada ${fecha(t.creada)}${t.completada ? ` · cerrada ${fecha(t.completada)}` : ''}` }));
-  if (t.descripcion) li.append(el('p', { className: 'desc', textContent: t.descripcion }));
-  if (t.resultado) li.append(el('p', { className: 'resultado', textContent: `Resultado: ${t.resultado}` }));
-  const ac = el('div', { className: 'acciones' });
-  ac.append(
-    el('button', { type: 'button', textContent: 'Editar', onclick: () => { editando = t.id; pintar(); } }),
-    el('button', { type: 'button', className: 'peligro', textContent: 'Eliminar', onclick: async () => {
-      if (!confirm(`¿Eliminar "${t.titulo}"?`)) return;
-      try { await api('DELETE', `/api/tasks/${t.id}`); mostrarError(); cargar(); } catch (e) { mostrarError(e); }
-    } }),
+/* ---------- avatar (SVG) ---------- */
+function avatar(p) {
+  const sk = hex(p.piel), ha = hex(p.pelo), sh = hex(p.camisa), oscuro = shade(sk, -22);
+  const pelos = {
+    corto: `<path d="M35 55C32 30 48 24 61 24 76 24 88 32 85 55 80 44 74 38 60 38 48 38 40 44 35 55Z" fill="${ha}"/>`,
+    largo: `<path d="M35 56C33 30 48 24 61 24 76 24 88 32 85 56 78 42 66 36 56 40 46 42 38 48 35 56Z" fill="${ha}"/>`,
+    rapado: `<path d="M37 48C38 32 50 28 60 28 72 28 83 32 83 48 78 40 70 37 60 37 50 37 42 40 37 48Z" fill="${ha}" opacity=".55"/>`,
+    rodete: `<circle cx="60" cy="17" r="9" fill="${ha}"/><path d="M35 55C32 30 48 24 61 24 76 24 88 32 85 55 80 44 74 38 60 38 48 38 40 44 35 55Z" fill="${ha}"/>`,
+    rulos: [[40, 34], [52, 27], [66, 27], [80, 34], [36, 46], [84, 46], [60, 33]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="11" fill="${ha}"/>`).join(''),
+  };
+  const atras = p.estiloPelo === 'largo' ? `<path d="M31 64C26 28 46 18 60 18 76 18 94 28 89 64L92 106 28 106Z" fill="${ha}"/>` : '';
+  const lentes = p.lentes ? '<g fill="none" stroke="#1d1d1d" stroke-width="2"><circle cx="50" cy="58" r="7.5"/><circle cx="70" cy="58" r="7.5"/><path d="M57.5 58h5"/></g>' : '';
+  return `<svg viewBox="0 0 120 120" role="img" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">${atras}
+    <path d="M14 122C14 96 34 90 60 90 86 90 106 96 106 122Z" fill="${sh}"/>
+    <path d="M48 91 60 106 72 91Z" fill="${oscuro}"/>
+    <rect x="51" y="76" width="18" height="18" rx="7" fill="${oscuro}"/>
+    <circle cx="36" cy="60" r="5" fill="${sk}"/><circle cx="84" cy="60" r="5" fill="${sk}"/>
+    <ellipse cx="60" cy="56" rx="24" ry="27" fill="${sk}"/>
+    ${pelos[p.estiloPelo] || pelos.corto}
+    <circle cx="50" cy="58" r="2.6" fill="#1b1b1b"/><circle cx="70" cy="58" r="2.6" fill="#1b1b1b"/>
+    <path d="M44 49q6-3 11 0M65 49q6-3 11 0" stroke="${shade(ha, -10)}" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    ${lentes}
+    <path d="M52 70q8 7 16 0" stroke="#7a3b2e" stroke-width="2.4" fill="none" stroke-linecap="round"/></svg>`;
+}
+function personaEl(p) { const d = el('div', { className: 'persona' }); d.innerHTML = avatar(p); return d; }
+
+/* ---------- lo que dice cada persona (según la pizarra real) ---------- */
+function dialogo(d) {
+  const out = [];
+  if (d.ahora) out.push(el('p', {}, 'Ahora estoy con: ', el('q', { textContent: d.ahora.titulo }), ` (desde ${hace(d.ahora.iniciada)}).`));
+  else if (d.proxima) out.push(el('p', {}, 'Todavía no arranqué. Lo próximo que tengo es: ', el('q', { textContent: d.proxima.titulo }), '.'));
+  else out.push(el('p', { textContent: 'No tengo nada pendiente. ¿Qué necesitás, Federico?' }));
+  if (d.ahora && d.cuentas.pendiente) out.push(el('p', { textContent: `Después me quedan ${d.cuentas.pendiente} por hacer.` }));
+  if (d.ultimaHecha) out.push(el('p', {}, 'Lo último que terminé: ', el('q', { textContent: d.ultimaHecha.titulo }), d.ultimaHecha.resultado ? ` — ${d.ultimaHecha.resultado}` : '', ` (${hace(d.ultimaHecha.completada)}).`));
+  return out;
+}
+const burbuja = (d) => d.ahora ? `🛠 ${d.ahora.titulo}` : d.proxima ? `⏳ Por empezar: ${d.proxima.titulo}` : '💤 Libre, esperando órdenes';
+
+/* ---------- oficina ---------- */
+function pintarOficina() {
+  const t = datos.tareas;
+  $('resumen').replaceChildren(...[
+    el('span', { className: 'chip' }, el('b', { textContent: t.filter((x) => x.estado === 'pendiente').length }), ' por hacer'),
+    el('span', { className: 'chip' }, el('b', { textContent: t.filter((x) => x.estado === 'en_curso').length }), ' en curso'),
+    el('span', { className: 'chip' }, el('b', { textContent: t.filter((x) => x.estado === 'completada').length }), ' hechas'),
+    datos.sinAsignar ? el('span', { className: 'chip', textContent: `⚠ ${datos.sinAsignar} sin asignar` }) : null,
+    t.some((x) => x.estado === 'bloqueada') ? el('span', { className: 'chip', textContent: `✋ ${t.filter((x) => x.estado === 'bloqueada').length} te esperan` }) : null,
+  ].filter(Boolean));
+
+  const p = datos.presidente;
+  const pres = $('presidencia');
+  pres.replaceChildren(
+    el('span', { className: 'rotulo', textContent: 'Presidencia' }),
+    personaEl(p),
+    el('div', {}, el('h3', { textContent: p.nombre }), el('div', { className: 'cargo', textContent: `${p.cargo} de ${datos.empresa}` }),
+      el('div', { className: 'hint', textContent: 'Tocá para dar una orden general o revisar lo que espera tu decisión →' })),
   );
-  if (t.estado !== 'pendiente') ac.append(el('button', { type: 'button', textContent: 'Reabrir', onclick: async () => {
-    try { await api('PUT', `/api/tasks/${t.id}`, { estado: 'pendiente' }); mostrarError(); cargar(); } catch (e) { mostrarError(e); }
-  } }));
-  li.append(ac);
+  pres.querySelector('.persona').style.cssText = 'width:96px;height:96px';
+
+  $('escritorios').replaceChildren(...datos.departamentos.map((d) => {
+    const c = d.cuentas;
+    const b = el('button', { type: 'button', className: `desk ${d.situacion}`, dataset: { id: d.id }, onclick: () => abrirDepto(d.id), attrs: { 'aria-label': `${d.nombre}: ${d.persona.nombre}. ${burbuja(d)}` } },
+      el('div', { className: 'burbuja' }, el('span', { textContent: burbuja(d) })),
+      el('div', { className: 'escena' },
+        personaEl(d.persona),
+        el('div', { className: 'mesa' }),
+        el('div', { className: 'monitor', textContent: d.emoji }),
+        el('div', { className: 'planta', textContent: ['🪴', '🌵', '🍀'][d.nombre.length % 3] }),
+        el('div', { className: 'teclado' }), el('div', { className: 'taza' })),
+      el('div', { className: 'placa' }, el('b', { textContent: d.persona.nombre }), el('small', { textContent: d.persona.cargo }),
+        el('span', { className: 'depto' }, el('i', { className: 'punto' }), d.nombre)),
+      el('div', { className: 'cuentas' }, el('span', {}, 'por hacer ', el('b', { textContent: c.pendiente })), el('span', {}, 'en curso ', el('b', { textContent: c.en_curso })), el('span', {}, 'hechas ', el('b', { textContent: c.completada }))),
+    );
+    b.style.setProperty('--c', hex(d.color));
+    return b;
+  }));
+}
+$('presidencia').onclick = abrirPresidente;
+
+/* ---------- pizarra ---------- */
+function filtrar() {
+  return datos.tareas.filter((t) => filtro === 'todos' || t.departamento === filtro);
+}
+function pintarFiltros() {
+  const f = $('filtros');
+  const cuenta = (id) => datos.tareas.filter((t) => id === 'todos' || t.departamento === id).length;
+  const opciones = [['todos', 'Todos'], ...datos.departamentos.map((d) => [d.id, `${d.emoji} ${d.nombre}`]), ['sin_asignar', 'Sin asignar']];
+  f.replaceChildren(...opciones.map(([id, nombre]) => {
+    const b = el('button', { type: 'button', textContent: `${nombre} (${cuenta(id)})`, onclick: () => { filtro = id; pintarPizarra(); } });
+    b.setAttribute('aria-pressed', String(filtro === id)); return b;
+  }));
+}
+function opcionesDepto(sel, { conSin = true, valor = '' } = {}) {
+  sel.replaceChildren(...[conSin ? el('option', { value: '', textContent: 'Sin asignar (que lo derive Claude)' }) : null,
+    ...datos.departamentos.map((d) => el('option', { value: d.id, textContent: `${d.emoji} ${d.nombre}` }))]);
+  sel.value = valor;
+}
+function tarjeta(t) {
+  const d = depto(t.departamento);
+  const li = el('li', { className: `tarjeta ${t.estado}`, draggable: true, dataset: { id: t.id } });
+  li.style.setProperty('--c', d ? hex(d.color) : '#8a93a5');
+  li.addEventListener('dragstart', (e) => { arrastrando = true; e.dataTransfer.setData('text/plain', t.id); });
+  li.addEventListener('dragend', () => { arrastrando = false; });
+  li.append(
+    el('div', { className: 'pill' }, d ? `${d.emoji} ${d.nombre}` : '❔ Sin asignar'),
+    el('div', { className: 'tit' }, el('i', { className: `prio ${t.prioridad}`, title: `Prioridad ${PRIO_ETQ[t.prioridad]}` }), t.titulo),
+  );
+  if (t.descripcion) li.append(el('p', { textContent: recortar(t.descripcion, 220) }));
+  if (t.entregaA && !t.entregado) li.append(el('div', { className: 'entrega', textContent: `↪ al terminar se entrega a ${depto(t.entregaA)?.nombre}` }));
+  if (t.entregado) li.append(el('div', { className: 'entrega', textContent: `↪ entregado a ${depto(t.entregaA)?.nombre}` }));
+  if (t.resultado) li.append(el('p', { className: 'res', textContent: `${t.estado === 'bloqueada' ? 'Motivo' : 'Resultado'}: ${t.resultado}` }));
+  const acc = el('div', { className: 'acc' });
+  const accion = (txt, fn, cls = '') => el('button', { type: 'button', className: `btn mini ${cls}`, textContent: txt, onclick: () => hacer(fn) });
+  if (t.estado === 'pendiente') acc.append(accion('▶ Tomar', () => api('POST', `/api/tasks/${t.id}/iniciar`)));
+  if (t.estado === 'en_curso') acc.append(accion('✔ Hecha', () => cerrarTarea(t, 'completar')), accion('✋ Bloquear', () => cerrarTarea(t, 'bloquear')), accion('↩ A por hacer', () => api('PUT', `/api/tasks/${t.id}`, { estado: 'pendiente' })));
+  if (t.estado === 'pendiente') acc.append(accion('✔ Hecha', () => cerrarTarea(t, 'completar')));
+  if (t.estado === 'completada' || t.estado === 'bloqueada') acc.append(accion('↩ Reabrir', () => api('PUT', `/api/tasks/${t.id}`, { estado: 'pendiente' })));
+  if (t.estado !== 'completada') {
+    const sel = el('select', { attrs: { 'aria-label': 'Derivar a otro departamento' } });
+    sel.append(el('option', { value: '', textContent: 'Derivar a…' }), ...datos.departamentos.filter((x) => x.id !== t.departamento).map((x) => el('option', { value: x.id, textContent: x.nombre })));
+    sel.onchange = () => sel.value && hacer(() => api('PUT', `/api/tasks/${t.id}`, { departamento: sel.value }));
+    acc.append(sel);
+  }
+  acc.append(accion('🗑', () => confirm(`¿Eliminar "${t.titulo}"?`) ? api('DELETE', `/api/tasks/${t.id}`) : null, 'peligro'));
+  li.append(acc);
   return li;
 }
-
-function editor(t) {
-  const li = el('li', { className: `tarea ${t.prioridad}` });
-  const titulo = el('input', { value: t.titulo, maxLength: 200 });
-  const prio = el('select'); for (const p of Object.keys(PRIO)) prio.append(el('option', { value: p, textContent: p, selected: p === t.prioridad }));
-  const desc = el('textarea', { value: t.descripcion });
-  const guardar = el('button', { type: 'button', className: 'primario', textContent: 'Guardar', onclick: async () => {
-    try { await api('PUT', `/api/tasks/${t.id}`, { titulo: titulo.value, prioridad: prio.value, descripcion: desc.value }); editando = null; mostrarError(); cargar(); } catch (e) { mostrarError(e); }
-  } });
-  const cancelar = el('button', { type: 'button', textContent: 'Cancelar', onclick: () => { editando = null; pintar(); } });
-  li.append(el('div', { className: 'editor' }, el('div', { className: 'fila' }, titulo, prio), desc, el('div', { className: 'acciones' }, guardar, cancelar)));
-  return li;
+async function cerrarTarea(t, tipo) {
+  const txt = prompt(tipo === 'completar' ? 'Resumen de lo que se hizo (opcional):' : 'Motivo del bloqueo:', '');
+  if (txt === null) return null;
+  return api('POST', `/api/tasks/${t.id}/${tipo}`, { texto: txt });
+}
+async function hacer(fn) {
+  try { await fn(); $('error').textContent = ''; await cargar(true); } catch (e) { $('error').textContent = e.message; }
+}
+function pintarPizarra() {
+  pintarFiltros();
+  const vis = filtrar();
+  $('cols').replaceChildren(...COLS.map(([estado, nombre]) => {
+    const items = vis.filter((t) => t.estado === estado);
+    const col = el('div', { className: 'col', dataset: { estado } },
+      el('h3', {}, nombre, el('span', { textContent: items.length })),
+      el('ul', {}, ...(items.length ? items.map(tarjeta) : [el('li', { className: 'vacio', textContent: estado === 'completada' ? 'Todavía no hay nada hecho.' : 'Vacío.' })])));
+    col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('sobre'); });
+    col.addEventListener('dragleave', () => col.classList.remove('sobre'));
+    col.addEventListener('drop', (e) => {
+      e.preventDefault(); col.classList.remove('sobre'); arrastrando = false;
+      const t = datos.tareas.find((x) => x.id === e.dataTransfer.getData('text/plain'));
+      if (!t || t.estado === estado) return;
+      hacer(() => estado === 'en_curso' ? api('POST', `/api/tasks/${t.id}/iniciar`)
+        : estado === 'completada' ? api('POST', `/api/tasks/${t.id}/completar`, {})
+        : estado === 'bloqueada' ? api('POST', `/api/tasks/${t.id}/bloquear`, {})
+        : api('PUT', `/api/tasks/${t.id}`, { estado: 'pendiente' }));
+    });
+    return col;
+  }));
 }
 
-$('form-nueva').onsubmit = async (ev) => {
-  ev.preventDefault();
+/* ---------- panel lateral ---------- */
+function abrirPanel(cab, cuerpo, c = '#777') {
+  const p = $('panel');
+  cab.style.setProperty('--c', c);
+  p.replaceChildren(cab, cuerpo);
+  p.classList.add('abierto'); $('velo').classList.add('abierto'); p.setAttribute('aria-hidden', 'false');
+  p.querySelector('.cerrar').focus();
+}
+function cerrarPanel() {
+  abierto = null; $('panel').classList.remove('abierto'); $('velo').classList.remove('abierto'); $('panel').setAttribute('aria-hidden', 'true');
+}
+$('velo').onclick = cerrarPanel;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && abierto) cerrarPanel(); });
+const cabecera = (persona, titulo, sub) => el('div', { className: 'cab' }, personaEl(persona),
+  el('div', {}, el('h2', { id: 'panel-titulo', textContent: titulo }), el('small', { textContent: sub })),
+  el('button', { type: 'button', className: 'cerrar', textContent: '✕', onclick: cerrarPanel, attrs: { 'aria-label': 'Cerrar' } }));
+
+function formOrden({ deptoFijo = null, entregas = [] }) {
+  const titulo = el('input', { placeholder: deptoFijo ? '¿Qué querés que haga?' : 'Orden general…', maxLength: 200, required: true });
+  const desc = el('textarea', { placeholder: 'Detalles o instrucciones (opcional)' });
+  const prio = el('select'); prio.append(...Object.entries(PRIO_ETQ).map(([v, n]) => el('option', { value: v, textContent: `Prioridad ${n.toLowerCase()}`, selected: v === 'media' })));
+  const dsel = el('select', { attrs: { 'aria-label': 'Departamento' } });
+  if (!deptoFijo) opcionesDepto(dsel);
+  const entrega = el('select', { attrs: { 'aria-label': 'Entregar el resultado a' } });
+  entrega.append(el('option', { value: '', textContent: 'No entregar a nadie' }), ...datos.departamentos.filter((x) => entregas.includes(x.id)).map((x) => el('option', { value: x.id, textContent: `Entregar a ${x.nombre}` })));
+  const ok = el('div', { className: 'ok', attrs: { role: 'status' } }), err = el('div', { className: 'error', attrs: { role: 'alert' } });
+  const f = el('form', { className: 'orden' }, titulo, desc,
+    el('div', { className: 'fila' }, deptoFijo ? null : dsel, prio, entregas.length || !deptoFijo ? entrega : null),
+    el('button', { className: 'btn primario', type: 'submit', textContent: 'Dar la orden' }), ok, err);
+  if (!deptoFijo) dsel.onchange = () => {
+    const d = depto(dsel.value); const ids = d ? d.entregaA : datos.departamentos.map((x) => x.id);
+    entrega.replaceChildren(el('option', { value: '', textContent: 'No entregar a nadie' }), ...datos.departamentos.filter((x) => ids.includes(x.id) && x.id !== dsel.value).map((x) => el('option', { value: x.id, textContent: `Entregar a ${x.nombre}` })));
+  };
+  f.onsubmit = async (e) => {
+    e.preventDefault(); err.textContent = ''; ok.textContent = '';
+    try {
+      await api('POST', '/api/tasks', { titulo: titulo.value, descripcion: desc.value, prioridad: prio.value, departamento: deptoFijo || dsel.value, entregaA: entrega.value });
+      titulo.value = ''; desc.value = ''; ok.textContent = '✔ Orden dada. Aparece en la pizarra.'; await cargar(true);
+    } catch (x) { err.textContent = x.message; }
+  };
+  return f;
+}
+function listaTareasPanel(tareas) {
+  if (!tareas.length) return el('div', { className: 'vacio', textContent: 'Sin tareas todavía.' });
+  return el('ul', { className: 'lista', style: 'gap:8px' }, ...tareas.map((t) => {
+    const etq = { pendiente: '⏳', en_curso: '🛠', completada: '✔', bloqueada: '✋' }[t.estado];
+    return el('li', { style: 'padding-left:0' }, el('div', { style: `${t.estado === 'completada' ? 'text-decoration:line-through;color:var(--muted)' : ''}` }, `${etq} `, el('b', { textContent: t.titulo })),
+      t.resultado ? el('div', { className: 'aviso', textContent: t.resultado }) : null);
+  }));
+}
+function abrirDepto(id) {
+  abierto = { tipo: 'depto', id };
+  const d = depto(id);
+  const cab = cabecera(d.persona, d.persona.nombre, `${d.persona.cargo} · ${d.nombre}`);
+  const vivo = el('div', { className: 'dialogo', attrs: { 'aria-live': 'polite' } });
+  const lista = el('div');
+  const cuerpo = el('div', { className: 'cuerpo' },
+    el('section', {}, el('h3', { textContent: 'Qué está haciendo' }), vivo),
+    el('section', {}, el('h3', { textContent: 'Darle una orden' }), formOrden({ deptoFijo: id, entregas: d.entregaA })),
+    el('section', {}, el('h3', { textContent: 'Sus tareas' }), lista),
+    el('section', {}, el('h3', { textContent: 'Quién es' }), el('p', { className: 'aviso', style: 'margin:0', textContent: d.persona.bio })),
+    el('section', {}, el('h3', { textContent: 'Misión' }), el('p', { style: 'margin:0', textContent: d.mision })),
+    el('section', {}, el('h3', { textContent: 'Sus funciones' }), el('ul', { className: 'lista' }, ...d.funciones.map((x) => el('li', { textContent: x })))),
+    el('section', {}, el('h3', { textContent: 'Reglas que cumple' }), el('ul', { className: 'lista' }, ...d.reglas.map((x) => el('li', { textContent: x })))),
+    el('section', {}, el('h3', { textContent: 'Lo que tiene prohibido' }), el('ul', { className: 'lista no' }, ...d.prohibido.map((x) => el('li', { textContent: x })))),
+    el('section', {}, el('h3', { textContent: 'Trabaja con' }), el('p', { className: 'aviso', style: 'margin:0', textContent: `Recibe pedidos de: ${d.recibeDe.map((x) => depto(x).nombre).join(', ') || '—'}. Entrega a: ${d.entregaA.map((x) => depto(x).nombre).join(', ') || '—'}.` })),
+  );
+  abrirPanel(cab, cuerpo, hex(d.color));
+  abierto.vivo = () => {
+    const dd = depto(id);
+    vivo.replaceChildren(...dialogo(dd));
+    lista.replaceChildren(listaTareasPanel(datos.tareas.filter((t) => t.departamento === id && t.estado !== 'completada').concat(datos.tareas.filter((t) => t.departamento === id && t.estado === 'completada').slice(0, 8))));
+  };
+  abierto.vivo();
+}
+function abrirPresidente() {
+  abierto = { tipo: 'presidente' };
+  const p = datos.presidente;
+  const cab = cabecera(p, p.nombre, `${p.cargo} de ${datos.empresa}`);
+  const espera = el('div');
+  const cuerpo = el('div', { className: 'cuerpo' },
+    el('section', {}, el('h3', { textContent: 'Orden general' }), formOrden({ entregas: [] }),
+      el('p', { className: 'aviso', textContent: 'Si no elegís departamento, la orden queda «sin asignar» y Claude la deriva al que corresponda. También podés pedírselo directamente a Claude en el chat: la pizarra es la misma.' })),
+    el('section', {}, el('h3', { textContent: 'Esperan tu decisión' }), espera),
+    el('section', {}, el('h3', { textContent: 'Reglamento de la oficina' }), el('ul', { className: 'lista' }, ...datos.reglamento.map((x) => el('li', { textContent: x })))),
+  );
+  abrirPanel(cab, cuerpo, '#d4af37');
+  abierto.vivo = () => {
+    const b = datos.tareas.filter((t) => t.estado === 'bloqueada');
+    espera.replaceChildren(b.length ? listaTareasPanel(b) : el('div', { className: 'vacio', textContent: 'Nada espera tu decisión. 👌' }));
+  };
+  abierto.vivo();
+}
+
+/* ---------- carga ---------- */
+async function cargar(forzar = false) {
+  const [of, lineas] = await Promise.all([api('GET', '/api/oficina'), api('GET', '/api/log')]);
+  const nueva = JSON.stringify(of) + lineas.length;
+  if (!forzar && nueva === firma) { return; }
+  if (!forzar && arrastrando) return;
+  firma = nueva; datos = of;
+  const l = $('log'), abajo = l.scrollTop + l.clientHeight >= l.scrollHeight - 8;
+  l.textContent = lineas.join('\n') || 'Sin actividad todavía.';
+  if (abajo) l.scrollTop = l.scrollHeight;
+  pintarOficina(); pintarPizarra();
+  opcionesDepto($('r-depto'), { valor: $('r-depto').value });
+  if (abierto) abierto.vivo();
+}
+$('form-rapida').onsubmit = async (e) => {
+  e.preventDefault();
   try {
-    await api('POST', '/api/tasks', { titulo: $('n-titulo').value, prioridad: $('n-prio').value, descripcion: $('n-desc').value });
-    $('n-titulo').value = ''; $('n-desc').value = ''; mostrarError(); cargar();
-  } catch (e) { mostrarError(e); }
+    await api('POST', '/api/tasks', { titulo: $('r-titulo').value, prioridad: $('r-prio').value, departamento: $('r-depto').value });
+    $('r-titulo').value = ''; $('error').textContent = ''; await cargar(true);
+  } catch (x) { $('error').textContent = x.message; }
 };
-
-cargar().catch(mostrarError);
-setInterval(() => { if (editando === null) cargar().catch(() => {}); }, 5000);
+cargar(true).catch((e) => { $('error').textContent = e.message; });
+setInterval(() => cargar().catch(() => {}), 3000);
 </script>
 </body>
 </html>

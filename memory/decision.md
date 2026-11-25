@@ -59,3 +59,9 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Hallazgo (logs de Supabase):** publicar la tienda (`public_catalogs`) fallaba con error 500 por "statement timeout": el documento pesaba ~6 MB porque las fotos van en base64. Por eso ni colores ni filtros llegaban a la tienda, aunque se guardaran en los ajustes.
 - **Decisión:** al publicar se achican las fotos y el logo (`src/utils/imageShrink.ts`) y, si la publicación falla, se avisa con un mensaje. Filtros y subfiltros se guardan y publican al instante, sin depender del botón Guardar de Configuración.
 - **Pendiente posible:** mover las fotos a Supabase Storage (URLs) en lugar de base64.
+
+## 2026-11-25 — Oficina virtual con departamentos
+- **Decisión:** el dashboard de `tareas/` pasó a ser una oficina virtual: 8 departamentos con una persona ficticia cada uno (Marketing, Ventas, Diseño, Gestión, Actualización, Evolución, Atención al Cliente, Legal y Finanzas), el presidente es Federico Roa. Pizarra Por hacer / En curso / Hecho (tachado) / Bloqueadas. Se dan órdenes tocando un escritorio o desde el chat (misma pizarra: `tareas/tasks.json`).
+- **Reglamento:** `tareas/departamentos.json` (misión, funciones, reglas, prohibiciones). Nada con efecto externo (publicar, enviar, gastar, deploy, credenciales, borrar) sin aprobación del presidente: queda Bloqueada «esperando aprobación».
+- **Flujo:** Diseño entrega flyers a Marketing (`entregaA` crea la tarea sola). Evolución investiga otras páginas y propone ideas con fuente.
+- **Límite:** lo que muestra la oficina es el estado real de la pizarra; los departamentos «trabajan» cuando Claude (sesión o tarea horaria) toma y cierra tareas, no por su cuenta.

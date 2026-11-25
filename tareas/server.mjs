@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DIR, leerTareas, ordenar, agregar, editar, eliminar, ultimasLineasLog, log } from './lib.mjs';
+import { DIR, leerTareas, ordenar, agregar, editar, eliminar, iniciar, completar, bloquear, estadoOficina, ultimasLineasLog, log } from './lib.mjs';
 
 const PORT = Number(process.env.PORT) || 3939;
 const HOST = '127.0.0.1';
@@ -40,13 +40,22 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       return res.end(readFileSync(join(DIR, 'public', 'index.html')));
     }
+    if (req.method === 'GET' && url.pathname === '/api/oficina') return json(res, 200, estadoOficina());
     if (req.method === 'GET' && url.pathname === '/api/tasks') return json(res, 200, ordenar(leerTareas()));
     if (req.method === 'GET' && url.pathname === '/api/log') return json(res, 200, ultimasLineasLog(200));
-    if (req.method === 'POST' && url.pathname === '/api/tasks') return json(res, 201, agregar(await leerCuerpo(req)));
+    if (req.method === 'POST' && url.pathname === '/api/tasks') return json(res, 201, agregar(await leerCuerpo(req), 'oficina'));
 
     const m = url.pathname.match(/^\/api\/tasks\/([\w-]+)$/);
     if (m && req.method === 'PUT') return json(res, 200, editar(m[1], await leerCuerpo(req)));
     if (m && req.method === 'DELETE') { eliminar(m[1]); return json(res, 200, { ok: true }); }
+
+    const acc = url.pathname.match(/^\/api\/tasks\/([\w-]+)\/(iniciar|completar|bloquear)$/);
+    if (acc && req.method === 'POST') {
+      const texto = (await leerCuerpo(req)).texto;
+      if (acc[2] === 'iniciar') return json(res, 200, iniciar(acc[1]));
+      if (acc[2] === 'completar') return json(res, 200, completar(acc[1], texto || 'Marcada como hecha por Federico Roa.'));
+      return json(res, 200, bloquear(acc[1], texto || 'Bloqueada por Federico Roa.'));
+    }
     return json(res, 404, { error: 'No encontrado.' });
   } catch (e) {
     return json(res, e.message === 'Tarea no encontrada.' ? 404 : 400, { error: e.message });

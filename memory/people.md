@@ -8,3 +8,7 @@ Formato: `## Nombre o rol` · relación con el proyecto · notas útiles · últ
 - Rol: dueño y desarrollador principal de RF-gestion.
 - Notas: escribe en español.
 - Actualizado: 2026-11-25
+
+## Federico Roa
+- Rol: presidente de RF Gestiones (el dueño). Su orden manda sobre cualquier departamento.
+- Actualizado: 2026-11-25
