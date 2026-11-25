@@ -35,3 +35,9 @@ python3 scripts/decisiones.py add "decisión" "razonamiento" "resultado esperado
 ```
 
 Se guarda con la fecha de hoy y una fecha de revisión a 30 días. Si falta el razonamiento o el resultado esperado, pregúntaselo antes de registrar. Un workflow diario (`.github/workflows/revision-decisiones.yml`) marca como `revision pendiente` las que vencen; `./review.sh` muestra solo esas. Cuando el usuario revise una, ejecuta `python3 scripts/decisiones.py done "texto de la decisión"`. Las decisiones importantes también van resumidas en `memory/decision.md`.
+
+## Dashboard de tareas (`tareas/`)
+
+- Interfaz local: `node tareas/server.mjs` → http://localhost:3939. Datos en `tareas/tasks.json`, actividad en `tareas/tasks.log` (sin dependencias).
+- Trabajo autónomo (tarea programada cada hora): la rama de estado es `claude/festive-franklin-9q3qsl`. Cada ejecución hace `git fetch origin claude/festive-franklin-9q3qsl` y trabaja sobre esa rama. Si `node tareas/cli.mjs count` da 0, no hace nada. Si no, toma la pendiente de mayor prioridad con `node tareas/cli.mjs next`, la hace y la cierra con `done <id> "qué hice"` (o `block <id> "motivo"` si no puede hacerla sola). Repite hasta vaciar la lista y hace commit y push de `tareas/` y del trabajo.
+- Nunca ejecutar de forma autónoma acciones destructivas o con efecto externo (borrar datos, force-push, merge a `main`, deploys, enviar mensajes, gastar dinero, tocar credenciales): se marcan `block` con el motivo.
