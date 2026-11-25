@@ -1182,6 +1182,7 @@ export default function App() {
       pickupHours: nextSettings.pickupHours || 'Lunes a Sábado · 9:00 a 19:00 hs',
       pickupInstructions: nextSettings.pickupInstructions,
       paymentNote: nextSettings.paymentNote,
+      paymentMethods: nextSettings.paymentMethods,
       merchantPaymentAlias: cfg.merchantPaymentAlias,
       merchantPaymentCvu: cfg.merchantPaymentCvu,
       merchantPaymentBank: cfg.merchantPaymentBank,

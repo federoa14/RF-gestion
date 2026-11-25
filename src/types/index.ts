@@ -871,6 +871,8 @@ export interface OnlineCatalogSettings {
   pickupHours?: string;
   pickupInstructions?: string;
   paymentNote?: string;
+  // Medios de pago que el comercio ofrece en la tienda (sin definir = todos, como antes)
+  paymentMethods?: Partial<Record<'transferencia' | 'mercadopago' | 'efectivo' | 'acordar', boolean>>;
   currencySymbol?: string;
   defaultLowStockThreshold?: number; // Alerta cuando queden <= N unidades (por defecto 2)
   cashOrTransferDiscountPercent?: number; // % descuento pagando Efectivo / Transferencia
@@ -1008,6 +1010,7 @@ export interface PublishedPublicCatalog {
   pickupHours: string;
   pickupInstructions?: string;
   paymentNote?: string;
+  paymentMethods?: Partial<Record<'transferencia' | 'mercadopago' | 'efectivo' | 'acordar', boolean>>;
   merchantPaymentAlias?: string;
   merchantPaymentCvu?: string;
   merchantPaymentBank?: string;

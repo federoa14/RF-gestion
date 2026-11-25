@@ -77,6 +77,12 @@ import {
 } from '../types';
 import { formatCurrency } from '../utils/alerts';
 import {
+  CATALOG_PAYMENT_OPTION_KEYS,
+  CATALOG_PAYMENT_OPTION_LABELS,
+  isPaymentOptionEnabled,
+  resolveEnabledPaymentOptions,
+} from '../utils/catalogPaymentOptions';
+import {
   CatalogOrderProcessStage,
   createWhatsAppUrl,
   generateAbandonedCartRecoveryWhatsAppMessage,
@@ -373,6 +379,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       settings.pickupInstructions ||
       'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
     paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
+    paymentMethods: settings.paymentMethods,
     defaultLowStockThreshold: settings.defaultLowStockThreshold ?? 2,
     cashOrTransferDiscountPercent: settings.cashOrTransferDiscountPercent ?? 0,
     coupons: settings.coupons || [],
@@ -428,6 +435,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         settings.pickupInstructions ||
         'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
       paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
+      paymentMethods: settings.paymentMethods,
       defaultLowStockThreshold: settings.defaultLowStockThreshold ?? 2,
       cashOrTransferDiscountPercent: settings.cashOrTransferDiscountPercent ?? 0,
       coupons: settings.coupons || [],
@@ -463,6 +471,12 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     merchantMpCheckoutLink: config.merchantMpCheckoutLink || '',
     merchantMpAccessToken: '',
   });
+  // Mercado Pago solo se puede ofrecer si el comercio lo tiene configurado (token o link de cobro)
+  const merchantMpAvailable = Boolean(
+    config.hasMerchantMpAccessToken ||
+      draftMerchantPayment.merchantMpAccessToken.trim() ||
+      draftMerchantPayment.merchantMpCheckoutLink.trim()
+  );
 
   useEffect(() => {
     setDraftMerchantPayment((prev) => ({
@@ -1528,6 +1542,22 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     e.preventDefault();
     if (draftSettings.allowPickup === false && draftSettings.allowDelivery === false) {
       showToast('Activá al menos una modalidad: Retiro en tienda o Envío a domicilio.');
+      return;
+    }
+    const enabledPayments = resolveEnabledPaymentOptions(draftSettings.paymentMethods, {
+      mercadoPagoAvailable: merchantMpAvailable,
+    });
+    if (enabledPayments.length === 0) {
+      showToast('Activá al menos un medio de pago para la tienda.');
+      return;
+    }
+    if (
+      draftSettings.paymentMethods &&
+      isPaymentOptionEnabled(draftSettings.paymentMethods, 'transferencia') &&
+      !draftMerchantPayment.merchantPaymentAlias.trim() &&
+      !draftMerchantPayment.merchantPaymentCvu.trim()
+    ) {
+      showToast('Para ofrecer Transferencia cargá tu alias o CVU (más abajo, en Cobros).');
       return;
     }
     const cleanRubroFilters = normalizeFilterList(draftSettings.rubroFilters);
@@ -6762,7 +6792,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-700">
-                Formas de pago al retirar
+                Nota sobre los pagos (opcional)
               </label>
               <input
                 type="text"
@@ -6825,6 +6855,56 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   placeholder="Ej. Envíos en el día en zona centro. Te pasamos alias/link por WhatsApp para abonar."
                   className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
                 />
+              </div>
+            </div>
+
+            {/* Medios de pago que se ofrecen en la tienda */}
+            <div className="sm:col-span-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+              <div>
+                <div className="text-xs font-bold text-slate-800">Medios de pago que ofrecés</div>
+                <p className="text-[11px] text-slate-500">
+                  El comprador solo ve los que marques. Tiene que haber al menos uno.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {CATALOG_PAYMENT_OPTION_KEYS.map((key) => {
+                  const isMp = key === 'mercadopago';
+                  const disabled = isMp && !merchantMpAvailable;
+                  const checked = !disabled && isPaymentOptionEnabled(draftSettings.paymentMethods, key);
+                  return (
+                    <label
+                      key={key}
+                      className={`flex items-start gap-2.5 p-2.5 rounded-lg border bg-white text-xs ${
+                        disabled ? 'opacity-60 cursor-not-allowed border-slate-200' : 'cursor-pointer border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={(e) =>
+                          setDraftSettings((prev) => {
+                            const base = prev.paymentMethods
+                              ? { ...prev.paymentMethods }
+                              : Object.fromEntries(
+                                  CATALOG_PAYMENT_OPTION_KEYS.map((k) => [k, k === 'mercadopago' ? merchantMpAvailable : true])
+                                );
+                            return { ...prev, paymentMethods: { ...base, [key]: e.target.checked } };
+                          })
+                        }
+                        className="mt-0.5 rounded border-slate-300"
+                      />
+                      <span>
+                        <span className="block font-semibold text-slate-800">{CATALOG_PAYMENT_OPTION_LABELS[key].title}</span>
+                        <span className="block text-[11px] text-slate-500">
+                          {disabled
+                            ? 'Configurá tu token o link de Mercado Pago (más abajo, en Cobros) para ofrecerlo.'
+                            : CATALOG_PAYMENT_OPTION_LABELS[key].hint}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
 

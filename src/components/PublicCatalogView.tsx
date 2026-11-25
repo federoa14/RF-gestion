@@ -77,6 +77,11 @@ import {
   verifyCatalogOrderMercadoPagoPayment,
   verifyCatalogTransferReceiptViaServer,
 } from '../utils/supabaseServices';
+import {
+  CATALOG_PAYMENT_OPTION_LABELS,
+  resolveEnabledPaymentOptions,
+  type CatalogPaymentOptionKey,
+} from '../utils/catalogPaymentOptions';
 import { formatCurrency } from '../utils/alerts';
 import { getCatalogRubroPreset, normalizeFilterList } from '../utils/catalogRubros';
 import {
@@ -262,6 +267,21 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const [mpSubOption, setMpSubOption] = useState<'dinero_en_cuenta' | 'tarjetas_todos'>(
     'dinero_en_cuenta'
   );
+  // Medios de pago que el comercio eligió ofrecer (Mercado Pago solo si está configurado)
+  const enabledPayOptions = useMemo(
+    () =>
+      catalog
+        ? resolveEnabledPaymentOptions(catalog.paymentMethods, {
+            mercadoPagoAvailable: Boolean(catalog.hasMerchantMpAccessToken || catalog.merchantMpCheckoutLink?.trim()),
+          })
+        : (['transferencia', 'mercadopago', 'efectivo', 'acordar'] as CatalogPaymentOptionKey[]),
+    [catalog]
+  );
+  useEffect(() => {
+    if (enabledPayOptions.length > 0 && !enabledPayOptions.includes(selectedPayGroup)) {
+      setSelectedPayGroup(enabledPayOptions[0]);
+    }
+  }, [enabledPayOptions, selectedPayGroup]);
   const [transferReceiptImageUrl, setTransferReceiptImageUrl] = useState('');
   const [transferReference, setTransferReference] = useState('');
   const [isCompressingReceipt, setIsCompressingReceipt] = useState(false);
@@ -2344,12 +2364,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                 </div>
               </div>
             )}
-            {catalog.paymentNote && (
+            {enabledPayOptions.length > 0 && (
               <div className="flex items-start gap-2">
                 <CreditCard className="w-4 h-4 text-sky-300 shrink-0 mt-0.5" />
                 <div>
                   <span className="text-slate-300 block text-[11px]">Medios de pago</span>
-                  <strong className="text-white">{catalog.paymentNote}</strong>
+                  <strong className="text-white">
+                    {enabledPayOptions.map((k) => CATALOG_PAYMENT_OPTION_LABELS[k].title).join(' · ')}
+                  </strong>
+                  {catalog.paymentNote &&
+                    catalog.paymentNote.trim() !== 'Efectivo, transferencia o link de pago' && (
+                      <span className="block text-[11px] text-slate-300 mt-0.5">{catalog.paymentNote}</span>
+                    )}
                 </div>
               </div>
             )}
@@ -4143,7 +4169,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                               selectedPayGroup === 'mercadopago' &&
                                               mpSubOption !== 'dinero_en_cuenta'
                                             ) {
-                                              setSelectedPayGroup('efectivo');
+                                              setSelectedPayGroup(
+                                                enabledPayOptions.includes('efectivo') ? 'efectivo' : enabledPayOptions[0] || 'acordar'
+                                              );
                                             }
                                           }}
                                           className="px-2 py-1 rounded-lg bg-white border border-amber-300 hover:bg-amber-100 text-[10px] font-bold text-amber-950 cursor-pointer"
@@ -4151,6 +4179,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                           Cambiar a Retiro en local
                                         </button>
                                       )}
+                                      {enabledPayOptions.includes('transferencia') && (
                                       <button
                                         type="button"
                                         onClick={() => setSelectedPayGroup('transferencia')}
@@ -4158,6 +4187,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                       >
                                         Pagar con Transferencia
                                       </button>
+                                      )}
+                                      {enabledPayOptions.includes('mercadopago') && (
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -4168,6 +4199,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                                       >
                                         Dinero en cuenta MP
                                       </button>
+                                      )}
                                     </div>
                                   </div>
                                 )
@@ -4204,7 +4236,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                           value={giftCardCodeInput}
                           onChange={(e) => setGiftCardCodeInput(e.target.value.toUpperCase())}
                           placeholder="Código de Gift Card (ej. GC-A8F2)"
-                          className="flex-1 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 uppercase"
+                          className="flex-1 min-w-0 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900 uppercase"
                         />
                         <button
                           type="button"
@@ -4523,7 +4555,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                               : 'Para canjear puntos elegí Retiro en el local, Transferencia o Mercado Pago (Dinero en cuenta).'}
                           </p>
                         )}
-                      <div className="grid grid-cols-2 gap-2">
+                      {/* Solo los medios de pago que el comercio eligió ofrecer */}
+                      <div className={`grid gap-2 ${enabledPayOptions.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                        {enabledPayOptions.includes('transferencia') && (
                         <button
                           type="button"
                           onClick={() => setSelectedPayGroup('transferencia')}
@@ -4545,7 +4579,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             Ver Alias y subir comprobante
                           </p>
                         </button>
+                        )}
 
+                        {enabledPayOptions.includes('mercadopago') && (
                         <button
                           type="button"
                           onClick={() => setSelectedPayGroup('mercadopago')}
@@ -4567,7 +4603,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             Dinero en cuenta / Tarjetas
                           </p>
                         </button>
+                        )}
 
+                        {enabledPayOptions.includes('efectivo') && (
                         <button
                           type="button"
                           onClick={() => setSelectedPayGroup('efectivo')}
@@ -4589,7 +4627,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             {deliveryMethod === 'envio' ? 'Al recibir envío' : 'Al retirar en local'}
                           </p>
                         </button>
+                        )}
 
+                        {enabledPayOptions.includes('acordar') && (
                         <button
                           type="button"
                           onClick={() => setSelectedPayGroup('acordar')}
@@ -4611,6 +4651,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                             Con el vendedor por WhatsApp
                           </p>
                         </button>
+                        )}
                       </div>
 
                       {/* Transferencia Box: Alias del dueño + carga de comprobante */}
