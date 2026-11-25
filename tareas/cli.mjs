@@ -3,7 +3,7 @@
 //   next                          la pendiente de mayor prioridad (JSON) o VACIA
 //   count                         número de tareas pendientes
 //   list                          lista todas las tareas ordenadas
-//   add "título" [depto] [prio] ["descripción"] [entregaA]
+//   add "título" [depto] [prio] ["descripción"] [entregaA] [apoyo,apoyo]
 //                                 crea una orden (depto: marketing, ventas, diseno, gestion,
 //                                 actualizacion, evolucion, soporte, legal; vacío = sin_asignar)
 //   start <id>                    el departamento toma la tarea (pasa a «En curso»)
@@ -11,11 +11,13 @@
 //   block <id> "motivo"           la marca como bloqueada (no se pudo hacer sola / falta aprobación)
 //   assign <id> <depto>           deriva una tarea a un departamento
 //   rules [depto]                 imprime el reglamento general y el de un departamento
+//   routines                      genera las tareas periódicas que ya tocan (idempotente; correr primero en cada ejecución autónoma)
+//   redes [pausar|reanudar]       estado del interruptor de redes; con pausar/reanudar lo cambia
 //   log "texto"                   añade una línea de actividad
-import { pendientes, leerTareas, ordenar, agregar, editar, iniciar, completar, bloquear, log, leerOficina } from './lib.mjs';
+import { pendientes, leerTareas, ordenar, agregar, editar, generarRutinas, leerRedes, ajustarRedes, iniciar, completar, bloquear, log, leerOficina } from './lib.mjs';
 
-const [cmd, a, b, c, d, e] = process.argv.slice(2);
-const USO = 'Uso: cli.mjs next | count | list | add "título" [depto] [prio] ["descripción"] [entregaA] | start <id> | done <id> "resumen" | block <id> "motivo" | assign <id> <depto> | rules [depto] | log "texto"';
+const [cmd, a, b, c, d, e, f] = process.argv.slice(2);
+const USO = 'Uso: cli.mjs next | count | list | add "título" [depto] [prio] ["descripción"] [entregaA] [apoyo,apoyo] | start <id> | done <id> "resumen" | block <id> "motivo" | assign <id> <depto> | rules [depto] | routines | redes [pausar|reanudar] | log "texto"';
 
 try {
   if (cmd === 'next') {
@@ -28,7 +30,7 @@ try {
       console.log(`${t.id}  ${t.prioridad.padEnd(5)}  ${t.estado.padEnd(10)}  ${t.departamento.padEnd(13)}  ${t.titulo}`);
     }
   } else if (cmd === 'add' && a) {
-    const t = agregar({ titulo: a, departamento: b, prioridad: c || 'media', descripcion: d || '', entregaA: e }, 'claude');
+    const t = agregar({ titulo: a, departamento: b, prioridad: c || 'media', descripcion: d || '', entregaA: e, apoyo: f ? f.split(',') : [] }, 'claude');
     console.log(`Creada ${t.id} en ${t.departamento}.`);
   } else if (cmd === 'start' && a) {
     iniciar(a); console.log('En curso.');
@@ -47,6 +49,10 @@ try {
       const lista = (t, xs) => `${t}:\n- ${xs.join('\n- ')}`;
       console.log(`\nDEPARTAMENTO: ${dep.nombre} — ${dep.persona.nombre}, ${dep.persona.cargo}\nMisión: ${dep.mision}\n${lista('Funciones', dep.funciones)}\n${lista('Reglas', dep.reglas)}\n${lista('Prohibido', dep.prohibido)}\nEntrega a: ${dep.entregaA.join(', ') || '—'}`);
     }
+  } else if (cmd === 'routines') {
+    const n = generarRutinas(); console.log(n.length ? n.map((t) => `${t.id} [${t.departamento}] ${t.titulo}`).join('\n') : 'Sin rutinas nuevas.');
+  } else if (cmd === 'redes') {
+    console.log(JSON.stringify(a === 'pausar' || a === 'reanudar' ? ajustarRedes({ pausada: a === 'pausar' }) : leerRedes()));
   } else if (cmd === 'log' && a) {
     log('NOTA', a);
   } else {

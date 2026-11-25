@@ -53,7 +53,8 @@
     "estado": "pendiente",
     "resultado": "",
     "creada": "2026-11-25T22:25:10.804Z",
-    "completada": null
+    "completada": null,
+    "rutina": "gestion-informe"
   },
   {
     "departamento": "actualizacion",
@@ -67,7 +68,8 @@
     "estado": "pendiente",
     "resultado": "",
     "creada": "2026-11-25T22:25:10.829Z",
-    "completada": null
+    "completada": null,
+    "rutina": "actualizacion-revision"
   },
   {
     "departamento": "evolucion",
@@ -81,7 +83,8 @@
     "estado": "pendiente",
     "resultado": "",
     "creada": "2026-11-25T22:25:10.858Z",
-    "completada": null
+    "completada": null,
+    "rutina": "evolucion-rastreo"
   },
   {
     "departamento": "soporte",
@@ -95,19 +98,95 @@
     "estado": "pendiente",
     "resultado": "",
     "creada": "2026-11-25T22:25:10.898Z",
-    "completada": null
+    "completada": null,
+    "rutina": "soporte-faq"
   },
   {
+    "departamento": "legal",
+    "entregaA": null,
+    "origen": "claude",
+    "iniciada": null,
     "id": "ad8e7197",
     "titulo": "Listar los puntos de los Términos y Condiciones para revisar con el abogado",
     "descripcion": "Texto redactado por Claude, pendiente de revisión profesional (ver memory/decision.md).",
     "prioridad": "media",
-    "departamento": "legal",
-    "entregaA": null,
-    "origen": "claude",
     "estado": "pendiente",
     "resultado": "",
     "creada": "2026-11-25T22:25:10.932Z",
+    "completada": null
+  },
+  {
+    "id": "98ee4e8c",
+    "titulo": "Piezas de la semana para redes (3 flyers, feed y stories)",
+    "descripcion": "Pensadas con Marketing: un flyer de producto/servicio, uno de consejo útil para cobranzas y uno institucional. Entregar a Marketing.",
+    "prioridad": "alta",
+    "departamento": "diseno",
+    "entregaA": "marketing",
+    "origen": "rutina",
+    "rutina": "diseno-piezas",
+    "estado": "pendiente",
+    "resultado": "",
+    "creada": "2026-11-25T22:27:24.822Z",
+    "iniciada": null,
+    "completada": null
+  },
+  {
+    "id": "83d0b61b",
+    "titulo": "Plan de publicaciones de la semana y publicación de lo recibido de Diseño",
+    "descripcion": "Objetivo, público y llamado a la acción en cada posteo. Respetar las barreras y el límite diario de redes. Si falta una pieza, pedirla a Diseño.",
+    "prioridad": "alta",
+    "departamento": "marketing",
+    "entregaA": null,
+    "origen": "rutina",
+    "rutina": "marketing-plan",
+    "estado": "pendiente",
+    "resultado": "",
+    "creada": "2026-11-25T22:27:24.822Z",
+    "iniciada": null,
+    "completada": null
+  },
+  {
+    "id": "0d6b01e9",
+    "titulo": "Revisar métricas, comentarios y mensajes de las redes",
+    "descripcion": "Responder con cordialidad. Consultas de compra a Ventas; reclamos a Atención al Cliente; reclamo grave o tema legal: bloquear y avisar al Presidente.",
+    "prioridad": "media",
+    "departamento": "marketing",
+    "entregaA": "ventas",
+    "origen": "rutina",
+    "rutina": "marketing-redes",
+    "estado": "pendiente",
+    "resultado": "",
+    "creada": "2026-11-25T22:27:24.822Z",
+    "iniciada": null,
+    "completada": null
+  },
+  {
+    "id": "a295912c",
+    "titulo": "Seguimiento de consultas e interesados abiertos",
+    "descripcion": "Registrar el próximo paso de cada contacto. Anotar qué piden los clientes para pasárselo a Evolución.",
+    "prioridad": "media",
+    "departamento": "ventas",
+    "entregaA": null,
+    "origen": "rutina",
+    "rutina": "ventas-seguimiento",
+    "estado": "pendiente",
+    "resultado": "",
+    "creada": "2026-11-25T22:27:24.822Z",
+    "iniciada": null,
+    "completada": null
+  },
+  {
+    "id": "4e848966",
+    "titulo": "Revisar que lo publicado y prometido cumpla la ley",
+    "descripcion": "Avisar al Presidente y a Marketing de cualquier riesgo, citando la norma o diciendo que falta verificarla.",
+    "prioridad": "media",
+    "departamento": "legal",
+    "entregaA": null,
+    "origen": "rutina",
+    "rutina": "legal-revision",
+    "estado": "pendiente",
+    "resultado": "",
+    "creada": "2026-11-25T22:27:24.822Z",
     "iniciada": null,
     "completada": null
   }

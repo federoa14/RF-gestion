@@ -38,3 +38,28 @@ test('lo que Diseño termina le llega a Marketing una sola vez', () => {
   assert.equal(recibidas.length, 1);
   assert.match(recibidas[0].titulo, /Recibido de Diseño/);
 });
+
+test('las rutinas se generan solas, una vez, y respetan la cadencia', () => {
+  const hoy = new Date('2026-12-01T10:00:00Z');
+  const primera = lib.generarRutinas(hoy);
+  assert.ok(primera.length > 0);
+  assert.equal(lib.generarRutinas(hoy).length, 0, 'no se duplican mientras siguen abiertas');
+  const t = primera[0];
+  lib.completar(t.id, 'hecho');
+  assert.equal(lib.generarRutinas(new Date('2026-12-02T10:00:00Z')).filter((x: any) => x.rutina === t.rutina).length, 0, 'todavía no toca');
+  assert.equal(lib.generarRutinas(new Date('2027-01-15T10:00:00Z')).filter((x: any) => x.rutina === t.rutina).length, 1, 'ya toca de nuevo');
+});
+
+test('pedir apoyo crea una tarea compañera en el otro departamento', () => {
+  const t = lib.agregar({ titulo: 'Lanzar promo', departamento: 'marketing', apoyo: ['diseno', 'ventas'] });
+  const apoyos = lib.leerTareas().filter((x: any) => x.desde === t.id);
+  assert.deepEqual(apoyos.map((x: any) => x.departamento).sort(), ['diseno', 'ventas']);
+  assert.throws(() => lib.agregar({ titulo: 'x', departamento: 'marketing', apoyo: ['cocina'] }), /apoyo inválido/);
+});
+
+test('el interruptor de redes se pausa, se reanuda y valida el límite', () => {
+  assert.equal(lib.ajustarRedes({ pausada: true }).pausada, true);
+  assert.equal(lib.estadoOficina().redes.pausada, true);
+  assert.equal(lib.ajustarRedes({ pausada: false }).pausada, false);
+  assert.throws(() => lib.ajustarRedes({ limitePorDia: 500 }), /entre 0 y 20/);
+});

@@ -65,3 +65,9 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Reglamento:** `tareas/departamentos.json` (misión, funciones, reglas, prohibiciones). Nada con efecto externo (publicar, enviar, gastar, deploy, credenciales, borrar) sin aprobación del presidente: queda Bloqueada «esperando aprobación».
 - **Flujo:** Diseño entrega flyers a Marketing (`entregaA` crea la tarea sola). Evolución investiga otras páginas y propone ideas con fuente.
 - **Límite:** lo que muestra la oficina es el estado real de la pizarra; los departamentos «trabajan» cuando Claude (sesión o tarea horaria) toma y cierra tareas, no por su cuenta.
+
+## 2026-11-25 — Departamentos autónomos, en conjunto y con libertad en redes
+- **Decisión:** los departamentos siguen trabajando sin órdenes mediante rutinas (`tareas/rutinas.json`) y colaboran con `entregaA` (cadena) y `apoyo` (tarea compañera). Marketing maneja las redes sociales con libertad, sin aprobación por posteo.
+- **Barreras:** solo material propio o de Diseño; veraz; sin precios/promos nuevas ni datos de clientes sin el Presidente; límite diario (2 por defecto); ante reclamo grave o tema legal se bloquea y se avisa. Interruptor de pausa de redes (oficina o `cli.mjs redes pausar`).
+- **Motivo:** el usuario los ve como ayudantes y quiere que sigan sin que él ordene cada cosa. Esto reemplaza la regla anterior de aprobación para publicar; el resto de acciones con efecto externo sigue requiriendo aprobación.
+- **Pendiente:** no hay cuentas de redes conectadas; sin eso no se publica de verdad. Falta definir con el usuario qué redes (Instagram, Facebook, WhatsApp Estados…) y conectarlas de forma segura.

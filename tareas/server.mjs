@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DIR, leerTareas, ordenar, agregar, editar, eliminar, iniciar, completar, bloquear, estadoOficina, ultimasLineasLog, log } from './lib.mjs';
+import { DIR, leerTareas, ordenar, agregar, editar, eliminar, iniciar, completar, bloquear, estadoOficina, generarRutinas, ajustarRedes, ultimasLineasLog, log } from './lib.mjs';
 
 const PORT = Number(process.env.PORT) || 3939;
 const HOST = '127.0.0.1';
@@ -45,6 +45,8 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/log') return json(res, 200, ultimasLineasLog(200));
     if (req.method === 'POST' && url.pathname === '/api/tasks') return json(res, 201, agregar(await leerCuerpo(req), 'oficina'));
 
+    if (req.method === 'POST' && url.pathname === '/api/redes') return json(res, 200, ajustarRedes(await leerCuerpo(req)));
+
     const m = url.pathname.match(/^\/api\/tasks\/([\w-]+)$/);
     if (m && req.method === 'PUT') return json(res, 200, editar(m[1], await leerCuerpo(req)));
     if (m && req.method === 'DELETE') { eliminar(m[1]); return json(res, 200, { ok: true }); }
@@ -61,6 +63,10 @@ const server = createServer(async (req, res) => {
     return json(res, e.message === 'Tarea no encontrada.' ? 404 : 400, { error: e.message });
   }
 });
+
+// Las rutinas se generan solas al arrancar y cada 30 minutos.
+generarRutinas();
+setInterval(generarRutinas, 30 * 60 * 1000).unref();
 
 server.listen(PORT, HOST, () => {
   log('SERVIDOR', `Dashboard en http://localhost:${PORT}`);

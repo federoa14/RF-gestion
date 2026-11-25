@@ -10,6 +10,8 @@ const DATA = process.env.TAREAS_DATA || DIR;
 export const TASKS_FILE = join(DATA, 'tasks.json');
 export const LOG_FILE = join(DATA, 'tasks.log');
 export const OFICINA_FILE = join(DIR, 'departamentos.json');
+export const RUTINAS_FILE = join(DIR, 'rutinas.json');
+export const REDES_FILE = join(DATA, 'redes.json');
 
 export const PRIORIDADES = { alta: 1, media: 2, baja: 3 };
 export const ESTADOS = ['pendiente', 'en_curso', 'completada', 'bloqueada'];
@@ -98,9 +100,60 @@ export function agregar(datos, origen = 'presidente') {
     iniciada: null,
     completada: null,
   };
-  guardar([...leerTareas(), t]);
+  const extra = [];
+  // Trabajo en conjunto: «apoyo» crea una tarea compañera en cada departamento pedido.
+  for (const ap of [...new Set([].concat(datos.apoyo ?? []).filter(Boolean))]) {
+    if (!idsDepartamento().includes(ap)) throw new Error('Departamento de apoyo inválido.');
+    if (ap === t.departamento) continue;
+    extra.push({ ...t, id: randomUUID().slice(0, 8), titulo: `Apoyo a ${nombreDepto(t.departamento)}: ${t.titulo}`.slice(0, 200), departamento: ap, entregaA: null, origen: 'apoyo', desde: t.id });
+  }
+  guardar([...leerTareas(), t, ...extra]);
   log('CREADA', `${t.id} [${t.departamento}] (${t.prioridad}) ${t.titulo}`);
+  for (const x of extra) log('APOYO', `${nombreDepto(x.departamento)} apoya a ${nombreDepto(t.departamento)}: ${x.id}`);
   return t;
+}
+
+/** Rutinas: cada departamento se genera solo sus tareas periódicas (sin esperar órdenes). */
+export function generarRutinas(ahora = new Date()) {
+  if (!existsSync(RUTINAS_FILE)) return [];
+  const rutinas = JSON.parse(readFileSync(RUTINAS_FILE, 'utf8'));
+  const tareas = leerTareas();
+  const nuevas = [];
+  for (const r of rutinas) {
+    const suyas = tareas.filter((t) => t.rutina === r.id);
+    if (suyas.some((t) => t.estado === 'pendiente' || t.estado === 'en_curso')) continue;
+    const ultima = suyas.map((t) => t.creada).sort().pop();
+    if (ultima && ahora - new Date(ultima) < r.cadenciaDias * 86400000) continue;
+    nuevas.push({
+      id: randomUUID().slice(0, 8), titulo: r.titulo, descripcion: r.descripcion, prioridad: r.prioridad,
+      departamento: r.departamento, entregaA: r.entregaA ?? null, origen: 'rutina', rutina: r.id,
+      estado: 'pendiente', resultado: '', creada: ahora.toISOString(), iniciada: null, completada: null,
+    });
+  }
+  if (nuevas.length) {
+    guardar([...tareas, ...nuevas]);
+    for (const t of nuevas) log('RUTINA', `${t.id} [${t.departamento}] ${t.titulo}`);
+  }
+  return nuevas;
+}
+
+/** Interruptor de las redes sociales (lo maneja el Presidente). */
+export function leerRedes() {
+  const base = { pausada: false, limitePorDia: 2, conectadas: [] };
+  if (!existsSync(REDES_FILE)) return base;
+  return { ...base, ...JSON.parse(readFileSync(REDES_FILE, 'utf8')) };
+}
+export function ajustarRedes(cambios) {
+  const r = leerRedes();
+  if (cambios.pausada !== undefined) r.pausada = Boolean(cambios.pausada);
+  if (cambios.limitePorDia !== undefined) {
+    const n = Number(cambios.limitePorDia);
+    if (!Number.isInteger(n) || n < 0 || n > 20) throw new Error('El límite diario debe ser un entero entre 0 y 20.');
+    r.limitePorDia = n;
+  }
+  writeFileSync(REDES_FILE, JSON.stringify(r, null, 2) + '\n');
+  log('REDES', `pausada=${r.pausada} limitePorDia=${r.limitePorDia}`);
+  return r;
 }
 
 export function editar(id, datos) {
@@ -220,6 +273,7 @@ export function estadoOficina() {
     presidente: oficina.presidente,
     reglamento: oficina.reglamento,
     departamentos,
+    redes: leerRedes(),
     sinAsignar: tareas.filter((t) => t.departamento === SIN_ASIGNAR && t.estado === 'pendiente').length,
     tareas: ordenar(tareas),
   };

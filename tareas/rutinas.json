@@ -1,0 +1,83 @@
+[
+  {
+    "id": "diseno-piezas",
+    "departamento": "diseno",
+    "titulo": "Piezas de la semana para redes (3 flyers, feed y stories)",
+    "descripcion": "Pensadas con Marketing: un flyer de producto/servicio, uno de consejo útil para cobranzas y uno institucional. Entregar a Marketing.",
+    "cadenciaDias": 7,
+    "prioridad": "alta",
+    "entregaA": "marketing"
+  },
+  {
+    "id": "marketing-plan",
+    "departamento": "marketing",
+    "titulo": "Plan de publicaciones de la semana y publicación de lo recibido de Diseño",
+    "descripcion": "Objetivo, público y llamado a la acción en cada posteo. Respetar las barreras y el límite diario de redes. Si falta una pieza, pedirla a Diseño.",
+    "cadenciaDias": 7,
+    "prioridad": "alta",
+    "entregaA": null
+  },
+  {
+    "id": "marketing-redes",
+    "departamento": "marketing",
+    "titulo": "Revisar métricas, comentarios y mensajes de las redes",
+    "descripcion": "Responder con cordialidad. Consultas de compra a Ventas; reclamos a Atención al Cliente; reclamo grave o tema legal: bloquear y avisar al Presidente.",
+    "cadenciaDias": 2,
+    "prioridad": "media",
+    "entregaA": "ventas"
+  },
+  {
+    "id": "ventas-seguimiento",
+    "departamento": "ventas",
+    "titulo": "Seguimiento de consultas e interesados abiertos",
+    "descripcion": "Registrar el próximo paso de cada contacto. Anotar qué piden los clientes para pasárselo a Evolución.",
+    "cadenciaDias": 2,
+    "prioridad": "media",
+    "entregaA": null
+  },
+  {
+    "id": "evolucion-rastreo",
+    "departamento": "evolucion",
+    "titulo": "Rastreo semanal de ideas: qué hacen otros sistemas de cobranzas y distribuidoras",
+    "descripcion": "Buscar en otras páginas. Máximo 3 ideas, cada una con fuente, beneficio, esfuerzo y riesgo. Si una sirve para redes, avisar a Marketing; si es de desarrollo, a Actualización.",
+    "cadenciaDias": 7,
+    "prioridad": "media",
+    "entregaA": null
+  },
+  {
+    "id": "gestion-informe",
+    "departamento": "gestion",
+    "titulo": "Informe semanal de la pizarra para el Presidente",
+    "descripcion": "Qué se hizo, qué está en curso, qué está trabado, qué se publicó en redes y qué necesita su decisión.",
+    "cadenciaDias": 7,
+    "prioridad": "media",
+    "entregaA": null
+  },
+  {
+    "id": "actualizacion-revision",
+    "departamento": "actualizacion",
+    "titulo": "Revisión semanal de dependencias y errores (solo informe)",
+    "descripcion": "Correr npm audit y listar versiones viejas. No actualizar nada sin aprobación.",
+    "cadenciaDias": 7,
+    "prioridad": "baja",
+    "entregaA": null
+  },
+  {
+    "id": "soporte-faq",
+    "departamento": "soporte",
+    "titulo": "Revisar consultas de clientes y actualizar preguntas frecuentes",
+    "descripcion": "Los errores se pasan a Actualización y las ideas a Evolución.",
+    "cadenciaDias": 3,
+    "prioridad": "baja",
+    "entregaA": null
+  },
+  {
+    "id": "legal-revision",
+    "departamento": "legal",
+    "titulo": "Revisar que lo publicado y prometido cumpla la ley",
+    "descripcion": "Avisar al Presidente y a Marketing de cualquier riesgo, citando la norma o diciendo que falta verificarla.",
+    "cadenciaDias": 7,
+    "prioridad": "media",
+    "entregaA": null
+  }
+]

@@ -420,9 +420,11 @@ function formOrden({ deptoFijo = null, entregas = [] }) {
   if (!deptoFijo) opcionesDepto(dsel);
   const entrega = el('select', { attrs: { 'aria-label': 'Entregar el resultado a' } });
   entrega.append(el('option', { value: '', textContent: 'No entregar a nadie' }), ...datos.departamentos.filter((x) => entregas.includes(x.id)).map((x) => el('option', { value: x.id, textContent: `Entregar a ${x.nombre}` })));
+  const apoyo = el('select', { attrs: { 'aria-label': 'Pedir apoyo a otro departamento' } });
+  apoyo.append(el('option', { value: '', textContent: 'Sin apoyo de otros' }), ...datos.departamentos.filter((x) => x.id !== deptoFijo).map((x) => el('option', { value: x.id, textContent: `Pedir apoyo a ${x.nombre}` })));
   const ok = el('div', { className: 'ok', attrs: { role: 'status' } }), err = el('div', { className: 'error', attrs: { role: 'alert' } });
   const f = el('form', { className: 'orden' }, titulo, desc,
-    el('div', { className: 'fila' }, deptoFijo ? null : dsel, prio, entregas.length || !deptoFijo ? entrega : null),
+    el('div', { className: 'fila' }, deptoFijo ? null : dsel, prio, entregas.length || !deptoFijo ? entrega : null, apoyo),
     el('button', { className: 'btn primario', type: 'submit', textContent: 'Dar la orden' }), ok, err);
   if (!deptoFijo) dsel.onchange = () => {
     const d = depto(dsel.value); const ids = d ? d.entregaA : datos.departamentos.map((x) => x.id);
@@ -431,11 +433,24 @@ function formOrden({ deptoFijo = null, entregas = [] }) {
   f.onsubmit = async (e) => {
     e.preventDefault(); err.textContent = ''; ok.textContent = '';
     try {
-      await api('POST', '/api/tasks', { titulo: titulo.value, descripcion: desc.value, prioridad: prio.value, departamento: deptoFijo || dsel.value, entregaA: entrega.value });
+      await api('POST', '/api/tasks', { titulo: titulo.value, descripcion: desc.value, prioridad: prio.value, departamento: deptoFijo || dsel.value, entregaA: entrega.value, apoyo: apoyo.value ? [apoyo.value] : [] });
       titulo.value = ''; desc.value = ''; ok.textContent = '✔ Orden dada. Aparece en la pizarra.'; await cargar(true);
     } catch (x) { err.textContent = x.message; }
   };
   return f;
+}
+function bloqueRedes() {
+  const caja = el('div', { className: 'dialogo' });
+  const pintar = () => {
+    const r = datos.redes;
+    const btn = el('button', { type: 'button', className: `btn mini ${r.pausada ? 'primario' : 'peligro'}`, textContent: r.pausada ? '▶ Reanudar redes' : '⏸ Pausar todas las redes',
+      onclick: () => hacer(() => api('POST', '/api/redes', { pausada: !r.pausada })) });
+    caja.replaceChildren(
+      el('p', {}, el('b', { textContent: r.pausada ? '⏸ Redes en pausa: nadie publica.' : '✅ Marketing tiene libertad para publicar (dentro de las barreras).' })),
+      el('p', { className: 'aviso', textContent: `Límite: ${r.limitePorDia} posteos por día. Cuentas conectadas: ${r.conectadas.length ? r.conectadas.join(', ') : 'ninguna todavía (hay que conectarlas para poder publicar de verdad)'}.` }),
+      btn);
+  };
+  return { caja, pintar };
 }
 function listaTareasPanel(tareas) {
   if (!tareas.length) return el('div', { className: 'vacio', textContent: 'Sin tareas todavía.' });
@@ -451,8 +466,10 @@ function abrirDepto(id) {
   const cab = cabecera(d.persona, d.persona.nombre, `${d.persona.cargo} · ${d.nombre}`);
   const vivo = el('div', { className: 'dialogo', attrs: { 'aria-live': 'polite' } });
   const lista = el('div');
+  const redes = id === 'marketing' ? bloqueRedes() : null;
   const cuerpo = el('div', { className: 'cuerpo' },
     el('section', {}, el('h3', { textContent: 'Qué está haciendo' }), vivo),
+    redes ? el('section', {}, el('h3', { textContent: 'Redes sociales' }), redes.caja) : null,
     el('section', {}, el('h3', { textContent: 'Darle una orden' }), formOrden({ deptoFijo: id, entregas: d.entregaA })),
     el('section', {}, el('h3', { textContent: 'Sus tareas' }), lista),
     el('section', {}, el('h3', { textContent: 'Quién es' }), el('p', { className: 'aviso', style: 'margin:0', textContent: d.persona.bio })),
@@ -466,6 +483,7 @@ function abrirDepto(id) {
   abierto.vivo = () => {
     const dd = depto(id);
     vivo.replaceChildren(...dialogo(dd));
+    if (redes) redes.pintar();
     lista.replaceChildren(listaTareasPanel(datos.tareas.filter((t) => t.departamento === id && t.estado !== 'completada').concat(datos.tareas.filter((t) => t.departamento === id && t.estado === 'completada').slice(0, 8))));
   };
   abierto.vivo();
@@ -475,7 +493,9 @@ function abrirPresidente() {
   const p = datos.presidente;
   const cab = cabecera(p, p.nombre, `${p.cargo} de ${datos.empresa}`);
   const espera = el('div');
+  const redes = bloqueRedes();
   const cuerpo = el('div', { className: 'cuerpo' },
+    el('section', {}, el('h3', { textContent: 'Interruptor de redes' }), redes.caja),
     el('section', {}, el('h3', { textContent: 'Orden general' }), formOrden({ entregas: [] }),
       el('p', { className: 'aviso', textContent: 'Si no elegís departamento, la orden queda «sin asignar» y Claude la deriva al que corresponda. También podés pedírselo directamente a Claude en el chat: la pizarra es la misma.' })),
     el('section', {}, el('h3', { textContent: 'Esperan tu decisión' }), espera),
@@ -483,6 +503,7 @@ function abrirPresidente() {
   );
   abrirPanel(cab, cuerpo, '#d4af37');
   abierto.vivo = () => {
+    redes.pintar();
     const b = datos.tareas.filter((t) => t.estado === 'bloqueada');
     espera.replaceChildren(b.length ? listaTareasPanel(b) : el('div', { className: 'vacio', textContent: 'Nada espera tu decisión. 👌' }));
   };
