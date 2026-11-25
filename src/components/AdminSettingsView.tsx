@@ -1502,7 +1502,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </label>
                 <input
                   type="text"
-                  placeholder="+54 9 11 3290-8811"
+                  placeholder="Ej. 11 2345-6789"
                   value={editingAdmin.phone || ''}
                   onChange={(e) => setEditingAdmin({ ...editingAdmin, phone: e.target.value })}
                   className="w-full text-xs p-2.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"

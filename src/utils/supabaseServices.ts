@@ -748,36 +748,6 @@ export async function createTenantSubscriptionPayOrder(params: {
     // non-blocking
   }
 
-  // 2. Respaldo: intentar servidor Express (/api/mercadopago/create-preference)
-  if (!mpInitPoint && typeof fetch === 'function') {
-    try {
-      const res = await fetch('/api/mercadopago/create-preference', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId: params.tenant.id,
-          tenantCode: params.tenant.tenantCode,
-          tenantName: params.tenant.name,
-          monthKey: params.monthKey,
-          monthName: params.monthName,
-          amount: params.amount,
-          planType: params.planType,
-          monthsCount: params.monthsCount,
-          payerEmail: params.payerEmail || params.tenant.email || undefined,
-          originUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.initPoint) {
-          mpInitPoint = data.initPoint;
-          mpPreferenceId = data.preferenceId;
-        }
-      }
-    } catch {
-      // non-blocking
-    }
-  }
 
   const order: TenantSubscriptionPayOrder = {
     token,
@@ -1221,45 +1191,7 @@ export async function createCatalogOrderMercadoPagoPreference(params: {
       ? window.location.href.split('?')[0]
       : '';
 
-  // 1. Intentar vía backend Express (/api/catalog/mp-create-preference)
-  try {
-    const res = await fetch('/api/catalog/mp-create-preference', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        tenantId: order.tenantId,
-        storeName: order.storeName,
-        customerName: order.customerName,
-        amount: order.totalAmount,
-        items: order.items.map((it) => ({
-          id: it.productId,
-          title: it.productName,
-          quantity: it.quantity,
-          unit_price: it.unitPrice,
-        })),
-        catalogHandle,
-        mpSubOption,
-        returnUrl: safeOrigin,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.ok && data?.initPoint) {
-        return {
-          ok: true,
-          mode: 'mercadopago_api',
-          initPoint: data.initPoint,
-          sandboxInitPoint: data.sandboxInitPoint,
-          preferenceId: data.preferenceId,
-        };
-      }
-    }
-  } catch {
-    // Fallback to Supabase Edge Function below
-  }
-
+  // Mercado Pago se resuelve solo en el servidor (Edge Function mp-create-preference)
   // 2. Intentar vía Supabase Edge Function (mp-create-preference con scope catalog_order)
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -1309,28 +1241,6 @@ export async function verifyCatalogOrderMercadoPagoPayment(params: {
   message?: string;
 }> {
   const { orderId, tenantId, paymentId, collectionStatus, mpSubOption } = params;
-
-  try {
-    const res = await fetch('/api/catalog/mp-verify-payment', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        orderId,
-        tenantId,
-        paymentId,
-        collectionStatus,
-        mpSubOption,
-      }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.verified) {
-        return { verified: true, status: 'approved', order: data.order, message: data.message };
-      }
-    }
-  } catch {
-    // Try Supabase Edge Function next
-  }
 
   const supabase = getSupabaseClient();
   if (supabase) {
@@ -1397,37 +1307,10 @@ export async function notifyCatalogOrderCustomerStageViaServer(params: {
   deliveryStatus?: string;
   info?: string;
 }> {
-  const { order, stage, message, config } = params;
-  if (!order?.customerPhone?.trim() || !message.trim()) {
-    return { success: false, info: 'Sin teléfono de cliente' };
-  }
-  try {
-    const res = await fetch('/api/catalog/notify-customer-stage', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId: order.tenantId,
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
-        stage,
-        message,
-        ...(config ? { whatsappConfig: config } : {}),
-      }),
-    });
-    if (!res.ok) {
-      return { success: false, info: `HTTP ${res.status}` };
-    }
-    const data = await res.json();
-    return {
-      success: Boolean(data?.success),
-      deliveryStatus: data?.deliveryStatus,
-      info: data?.info,
-    };
-  } catch {
-    return { success: false, info: 'Servidor no disponible' };
-  }
+  // Los mensajes a compradores se mandan a mano con el enlace de WhatsApp (wa.me).
+  // Los envíos automáticos oficiales (Cloud API) son solo los del servidor: ver whatsapp-dispatch.
+  void params;
+  return { success: false, info: 'Envío manual por WhatsApp' };
 }
 
 export async function testMerchantMercadoPagoConnection(params: {
@@ -1451,32 +1334,29 @@ export async function testMerchantMercadoPagoConnection(params: {
   };
   error?: string;
 }> {
+  // La prueba la hace el servidor (Edge Function): el token no se guarda ni se lee en el navegador.
+  const supabase = getSupabaseClient();
+  if (!supabase) return { ok: false, valid: false, error: 'La app no está conectada a Supabase.' };
   try {
-    const res = await fetch('/api/merchant/mp-test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenantId: params.tenantId,
-        ...(params.mpAccessToken?.trim()
-          ? { mpAccessToken: params.mpAccessToken.trim() }
-          : {}),
-      }),
+    const { data, error } = await supabase.functions.invoke('mp-test-connection', {
+      body: { tenantId: params.tenantId, mpAccessToken: params.mpAccessToken?.trim() || undefined },
     });
-    const data = await res.json().catch(() => null);
-    if (!data) {
-      return {
-        ok: false,
-        valid: false,
-        error: 'El servidor backend de pruebas no respondió en esta vista.',
-      };
+    if (error || !data) {
+      return { ok: false, valid: false, error: 'No se pudo conectar con el servidor para probar Mercado Pago.' };
     }
-    return data;
-  } catch {
+    const baseUrl = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
     return {
-      ok: false,
-      valid: false,
-      error: 'No se pudo conectar con el servidor para probar las credenciales de Mercado Pago.',
+      ok: true,
+      valid: Boolean(data.ok),
+      hasSavedToken: Boolean(data.ok),
+      account: data.account,
+      error: data.ok ? undefined : data.message,
+      webhookUrls: baseUrl
+        ? { supabaseWebhookUrl: `${baseUrl}/functions/v1/mp-webhook?tenantId=${encodeURIComponent(params.tenantId)}` }
+        : undefined,
     };
+  } catch {
+    return { ok: false, valid: false, error: 'No se pudo conectar con el servidor para probar Mercado Pago.' };
   }
 }
 
@@ -1484,30 +1364,10 @@ export async function notifyCatalogStockAlertViaServer(params: {
   alert: CatalogStockAlertRequest;
   message: string;
 }): Promise<{ success: boolean; deliveryStatus?: string; info?: string }> {
-  if (!params.alert?.customerPhone?.trim() || !params.message.trim()) {
-    return { success: false, info: 'Sin teléfono del cliente' };
-  }
-  try {
-    const res = await fetch('/api/catalog/notify-stock-alert', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        alertId: params.alert.id,
-        tenantId: params.alert.tenantId,
-        customerPhone: params.alert.customerPhone,
-        message: params.message,
-      }),
-    });
-    if (!res.ok) return { success: false, info: `HTTP ${res.status}` };
-    const data = await res.json();
-    return {
-      success: Boolean(data?.success),
-      deliveryStatus: data?.deliveryStatus,
-      info: data?.info,
-    };
-  } catch {
-    return { success: false, info: 'Servidor no disponible' };
-  }
+  // Los mensajes a compradores se mandan a mano con el enlace de WhatsApp (wa.me).
+  // Los envíos automáticos oficiales (Cloud API) son solo los del servidor: ver whatsapp-dispatch.
+  void params;
+  return { success: false, info: 'Envío manual por WhatsApp' };
 }
 
 export async function verifyCatalogTransferReceiptViaServer(params: {
@@ -1604,25 +1464,10 @@ export async function sendCatalogPromoWhatsAppViaServer(params: {
   customerPhone: string;
   message: string;
 }): Promise<{ success: boolean; deliveryStatus?: string; info?: string }> {
-  if (!params.customerPhone?.trim() || !params.message.trim()) {
-    return { success: false, info: 'Sin teléfono del suscriptor' };
-  }
-  try {
-    const res = await fetch('/api/catalog/send-promo-message', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-    if (!res.ok) return { success: false, info: `HTTP ${res.status}` };
-    const data = await res.json();
-    return {
-      success: Boolean(data?.success),
-      deliveryStatus: data?.deliveryStatus,
-      info: data?.info,
-    };
-  } catch {
-    return { success: false, info: 'Servidor no disponible' };
-  }
+  // Los mensajes a compradores se mandan a mano con el enlace de WhatsApp (wa.me).
+  // Los envíos automáticos oficiales (Cloud API) son solo los del servidor: ver whatsapp-dispatch.
+  void params;
+  return { success: false, info: 'Envío manual por WhatsApp' };
 }
 
 export async function fetchPublicCatalogLoyaltyAccountFromSupabase(

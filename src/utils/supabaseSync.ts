@@ -81,7 +81,17 @@ const KNOWN_TENANT_FIELDS = new Set([
 const BUSINESS_TABLES = ['boletas', ...Object.values(COLLECTION_TABLES)];
 
 // Datos sensibles que nunca se guardan dentro de la configuración visible
-const CONFIG_SECRET_FIELDS = ['merchantMpAccessToken'];
+const CONFIG_SECRET_FIELDS = [
+  'merchantMpAccessToken',
+  // Tokens viejos de WhatsApp: ahora viven solo en el servidor (business_secrets)
+  'whatsappApiToken',
+  'whatsappPhoneNumberId',
+  'twilioAccountSid',
+  'twilioAuthToken',
+  'twilioFromPhone',
+  'webhookGatewayUrl',
+  'webhookAuthKey',
+];
 
 // -----------------------------------------------------------------------------
 // Estado

@@ -16,6 +16,12 @@ y el dueño y los vendedores ven lo mismo desde cualquier dispositivo.
 | `functions/auth-login` | Entrar con **usuario + código de empresa** (para quien no tiene email). |
 | `functions/admin-users` | Alta, edición y baja de usuarios desde los paneles. |
 | `functions/mp-*` | Mercado Pago, ahora leyendo los tokens de `business_secrets` / `platform_secrets`. |
+| `whatsapp.sql` | Fase 4: registro de envíos de WhatsApp, credenciales por comercio y cron cada 15 min. |
+| `functions/whatsapp-dispatch` | Envíos de WhatsApp Business (hoja de ruta, alertas al dueño, cierre) desde el servidor. |
+| `functions/whatsapp-connect` | El comercio conecta su número de WhatsApp Business (se valida contra Meta). |
+| `functions/mp-test-connection` | Prueba el token de Mercado Pago del comercio desde el servidor. |
+
+WhatsApp: seguí `../docs/WHATSAPP-META.md`.
 
 ## Pasos
 

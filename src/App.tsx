@@ -225,11 +225,7 @@ import {
   verifyAndRecordTenantPaymentInSupabase,
   verifyCatalogTransferReceiptViaServer,
 } from './utils/supabaseServices';
-import {
-  executeBlockedChargeAlertDirect,
-  executeDailyAlertsDirect,
-  executeDailyClosingDirect,
-} from './utils/clientDispatchEngine';
+import { executeBlockedChargeAlertDirect } from './utils/clientDispatchEngine';
 import {
   getTenantSubscriptionStatus,
   getCurrentMonthInfo,
@@ -1010,101 +1006,8 @@ export default function App() {
     }
   }, [selectedTenant, currentUser?.role]);
 
-  // Background automated dispatch check on mount (client engine persisted to Supabase)
-  useEffect(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    if (config.autoDispatchEnabled && config.lastAutoDispatchDate !== todayStr && boletas.length > 0) {
-      executeDailyAlertsDirect({
-        boletas,
-        clients,
-        salespeople,
-        admins,
-        config,
-      })
-        .then((data) => {
-          if (data.logs?.length > 0) {
-            const updatedConfig = { ...config, lastAutoDispatchDate: todayStr };
-            setConfig(updatedConfig);
-            saveConfig(updatedConfig);
-            const updated = [...data.logs, ...autoLogs];
-            setAutoLogs(updated);
-            saveAutoDispatchLogs(updated);
-            if (selectedTenant) {
-              const cur = loadTenantData(selectedTenant.id);
-              cur.config = updatedConfig;
-              cur.autoLogs = [...data.logs, ...(cur.autoLogs || [])];
-              saveTenantData(selectedTenant.id, cur);
-            }
-            showToast(`🤖 Despacho automático matutino: ${data.logs.length} alertas generadas y guardadas en Supabase.`);
-          }
-        })
-        .catch((err) => {
-          console.error('Error en despacho automático en segundo plano:', err);
-        });
-    }
-  }, []);
-
-  // Automatic End-of-Day Closing WhatsApp Summary to Owner (persisted to Supabase)
-  useEffect(() => {
-    if (!selectedTenant || currentUser?.role === 'superadmin') return;
-    if (config.dailyClosingEnabled === false) return;
-
-    const checkAndDispatchClosing = () => {
-      const now = new Date();
-      const todayStr = now.toISOString().split('T')[0];
-      const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-      const closingTime = config.dailyClosingTime || '19:00';
-      const attemptKey = `${selectedTenant.id}::${todayStr}`;
-
-      if (
-        config.lastDailyClosingDate !== todayStr &&
-        currentHHMM >= closingTime &&
-        lastAutoClosingAttemptRef.current !== attemptKey &&
-        (boletas.length > 0 || paidBoletas.length > 0)
-      ) {
-        lastAutoClosingAttemptRef.current = attemptKey;
-        executeDailyClosingDirect({
-          boletas,
-          paidBoletas,
-          admins,
-          config,
-          targetDateStr: todayStr,
-        })
-          .then((data) => {
-            if (Array.isArray(data.logs) && data.logs.length > 0) {
-              const updatedConfig = { ...config, lastDailyClosingDate: todayStr };
-              setConfig(updatedConfig);
-              saveConfig(updatedConfig);
-              const curData = loadTenantData(selectedTenant.id);
-              const updatedLogs = [...data.logs, ...(curData.autoLogs || autoLogs)];
-              curData.config = updatedConfig;
-              curData.autoLogs = updatedLogs;
-              saveTenantData(selectedTenant.id, curData);
-
-              setAutoLogs(updatedLogs);
-              saveAutoDispatchLogs(updatedLogs);
-              showToast(`📊 Cierre del día automático generado y guardado en Supabase (${data.logs.length} WhatsApp).`);
-            }
-          })
-          .catch((err) => {
-            console.warn('Error generando resumen de cierre diario:', err);
-          });
-      }
-    };
-
-    checkAndDispatchClosing();
-    const timer = setInterval(checkAndDispatchClosing, 60000);
-    return () => clearInterval(timer);
-  }, [
-    selectedTenant?.id,
-    currentUser?.role,
-    config.dailyClosingEnabled,
-    config.dailyClosingTime,
-    config.lastDailyClosingDate,
-    boletas,
-    paidBoletas,
-    admins,
-  ]);
+  // Los envíos automáticos de WhatsApp (matutino 08:00 y cierre 19:00) ya NO corren en el navegador:
+  // los hace el servidor con la WhatsApp Business Cloud API (Edge Function whatsapp-dispatch + pg_cron).
 
   const handlePauseOwnTenant = (reason: string, pausedBy: 'tenant' | 'trial_expired') => {
     if (!selectedTenant) return;
@@ -2247,11 +2150,6 @@ export default function App() {
     const { merchantMpAccessToken: _stripped, ...cleanUpdated } = updated;
     if (rawMpToken && selectedTenant) {
       void saveMerchantMpAccessTokenSecret(selectedTenant.id, rawMpToken);
-      void fetch('/api/merchant/mp-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId: selectedTenant.id, mpAccessToken: rawMpToken }),
-      }).catch(() => {});
     }
     const normalizedConfig: DistributorConfig = {
       ...cleanUpdated,

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Bot,
   Play,
@@ -40,10 +40,57 @@ import {
   createMailtoUrl,
   generateDailyClosingOwnerSummary,
 } from '../utils/whatsapp';
-import {
-  executeDailyAlertsDirect,
-  executeDailyClosingDirect,
-} from '../utils/clientDispatchEngine';
+import { getSupabaseClient } from '../utils/supabaseClient';
+import { describeCloudError } from '../utils/supabaseSync';
+
+interface ServerMessageRow {
+  id: number;
+  kind: string;
+  recipient_name: string;
+  status: string;
+  error: string | null;
+  preview: string;
+  trigger: string;
+  created_at: string;
+}
+
+const SERVER_KIND_LABELS: Record<string, string> = {
+  vendor_route: 'Hoja de ruta',
+  owner_alerts: 'Alertas al dueño',
+  daily_closing: 'Cierre del día',
+  client_overdue: 'Aviso a cliente',
+};
+const SERVER_STATUS_LABELS: Record<string, string> = {
+  sent: 'Enviado',
+  failed: 'Error',
+  skipped: 'Pendiente (WhatsApp sin conectar)',
+  pending: 'En proceso',
+};
+
+interface ServerDispatchItem {
+  recipient: string;
+  kind: string;
+  status: string;
+  error?: string;
+}
+
+function summarizeServerResult(data: any, kind: 'morning' | 'closing'): string {
+  if (data?.error) return data.error;
+  const r = data?.result || {};
+  if (r.skipped) return `No se envió: ${r.skipped}.`;
+  const items: ServerDispatchItem[] = (kind === 'morning' ? r.morning : r.closing) || [];
+  const info = kind === 'morning' ? r.morningInfo : r.closingInfo;
+  if (items.length === 0) return info || 'No había nada para enviar.';
+  const sent = items.filter((i) => i.status === 'enviado').length;
+  const already = items.filter((i) => i.status === 'ya enviado hoy').length;
+  const failed = items.filter((i) => i.status === 'error');
+  const parts = [`Enviados: ${sent}`];
+  if (already) parts.push(`ya enviados hoy: ${already}`);
+  if (failed.length) parts.push(`con error: ${failed.length} (${failed[0].error})`);
+  if (!data.configured) parts.push('WhatsApp Business sin conectar: quedaron registrados como pendientes');
+  if (Array.isArray(r.invalidPhones) && r.invalidPhones.length) parts.push(`teléfonos inválidos: ${r.invalidPhones.join(', ')}`);
+  return parts.join(' · ') + '.';
+}
 
 interface AutomatedDispatchManagerProps {
   boletas: Boleta[];
@@ -104,25 +151,124 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
   const [senderPhone, setSenderPhone] = useState(config.senderPhone || config.distributorPhone);
   const [senderEmail, setSenderEmail] = useState(config.senderEmail || config.distributorEmail);
 
-  // Direct WhatsApp Gateway configurations
-  const [whatsappProvider, setWhatsappProvider] = useState<'server_daemon' | 'meta' | 'twilio' | 'webhook'>(
-    config.whatsappProvider || 'server_daemon'
-  );
-  const [whatsappApiToken, setWhatsappApiToken] = useState(config.whatsappApiToken || '');
-  const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState(config.whatsappPhoneNumberId || '');
-  const [twilioAccountSid, setTwilioAccountSid] = useState(config.twilioAccountSid || '');
-  const [twilioAuthToken, setTwilioAuthToken] = useState(config.twilioAuthToken || '');
-  const [twilioFromPhone, setTwilioFromPhone] = useState(config.twilioFromPhone || '');
-  const [webhookGatewayUrl, setWebhookGatewayUrl] = useState(config.webhookGatewayUrl || '');
-  const [webhookAuthKey, setWebhookAuthKey] = useState(config.webhookAuthKey || '');
+  // WhatsApp Business del comercio (las credenciales se guardan solo en el servidor)
+  const businessId = config.tenantId || '';
+  const [waPhoneId, setWaPhoneId] = useState('');
+  const [waToken, setWaToken] = useState('');
+  const [waLang, setWaLang] = useState('es_AR');
+  const [waStatus, setWaStatus] = useState<{ connected: boolean; displayPhone: string | null }>({
+    connected: Boolean(config.hasWhatsAppCredentials),
+    displayPhone: config.whatsappDisplayPhone || null,
+  });
+  const [isConnectingWa, setIsConnectingWa] = useState(false);
+  const [waMessage, setWaMessage] = useState<string | null>(null);
+  const [serverMessages, setServerMessages] = useState<ServerMessageRow[]>([]);
+
+  const loadServerMessages = useCallback(async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase || !businessId) return;
+    const { data } = await supabase
+      .from('whatsapp_messages')
+      .select('id, kind, recipient_name, status, error, preview, trigger, created_at')
+      .eq('business_id', businessId)
+      .order('id', { ascending: false })
+      .limit(30);
+    setServerMessages((data as ServerMessageRow[]) || []);
+  }, [businessId]);
+
+  useEffect(() => {
+    void loadServerMessages();
+    const supabase = getSupabaseClient();
+    if (!supabase || !businessId) return;
+    supabase.functions
+      .invoke('whatsapp-connect', { body: { action: 'status', businessId } })
+      .then(({ data }) => {
+        if (data?.ok) setWaStatus({ connected: Boolean(data.connected), displayPhone: data.displayPhone || null });
+      })
+      .catch(() => {});
+  }, [businessId, loadServerMessages]);
+
+  const callWhatsAppConnect = async (body: Record<string, unknown>) => {
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error('La app no está conectada a Supabase.');
+    const { data, error } = await supabase.functions.invoke('whatsapp-connect', { body: { ...body, businessId } });
+    if (error) {
+      let message = error.message;
+      try {
+        const ctx = (error as any).context;
+        if (ctx && typeof ctx.json === 'function') message = (await ctx.json())?.message || message;
+      } catch {
+        // ignore
+      }
+      throw new Error(message);
+    }
+    return data;
+  };
+
+  const handleConnectWhatsApp = async () => {
+    setWaMessage(null);
+    if (!waPhoneId.trim() || !waToken.trim()) {
+      setWaMessage('Completá el identificador del número y el token.');
+      return;
+    }
+    setIsConnectingWa(true);
+    try {
+      const data = await callWhatsAppConnect({ action: 'save', phoneNumberId: waPhoneId.trim(), accessToken: waToken.trim(), templateLang: waLang });
+      setWaMessage(data?.message || null);
+      if (data?.ok) {
+        setWaToken('');
+        setWaStatus({ connected: true, displayPhone: data.displayPhone || null });
+        onSaveConfig({ ...config, hasWhatsAppCredentials: true, whatsappDisplayPhone: data.displayPhone || undefined, whatsappProvider: 'meta' });
+      }
+    } catch (err) {
+      setWaMessage(describeCloudError(err));
+    } finally {
+      setIsConnectingWa(false);
+    }
+  };
+
+  const handleDisconnectWhatsApp = async () => {
+    setIsConnectingWa(true);
+    try {
+      const data = await callWhatsAppConnect({ action: 'remove' });
+      setWaMessage(data?.message || null);
+      setWaStatus({ connected: false, displayPhone: null });
+      onSaveConfig({ ...config, hasWhatsAppCredentials: false, whatsappDisplayPhone: undefined });
+    } catch (err) {
+      setWaMessage(describeCloudError(err));
+    } finally {
+      setIsConnectingWa(false);
+    }
+  };
+
+  /** Los botones llaman al servidor de verdad (Edge Function whatsapp-dispatch) */
+  const runServerDispatch = async (kind: 'morning' | 'closing'): Promise<string> => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return 'La app no está conectada a Supabase.';
+    const { data, error } = await supabase.functions.invoke('whatsapp-dispatch', {
+      body: { mode: 'manual', businessId, kind },
+    });
+    if (error) {
+      try {
+        const ctx = (error as any).context;
+        if (ctx && typeof ctx.json === 'function') return (await ctx.json())?.error || describeCloudError(error);
+      } catch {
+        // ignore
+      }
+      return describeCloudError(error);
+    }
+    void loadServerMessages();
+    return summarizeServerResult(data, kind);
+  };
+
   const [notifyOwnerOnlyIfPertinent, setNotifyOwnerOnlyIfPertinent] = useState(
     config.notifyOwnerOnlyIfPertinent ?? true
   );
 
   const generalAdmin = admins.find((a) => a.isGeneralAdmin || a.role === 'dueño') || admins[0] || {
-    name: 'Federico Roa',
-    phone: '+54 9 11 3290-8811',
-    email: 'federoa14@gmail.com',
+    name: config.distributorName || 'Dueño',
+    phone: config.distributorPhone || '',
+    email: config.distributorEmail || '',
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
@@ -145,112 +291,29 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
       dailyClosingTime,
       senderPhone: senderPhone.trim(),
       senderEmail: senderEmail.trim(),
-      whatsappProvider,
-      whatsappApiToken: whatsappApiToken.trim(),
-      whatsappPhoneNumberId: whatsappPhoneNumberId.trim(),
-      twilioAccountSid: twilioAccountSid.trim(),
-      twilioAuthToken: twilioAuthToken.trim(),
-      twilioFromPhone: twilioFromPhone.trim(),
-      webhookGatewayUrl: webhookGatewayUrl.trim(),
-      webhookAuthKey: webhookAuthKey.trim(),
       notifyOwnerOnlyIfPertinent,
     };
     onSaveConfig(updated);
-    setLastRunSummary('Configuración de automatización matutina y cierre del día guardada correctamente.');
+    setLastRunSummary('Horarios guardados. El servidor hace los envíos a esa hora (hora de Argentina), aunque nadie tenga la app abierta.');
   };
 
-  // Run daily closing summary dispatch immediately
+  // Cierre del día: lo envía el servidor ahora
   const handleExecuteDailyClosing = async () => {
     setIsRunningClosing(true);
     setLastRunSummary(null);
     try {
-      const mergedConfig: DistributorConfig = {
-        ...config,
-        senderPhone,
-        senderEmail,
-        dailyClosingEnabled,
-        dailyClosingTime,
-        whatsappProvider,
-        whatsappApiToken,
-        whatsappPhoneNumberId,
-        twilioAccountSid,
-        twilioAuthToken,
-        twilioFromPhone,
-        webhookGatewayUrl,
-        webhookAuthKey,
-      };
-      const data = await executeDailyClosingDirect({
-        boletas,
-        paidBoletas,
-        admins,
-        targetDateStr: todayStr,
-        config: mergedConfig,
-      });
-      const generatedLogs: AutoDispatchLog[] = data.logs || [];
-      if (generatedLogs.length > 0) {
-        onAddLogs(generatedLogs);
-      }
-      onSaveConfig({
-        ...config,
-        dailyClosingEnabled,
-        dailyClosingTime,
-        lastDailyClosingDate: todayStr,
-      });
-      setLastRunSummary(
-        `Resumen de Cierre del Día generado y guardado en Supabase (${generatedLogs.length} envío/s). Total cobrado hoy: ${formatCurrency(
-          closingSummary.metrics.totalGeneralCobrado,
-          config.currencySymbol
-        )}.`
-      );
-    } catch (err) {
-      console.error('Error al generar cierre del día:', err);
-      setLastRunSummary('No se pudo generar el resumen de cierre del día.');
+      setLastRunSummary(`Cierre del día: ${await runServerDispatch('closing')}`);
     } finally {
       setIsRunningClosing(false);
     }
   };
 
-  // Run dispatch engine directly on client + persist logs to Supabase
+  // "Probar envío ahora": el servidor hace el envío matutino ahora mismo
   const handleExecuteDispatch = async () => {
     setIsRunning(true);
     setLastRunSummary(null);
-
     try {
-      const mergedConfig: DistributorConfig = {
-        ...config,
-        senderPhone,
-        senderEmail,
-        autoDispatchChannels: channels,
-        whatsappProvider,
-        whatsappApiToken,
-        whatsappPhoneNumberId,
-        twilioAccountSid,
-        twilioAuthToken,
-        twilioFromPhone,
-        webhookGatewayUrl,
-        webhookAuthKey,
-        notifyOwnerOnlyIfPertinent,
-      };
-      const data = await executeDailyAlertsDirect({
-        boletas,
-        clients,
-        salespeople,
-        admins,
-        config: mergedConfig,
-      });
-
-      const generatedLogs: AutoDispatchLog[] = data.logs || [];
-
-      if (generatedLogs.length > 0) {
-        onAddLogs(generatedLogs);
-      }
-
-      setLastRunSummary(
-        `Despacho ejecutado y guardado en Supabase: ${generatedLogs.length} alertas generadas con acceso directo a WhatsApp.`
-      );
-    } catch (err) {
-      console.error('Error en despacho automático:', err);
-      setLastRunSummary('Error al ejecutar el motor de despacho.');
+      setLastRunSummary(`Envío matutino: ${await runServerDispatch('morning')}`);
     } finally {
       setIsRunning(false);
     }
@@ -376,7 +439,11 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
                 }`}
               />
               <span>
-                {config.autoDispatchEnabled !== false ? 'Envío automático: activo' : 'Envío automático: pausado'}
+                {config.autoDispatchEnabled === false
+                  ? 'Envío automático: pausado'
+                  : waStatus.connected
+                  ? 'Envío automático: activo'
+                  : 'Activo, falta conectar WhatsApp'}
               </span>
             </span>
           </div>
@@ -742,7 +809,7 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
             onClick={() => setIsGatewaySettingsOpen(!isGatewaySettingsOpen)}
             className="text-xs font-bold text-emerald-600 hover:text-emerald-500 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800"
           >
-            <span>{isGatewaySettingsOpen ? 'Ocultar Pasarela WhatsApp' : 'Configurar Pasarela WhatsApp'}</span>
+            <span>{isGatewaySettingsOpen ? 'Ocultar conexión de WhatsApp' : waStatus.connected ? 'WhatsApp conectado' : 'Conectar WhatsApp Business'}</span>
             <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isGatewaySettingsOpen ? 'rotate-180' : ''}`} />
           </button>
         </div>
@@ -842,7 +909,7 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
               </label>
               <input
                 type="text"
-                placeholder="+54 9 11 3290-8811"
+                placeholder="Ej. 11 2345-6789"
                 value={senderPhone}
                 onChange={(e) => setSenderPhone(e.target.value)}
                 className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono text-slate-900 dark:text-white"
@@ -865,106 +932,107 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
             </div>
           </div>
 
-          {/* ADVANCED GATEWAY CONFIGURATION */}
+          {/* CONEXIÓN CON WHATSAPP BUSINESS (cada comercio conecta su propio número) */}
           {isGatewaySettingsOpen && (
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4 animate-in fade-in">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
               <h4 className="text-xs font-black uppercase text-slate-700 dark:text-slate-300 flex items-center gap-2">
-                <Zap className="w-4 h-4 text-emerald-600" />
-                <span>Pasarela de envío (API o webhook)</span>
+                <Zap className="w-4 h-4 text-emerald-600" aria-hidden="true" />
+                <span>Tu número de WhatsApp Business (API oficial de Meta)</span>
               </h4>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                Los envíos automáticos salen desde el servidor con la API oficial de WhatsApp Business, usando el número de tu
+                comercio. Copiá los datos desde Meta (WhatsApp → Configuración de la API). El token se valida y se guarda en el
+                servidor: nunca queda en este dispositivo.
+              </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {waStatus.connected ? (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-900 dark:text-emerald-200 flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex items-center gap-2 font-semibold">
+                    <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                    WhatsApp conectado{waStatus.displayPhone ? `: ${waStatus.displayPhone}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleDisconnectWhatsApp}
+                    disabled={isConnectingWa}
+                    className="px-3 py-2 min-h-[44px] rounded-lg border border-emerald-300 dark:border-emerald-700 font-bold cursor-pointer disabled:opacity-60"
+                  >
+                    Desconectar
+                  </button>
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200">
+                  Todavía no conectaste tu WhatsApp Business: los envíos automáticos quedan registrados como pendientes y no se
+                  mandan. Mientras tanto podés usar los botones "Abrir en WhatsApp".
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                    Proveedor de Salida:
+                  <label htmlFor="wa-phone-id" className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Identificador del número de teléfono
+                  </label>
+                  <input
+                    id="wa-phone-id"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={waPhoneId}
+                    onChange={(e) => setWaPhoneId(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Ej. 123456789012345"
+                    className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="wa-token" className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Token de acceso permanente
+                  </label>
+                  <input
+                    id="wa-token"
+                    type="password"
+                    autoComplete="off"
+                    value={waToken}
+                    onChange={(e) => setWaToken(e.target.value)}
+                    placeholder={waStatus.connected ? '•••••••• (cargado; escribí uno nuevo para cambiarlo)' : 'EAAG…'}
+                    className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="wa-lang" className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Idioma de las plantillas
                   </label>
                   <select
-                    value={whatsappProvider}
-                    onChange={(e) => setWhatsappProvider(e.target.value as any)}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-semibold"
+                    id="wa-lang"
+                    value={waLang}
+                    onChange={(e) => setWaLang(e.target.value)}
+                    className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                   >
-                    <option value="server_daemon">🚀 Servidor Directo Autónomo (Sin clics)</option>
-                    <option value="meta">💬 Meta WhatsApp Cloud API (Oficial)</option>
-                    <option value="twilio">📞 Twilio WhatsApp API</option>
-                    <option value="webhook">🌐 Webhook Gateway Directo (Baileys / Evolution)</option>
+                    <option value="es_AR">Español (Argentina) · es_AR</option>
+                    <option value="es">Español · es</option>
                   </select>
                 </div>
+              </div>
 
-                {whatsappProvider === 'meta' && (
-                  <>
-                    <div>
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                        Phone Number ID de Meta:
-                      </label>
-                      <input
-                        type="text"
-                        value={whatsappPhoneNumberId}
-                        onChange={(e) => setWhatsappPhoneNumberId(e.target.value)}
-                        placeholder="Ej. 109482718912"
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                        Token de Acceso Permanente Meta Cloud API:
-                      </label>
-                      <input
-                        type="password"
-                        value={whatsappApiToken}
-                        onChange={(e) => setWhatsappApiToken(e.target.value)}
-                        placeholder="Credencial de acceso permanente Meta Cloud API"
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {whatsappProvider === 'twilio' && (
-                  <>
-                    <div>
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                        Twilio Account SID:
-                      </label>
-                      <input
-                        type="text"
-                        value={twilioAccountSid}
-                        onChange={(e) => setTwilioAccountSid(e.target.value)}
-                        placeholder="AC..."
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                        Twilio Auth Token:
-                      </label>
-                      <input
-                        type="password"
-                        value={twilioAuthToken}
-                        onChange={(e) => setTwilioAuthToken(e.target.value)}
-                        placeholder="Token..."
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
-                      />
-                    </div>
-                  </>
-                )}
-
-                {whatsappProvider === 'webhook' && (
-                  <>
-                    <div className="sm:col-span-2">
-                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                        URL de Endpoint Webhook:
-                      </label>
-                      <input
-                        type="url"
-                        value={webhookGatewayUrl}
-                        onChange={(e) => setWebhookGatewayUrl(e.target.value)}
-                        placeholder="https://mi-servidor-whatsapp.com/api/send"
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-mono"
-                      />
-                    </div>
-                  </>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleConnectWhatsApp}
+                  disabled={isConnectingWa}
+                  className="px-4 py-2.5 min-h-[44px] bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer disabled:opacity-60"
+                >
+                  {isConnectingWa ? 'Verificando con Meta…' : waStatus.connected ? 'Actualizar conexión' : 'Verificar y conectar'}
+                </button>
+                {waMessage && (
+                  <span role="status" className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    {waMessage}
+                  </span>
                 )}
               </div>
+
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Plantillas que tenés que tener aprobadas en Meta (con estos nombres exactos): <code>hoja_ruta_vendedor</code>,{' '}
+                <code>alerta_cobranza_duenio</code>, <code>cierre_del_dia</code> y, solo si activás avisos a clientes,{' '}
+                <code>boleta_vencida_cliente</code>.
+              </p>
             </div>
           )}
 
@@ -977,6 +1045,57 @@ export const AutomatedDispatchManager: React.FC<AutomatedDispatchManagerProps> =
             </button>
           </div>
         </form>
+      </div>
+
+      {/* HISTORIAL DE ENVÍOS OFICIALES (servidor) */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+            <Server className="w-4 h-4 text-emerald-600" aria-hidden="true" />
+            Envíos por WhatsApp Business (servidor)
+          </h3>
+          <button
+            type="button"
+            onClick={() => void loadServerMessages()}
+            className="px-3 py-2 min-h-[44px] text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer"
+          >
+            Actualizar
+          </button>
+        </div>
+        {serverMessages.length === 0 ? (
+          <p className="text-xs text-slate-500">Todavía no hay envíos registrados.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+            {serverMessages.map((m) => (
+              <li key={m.id} className="py-2.5 text-xs flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1">
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-900 dark:text-white">
+                    {SERVER_KIND_LABELS[m.kind] || m.kind} · {m.recipient_name}
+                  </div>
+                  <div className="text-slate-500 dark:text-slate-400 break-words">{m.preview}</div>
+                  {m.error && <div className="text-rose-700 dark:text-rose-300 font-medium">{m.error}</div>}
+                </div>
+                <div className="shrink-0 text-right">
+                  <span
+                    className={`inline-block px-2 py-0.5 rounded-md font-bold ${
+                      m.status === 'sent'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : m.status === 'failed'
+                        ? 'bg-rose-100 text-rose-800'
+                        : 'bg-amber-100 text-amber-800'
+                    }`}
+                  >
+                    {SERVER_STATUS_LABELS[m.status] || m.status}
+                  </span>
+                  <div className="text-slate-400 mt-0.5">
+                    {new Date(m.created_at).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}
+                    {m.trigger === 'manual' ? ' · manual' : ''}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

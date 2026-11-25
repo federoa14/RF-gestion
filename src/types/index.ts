@@ -268,6 +268,8 @@ export interface DistributorConfig {
   tenantCode?: string; // Código de acceso de la distribuidora (ej. "DIST-001")
   // Parámetros de Envío Directo y Pasarela WhatsApp:
   whatsappProvider?: 'server_daemon' | 'meta' | 'twilio' | 'webhook';
+  hasWhatsAppCredentials?: boolean; // El comercio conectó su WhatsApp Business (el token vive solo en el servidor)
+  whatsappDisplayPhone?: string; // Número conectado, para mostrar
   whatsappApiToken?: string;
   whatsappPhoneNumberId?: string;
   twilioAccountSid?: string;
