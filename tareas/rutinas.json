@@ -79,5 +79,14 @@
     "cadenciaDias": 7,
     "prioridad": "media",
     "entregaA": null
+  },
+  {
+    "id": "gestion-devolucion-mensual",
+    "departamento": "gestion",
+    "titulo": "Devolución de fin de mes: evolución de la empresa",
+    "descripcion": "Informe para el Presidente con datos reales: clientes activos y nuevos, bajas y motivos, ingresos de los planes, costos, consultas que se volvieron clientes, casos de asistencia (cuáles escalaron y por qué), ideas de usuarios aplicadas y posteos publicados. Cerrar con una lectura honesta: ¿el crecimiento fue sostenible, rentable y colaborativo con el usuario? Qué se hizo bien, qué corregir y qué propone cada departamento para el mes siguiente. Si un dato no existe, decirlo; no inventar cifras.",
+    "cadenciaDias": 30,
+    "prioridad": "alta",
+    "entregaA": null
   }
 ]

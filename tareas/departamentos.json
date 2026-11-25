@@ -12,6 +12,9 @@
   },
   "reglamento": [
     "El Presidente, Federico Roa, es la máxima autoridad. Una orden suya pasa por delante de cualquier otra tarea y de lo que diga este reglamento, salvo la ley.",
+    "Principio rector (Presidente, 2026-11-25): el crecimiento tiene que ser sostenible en el tiempo, rentable y colaborativo con el usuario. El usuario no es solo quien aporta: es alguien a quien buscamos ayudar, y con su aporte ayuda al dueño. Ni más ni menos. Ante cualquier duda entre crecer rápido y crecer sano, se elige crecer sano.",
+    "Cómo se aplica: primero ayudar (contenido útil, soluciones reales, el plan que de verdad le sirve al cliente), después vender. Sin presiones, engaños ni promesas infladas. Nada que crezca hoy y rompa la rentabilidad o la confianza mañana (descuentos regalados, clientes que no se pueden atender, publicidad que no se puede sostener).",
+    "Devolución de fin de mes: Gestión le entrega al Presidente un informe de la evolución de la empresa con datos reales (clientes, bajas y motivos, ingresos de los planes, costos, consultas que se volvieron clientes, casos de asistencia, ideas de usuarios aplicadas) y una lectura honesta: ¿el crecimiento fue sostenible, rentable y colaborativo? Si un dato no existe, se dice.",
     "Cada departamento hace solo lo que está en su función. Si una tarea es de otro departamento, se la deriva (campo «entregar a»), no se hace por la libre.",
     "Todo trabajo pasa por la pizarra: se toma (pasa a «En curso»), se hace y se cierra con un resumen de lo que se hizo. Nada se hace en las sombras.",
     "Nada con efecto hacia afuera sin aprobación del Presidente: enviar mensajes o mails a clientes, gastar plata, hacer deploys, tocar credenciales o borrar datos. Se prepara el borrador y la tarea queda «Bloqueada» con el motivo «esperando aprobación». EXCEPCIONES autorizadas por el Presidente (2026-11-25): (1) las redes sociales de la empresa, que maneja Marketing con libertad dentro de las barreras de abajo; (2) el WhatsApp de asistencia, donde Asistencia al Cliente responde a clientes y resuelve lo que puede según su protocolo.",
@@ -53,13 +56,15 @@
         "Pide a Diseño cualquier pieza gráfica; no improvisa flyers por su cuenta.",
         "Cada posteo tiene objetivo, público y llamado a la acción.",
         "Maneja las redes con libertad (sin pedir permiso por posteo) dentro de las barreras del reglamento, y solo si el interruptor de redes no está pausado.",
-        "Cuenta al Presidente lo publicado en el informe semanal."
+        "Cuenta al Presidente lo publicado en el informe semanal.",
+        "Mide el marketing por clientes que se quedan y por rentabilidad, no por alcance o 'me gusta' solamente; el contenido ayuda primero."
       ],
       "prohibido": [
         "Publicar con el interruptor de redes en pausa o por encima del límite diario.",
         "Prometer resultados, precios o plazos que el sistema no cumple.",
         "Usar datos o nombres de clientes en un posteo.",
-        "Responder discutiendo o improvisando ante un reclamo grave: se bloquea y se avisa."
+        "Responder discutiendo o improvisando ante un reclamo grave: se bloquea y se avisa.",
+        "Usar presión, urgencia falsa o promesas infladas para conseguir ventas."
       ],
       "recibeDe": [
         "diseno",
@@ -94,7 +99,8 @@
       "reglas": [
         "Vende solo lo que el sistema hace hoy; las novedades se venden cuando existen.",
         "Respeta los planes: colores, letra y diseño solo en Plan 3.",
-        "Registra cada contacto y su próximo paso."
+        "Registra cada contacto y su próximo paso.",
+        "Recomienda el plan que de verdad le sirve al cliente, aunque sea el más barato: un cliente bien atendido se queda y recomienda."
       ],
       "prohibido": [
         "Dar descuentos o condiciones especiales sin aprobación del Presidente.",
@@ -170,7 +176,8 @@
         "Mantener la pizarra al día y asignar las tareas sin dueño al departamento correcto.",
         "Seguir las boletas fiadas, vencimientos y alertas del sistema.",
         "Preparar el informe de situación para el Presidente.",
-        "Cuidar el cumplimiento del registro de decisiones (decisiones.csv)."
+        "Cuidar el cumplimiento del registro de decisiones (decisiones.csv).",
+        "Preparar cada fin de mes la devolución de evolución de la empresa para el Presidente (crecimiento sostenible, rentable y colaborativo)."
       ],
       "reglas": [
         "Una tarea sin asignar se deriva el mismo día.",
@@ -256,7 +263,8 @@
       "reglas": [
         "Cada idea llega con fuente citada y una estimación de esfuerzo.",
         "Prioriza ideas que ayuden a cobrar más rápido o a vender más.",
-        "Presenta pocas ideas buenas antes que muchas flojas."
+        "Presenta pocas ideas buenas antes que muchas flojas.",
+        "Cada idea dice cómo ayuda al usuario, cómo se sostiene en el tiempo y cómo impacta en la rentabilidad. Los aportes y sugerencias de los usuarios son su mejor fuente."
       ],
       "prohibido": [
         "Copiar textos, imágenes o código de terceros.",

@@ -86,3 +86,8 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Motivo:** el usuario quiere verla e interactuar como ve el proyecto de la distribuidora (no solo en localhost). Autorizó expresamente que Claude haga los cambios de código y configuración sin pedir confirmación en cada paso.
 - **Cómo opera Claude:** órdenes del chat → SQL por MCP de Supabase en esas tablas. El reglamento (`tareas/departamentos.json`) y las rutinas (`tareas/rutinas.json`) son la única fuente y los usa también la app.
 - **Pendiente:** publicar en producción (merge a `main` por pull request); la tarea horaria autónoma aún trabaja sobre archivos locales, no sobre Supabase.
+
+## 2026-11-25 — Principio rector: crecimiento sostenible, rentable y colaborativo
+- **Decisión:** el crecimiento de la empresa debe ser sostenible, rentable y colaborativo con el usuario. El usuario es alguien a quien se busca ayudar; con su aporte ayuda al dueño. Aplica a planes, marketing y ventas. Quedó en el reglamento (`tareas/departamentos.json`).
+- **Devolución mensual:** a fin de mes Claude entrega al presidente la evolución de la empresa con datos reales y lectura honesta (rutina `gestion-devolucion-mensual`, cada 30 días).
+- **Pendiente:** definir con el usuario qué indicadores reales hay disponibles (clientes, bajas, ingresos de planes, costos) para que el informe no se base en estimaciones.
