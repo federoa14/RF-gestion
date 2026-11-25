@@ -7,9 +7,10 @@
 //   · { mode: 'now', businessId } → botón "Hacer un respaldo ahora" (dueño, administrador o superadmin).
 //
 // Los tokens (business_secrets) nunca se incluyen.
-// Variables: CRON_SECRET (la misma de whatsapp-dispatch).
+// La clave del cron se lee de Vault (rf_cron_secret); no hace falta cargar variables.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, jsonResponse } from '../_shared/http.ts';
+import { isCronRequest } from '../_shared/cronAuth.ts';
 import { BACKUP_TABLES, backupFileName, filesToPrune, stripSecrets } from '../_shared/backupLogic.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,8 +67,7 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({}));
 
   if (body?.mode === 'cron') {
-    const secret = Deno.env.get('CRON_SECRET') || '';
-    if (!secret || req.headers.get('x-cron-secret') !== secret) return jsonResponse({ error: 'No autorizado.' }, 401);
+    if (!(await isCronRequest(req, db))) return jsonResponse({ error: 'No autorizado.' }, 401);
     const { data: businesses, error } = await db.from('businesses').select('id');
     if (error) return jsonResponse({ error: error.message }, 500);
     const results = [];

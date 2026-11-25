@@ -430,6 +430,15 @@ grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on all tables in schema public to authenticated;
 revoke all on public.business_secrets, public.platform_secrets from anon, authenticated;
 grant select on public.public_catalogs, public.platform_settings to anon;
+-- Las Edge Functions usan la service role: en los proyectos nuevos de Supabase
+-- ya no recibe permisos automáticos sobre las tablas, así que se otorgan acá.
+grant usage on schema public to service_role;
+grant all on all tables in schema public to service_role;
+grant all on all sequences in schema public to service_role;
+grant execute on all functions in schema public to service_role;
+alter default privileges in schema public grant all on tables to service_role;
+alter default privileges in schema public grant all on sequences to service_role;
+alter default privileges in schema public grant execute on functions to service_role;
 
 -- -----------------------------------------------------------------------------
 -- 7. Vistas: pagos y cuotas (respetan RLS del usuario que consulta)
