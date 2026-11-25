@@ -2202,8 +2202,7 @@ export default function App() {
     currentUser &&
       currentUser.role !== 'superadmin' &&
       selectedTenant &&
-      (!selectedTenant.subscription?.termsAccepted ||
-        selectedTenant.subscription?.termsVersion !== TERMS_VERSION)
+      !selectedTenant.subscription?.termsAccepted // solo la primera vez: no se vuelve a pedir al cambiar la versión
   );
 
   const handleAcceptCurrentTerms = () => {
