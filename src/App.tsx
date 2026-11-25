@@ -82,6 +82,7 @@ import {
 } from './utils/storage';
 import { getPanelThemeRootProps } from './utils/storeTheme';
 import { TermsAcceptanceGate } from './components/TermsAcceptanceGate';
+import { CounterSaleModal } from './components/CounterSaleModal';
 import type { CatalogStoreTheme } from './types';
 import { ensureClientCreditHistory, getDaysElapsed } from './utils/retentionPurge';
 import { getSupabaseClient } from './utils/supabaseClient';
@@ -558,6 +559,7 @@ export default function App() {
 
   // Modal States
   const [isNewBoletaOpen, setIsNewBoletaOpen] = useState(false);
+  const [isCounterSaleOpen, setIsCounterSaleOpen] = useState(false);
   const [preselectedClientForNewBoleta, setPreselectedClientForNewBoleta] = useState<string | null>(null);
   const [rubroMigrationRequest, setRubroMigrationRequest] = useState<{
     targetRubro: BusinessRubro;
@@ -2200,8 +2202,7 @@ export default function App() {
     currentUser &&
       currentUser.role !== 'superadmin' &&
       selectedTenant &&
-      (!selectedTenant.subscription?.termsAccepted ||
-        selectedTenant.subscription?.termsVersion !== TERMS_VERSION)
+      !selectedTenant.subscription?.termsAccepted // solo la primera vez: no se vuelve a pedir al cambiar la versión
   );
 
   const handleAcceptCurrentTerms = () => {
@@ -2222,6 +2223,23 @@ export default function App() {
     saveTenants(freshTenants);
     setSelectedTenant(updatedTenant);
   };
+
+  const handleConfirmCounterSale = (order: CatalogPickupOrder) => {
+    handleSaveCatalogOrders([order, ...catalogOrders]);
+    const { updatedProducts, changed } = applyOrderStockDeltaToProducts(
+      catalogProducts,
+      order.items,
+      'deduct'
+    );
+    if (changed) handleSaveCatalogProducts(updatedProducts);
+    showToast(
+      `Venta ${order.orderNumber} cobrada: ${order.currencySymbol} ${Math.round(order.totalAmount).toLocaleString('es-AR')}.`
+    );
+  };
+
+  const canCounterSale = Boolean(
+    selectedTenant && getTenantEffectiveFeatureAccess(selectedTenant).canAccessWebCatalog
+  );
 
   const handleSavePanelTheme = (panelTheme: CatalogStoreTheme | undefined) => {
     // Solo el Plan 3 puede modificar el diseño
@@ -4129,6 +4147,18 @@ export default function App() {
       )}
       className="rf-panel min-h-screen bg-[#F4F6F9] dark:bg-[#071021] text-slate-800 dark:text-[#E2E8F0] font-sans flex"
     >
+      {selectedTenant && (
+        <CounterSaleModal
+          isOpen={isCounterSaleOpen}
+          onClose={() => setIsCounterSaleOpen(false)}
+          products={catalogProducts}
+          tenantId={selectedTenant.id}
+          tenantCode={selectedTenant.tenantCode}
+          storeName={catalogSettings.storeName || config.distributorName || selectedTenant.name}
+          currencySymbol={catalogSettings.currencySymbol || config.currencySymbol || '$'}
+          onConfirmSale={handleConfirmCounterSale}
+        />
+      )}
       {needsTermsAcceptance && (
         <TermsAcceptanceGate onAccept={handleAcceptCurrentTerms} onLogout={handleLogout} />
       )}
@@ -4228,6 +4258,7 @@ export default function App() {
           activeTab={activeTab}
           setActiveTab={handleSelectTab}
           onOpenNewBoleta={() => setIsNewBoletaOpen(true)}
+          onOpenCounterSale={canCounterSale ? () => setIsCounterSaleOpen(true) : undefined}
           onOpenAlertsCenter={() => setIsAlertsCenterOpen(true)}
           onOpenSettings={() => handleSelectTab('administradores')}
           onOpenCriticalBubble={() => setIsCriticalBubbleOpen(true)}
