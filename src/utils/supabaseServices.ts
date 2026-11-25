@@ -17,6 +17,7 @@ import type {
   TenantSubscriptionPayOrder,
 } from '../types';
 import { normalizeDni } from './catalogStock';
+import { slimCatalogSnapshotImages } from './imageShrink';
 import { getTenantEffectiveFeatureAccess } from './tenantSubscription';
 import { dbGetItem, dbSetItem } from './localInternalDb';
 import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
@@ -963,7 +964,7 @@ export async function setPublicCatalogSuperAdminEnabledInSupabase(
     } catch {
       // ignore
     }
-    await insertOrUpdateCloudStoreKey(key, updated);
+    await insertOrUpdateCloudStoreKey(key, await slimCatalogSnapshotImages(updated));
   } else if (enabled) {
     const createdSnapshot: PublishedPublicCatalog = {
       tenantId: tenant.id,
