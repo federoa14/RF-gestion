@@ -1,3 +1,4 @@
+import { isNewOrderSoundEnabled, playNewOrderChime, setNewOrderSoundEnabled } from '../utils/newOrderAlerts';
 import { StoreDesignEditor } from './StoreDesignEditor';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
@@ -150,6 +151,7 @@ import { WebLoyaltyClientsPanel } from './WebLoyaltyClientsPanel';
 import { QrCodeSvg } from './QrCodeSvg';
 
 interface CatalogManagerProps {
+  focusOrdersToken?: number; // al cambiar, abre la pestaña de pedidos
   config: DistributorConfig;
   tenant: Tenant | null;
   settings: OnlineCatalogSettings;
@@ -346,6 +348,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   planFeatureAccess,
   onRequestUpgradePlan,
   showToast,
+  focusOrdersToken,
 }) => {
   const [subTab, setSubTab] = useState<
     | 'productos'
@@ -357,7 +360,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     | 'clientes_web'
     | 'estadisticas'
     | 'configuracion'
-  >('productos');
+  >(() => (focusOrdersToken ? 'pedidos' : 'productos'));
+  useEffect(() => {
+    if (focusOrdersToken) setSubTab('pedidos');
+  }, [focusOrdersToken]);
+  const [orderSoundOn, setOrderSoundOn] = useState(isNewOrderSoundEnabled);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [selectedSubfilter, setSelectedSubfilter] = useState<string>('Todos');
@@ -4172,6 +4179,20 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 Además de llegarte al WhatsApp, cada pedido queda guardado aquí para pasarlo a boleta, enviarlo o avisar retiro y cobrar por WhatsApp.
               </p>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 bg-white text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={orderSoundOn}
+                onChange={(e) => {
+                  setOrderSoundOn(e.target.checked);
+                  setNewOrderSoundEnabled(e.target.checked);
+                  if (e.target.checked) playNewOrderChime();
+                }}
+                className="rounded border-slate-300"
+              />
+              Sonido al entrar un pedido
+            </label>
             {onRefreshOrders && (
               <button
                 type="button"
@@ -4190,6 +4211,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 <span>Actualizar pedidos</span>
               </button>
             )}
+            </div>
           </div>
 
           {orders.length === 0 ? (

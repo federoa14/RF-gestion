@@ -47,6 +47,7 @@ interface SidebarNavProps {
   currentDateRef?: string;
   catalogEnabled?: boolean;
   webOrdersCount?: number;
+  ordersToPrepareCount?: number; // pedidos web nuevos sin preparar
   featureAccess?: {
     canAccessWebCatalog: boolean;
     canAccessFullFeatures: boolean;
@@ -84,6 +85,7 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
   currentDateRef,
   catalogEnabled = true,
   webOrdersCount = 0,
+  ordersToPrepareCount = 0,
   featureAccess,
   planSectionLabel,
 }) => {
@@ -212,6 +214,8 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({
                 label: 'Catálogo Online',
                 hint: 'Productos y pedidos WhatsApp',
                 icon: Store,
+                badge: ordersToPrepareCount > 0 ? ordersToPrepareCount : undefined,
+                badgeTone: 'crimson' as const,
               },
               {
                 id: 'ventas_web',

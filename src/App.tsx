@@ -204,6 +204,7 @@ import {
   fetchPlatformBillingConfigFromServer,
 } from './utils/multiTenantStorage';
 import { SUPABASE_SYNC_EVENT } from './utils/supabaseSync';
+import { countOrdersToPrepare, isNewOrderSoundEnabled, playNewOrderChime } from './utils/newOrderAlerts';
 import { ensureCloudHydrated } from './utils/localInternalDb';
 import {
   fetchCatalogAbandonedCartsForTenantFromSupabase,
@@ -458,6 +459,41 @@ export default function App() {
 
   // Active Navigation Tab
   const [activeTab, setActiveTab] = useState<string>('boletas');
+
+  // Aviso de pedidos nuevos del catálogo (llegan por tiempo real o al sincronizar)
+  const [newOrderNotice, setNewOrderNotice] = useState<CatalogPickupOrder | null>(null);
+  const [focusCatalogOrdersToken, setFocusCatalogOrdersToken] = useState(0);
+  const knownOrderIdsRef = useRef<{ tenantId: string | null; ids: Set<string> }>({ tenantId: null, ids: new Set() });
+  useEffect(() => {
+    const tenantId = selectedTenant?.id || null;
+    const known = knownOrderIdsRef.current;
+    const currentIds = new Set(catalogOrders.map((o) => o.id));
+    if (known.tenantId !== tenantId) {
+      // Primera carga de este comercio: se toma como punto de partida, sin avisar
+      knownOrderIdsRef.current = { tenantId, ids: currentIds };
+      return;
+    }
+    const recentLimit = Date.now() - 24 * 60 * 60 * 1000;
+    const fresh = catalogOrders.filter(
+      (o) =>
+        !known.ids.has(o.id) &&
+        o.status === 'pendiente_retiro' &&
+        Date.parse(o.createdAt || '') >= recentLimit
+    );
+    knownOrderIdsRef.current = { tenantId, ids: currentIds };
+    if (fresh.length === 0 || !currentUser || currentUser.role === 'superadmin') return;
+    const newest = [...fresh].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0];
+    setNewOrderNotice(newest);
+    if (isNewOrderSoundEnabled()) playNewOrderChime();
+  }, [catalogOrders, selectedTenant?.id, currentUser]);
+
+  const ordersToPrepareCount = countOrdersToPrepare(catalogOrders);
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\)\s+/, '');
+    document.title = ordersToPrepareCount > 0 && currentUser && currentUser.role !== 'superadmin'
+      ? `(${ordersToPrepareCount}) ${base}`
+      : base;
+  }, [ordersToPrepareCount, currentUser]);
 
   // Si cambia a un rubro distinto de Distribuidora/Mayorista mientras estaba en Rendición, volver a Boletas
   useEffect(() => {
@@ -3975,6 +4011,47 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F4F6F9] dark:bg-[#071021] text-slate-800 dark:text-[#E2E8F0] font-sans flex">
       {/* Toast Notification */}
+      {newOrderNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-4 right-4 left-4 sm:left-auto sm:w-96 z-[60] bg-white border border-emerald-300 shadow-2xl rounded-2xl p-4 flex items-start gap-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0">
+            <ShoppingBag className="w-5 h-5 text-emerald-700" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-bold text-slate-900">¡Entró un pedido nuevo!</div>
+            <div className="text-xs text-slate-600 break-words">
+              #{newOrderNotice.orderNumber} · {newOrderNotice.customerName} ·{' '}
+              <span className="font-mono font-semibold">
+                {formatCurrency(Number(newOrderNotice.totalAmount) || 0, newOrderNotice.currencySymbol || config.currencySymbol || '$')}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setNewOrderNotice(null);
+                  handleSelectTab('catalogo');
+                  setFocusCatalogOrdersToken((n) => n + 1);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Ver pedido
+              </button>
+              <button
+                type="button"
+                onClick={() => setNewOrderNotice(null)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {toastMessage && (
         <div className="fixed bottom-5 right-5 z-50 bg-[#0B1933] text-white border border-[#B6C2D2]/30 dark:bg-[#E2E8F0] dark:text-[#091428] px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 dark:text-emerald-600 shrink-0" />
@@ -4012,6 +4089,7 @@ export default function App() {
         currentDateRef={currentDateRef}
         catalogEnabled={tenantFeatureAccess.canAccessWebCatalog}
         webOrdersCount={paidWebOrders.length}
+        ordersToPrepareCount={ordersToPrepareCount}
         featureAccess={{
           canAccessWebCatalog: tenantFeatureAccess.canAccessWebCatalog,
           canAccessFullFeatures: tenantFeatureAccess.canAccessFullFeatures,
@@ -5250,6 +5328,7 @@ export default function App() {
         {activeTab === 'catalogo' && (
           <Suspense fallback={<LazyViewFallback />}>
             <CatalogManager
+              focusOrdersToken={focusCatalogOrdersToken}
               config={config}
               tenant={selectedTenant}
               settings={catalogSettings}
