@@ -4210,7 +4210,7 @@ export default function App() {
                     </span>
                   </p>
                   <p className="text-[#CBD5E1] text-[11px] mt-0.5 tabular-nums">
-                    Tu período de gracia finaliza el <strong className="font-mono text-white">{tenantSubscriptionStatus.trialEndsAt}</strong>. Luego podrás abonar <strong className="font-mono text-white">$ {tenantSubscriptionStatus.monthlyFee.toLocaleString('es-AR')}/mes</strong> para continuar o pausar tu cuenta.
+                    Tu período de gracia finaliza el <strong className="font-mono text-white">{tenantSubscriptionStatus.trialEndsAt}</strong>. Estás probando el Plan 2. Luego podrás bajar al Plan 1, mantener el Plan 2 o subir al Plan 3, o pausar tu cuenta.
                   </p>
                 </div>
               </div>

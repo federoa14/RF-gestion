@@ -368,13 +368,12 @@ export function isDue(configTime: string | undefined, fallback: string, nowTime:
   return nowTime >= target && nowTime <= untilTime;
 }
 
-/** El servicio de WhatsApp automático es del Plan 3 (o prueba gratis vigente) y no corre si la cuenta está pausada */
+/** El servicio de WhatsApp automático es del Plan 3 (la prueba gratis es con Plan 2, sin este servicio) y no corre si la cuenta está pausada */
 export function businessCanDispatch(business: Record<string, any>, todayStr: string): { ok: boolean; reason?: string } {
   const sub = business?.subscription || {};
   if (business?.status === 'suspended') return { ok: false, reason: 'Empresa suspendida' };
   if (sub.isPaused) return { ok: false, reason: 'Cuenta pausada' };
-  const inTrial = Boolean(sub.trialEndsAt && sub.trialEndsAt >= todayStr);
   const tier = sub.planTier;
-  if (tier && tier !== 'full' && !inTrial) return { ok: false, reason: 'WhatsApp automático es del Plan 3' };
+  if (tier && tier !== 'full') return { ok: false, reason: 'WhatsApp automático es del Plan 3' };
   return { ok: true };
 }

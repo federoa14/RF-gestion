@@ -59,7 +59,8 @@ assert.equal(isDue(undefined, '19:00', '19:15'), true);
 assert.equal(isDue('08:00', '08:00', '19:30', '19:00'), false);
 assert.equal(businessCanDispatch({ subscription: { isPaused: true } }, today).ok, false);
 assert.equal(businessCanDispatch({ subscription: { planTier: 'web' } }, today).ok, false);
-assert.equal(businessCanDispatch({ subscription: { planTier: 'web', trialEndsAt: '2026-12-01' } }, today).ok, true);
+// La prueba gratis es con Plan 2: no incluye WhatsApp automático
+assert.equal(businessCanDispatch({ subscription: { planTier: 'web', trialEndsAt: '2026-12-01' } }, today).ok, false);
 assert.equal(businessCanDispatch({ subscription: { planTier: 'full' } }, today).ok, true);
 // Hora AR: 11:00 UTC = 08:00 AR
 assert.deepEqual(argentinaNow(new Date('2026-11-25T11:00:00Z')), { dateStr: '2026-11-25', timeStr: '08:00' });
