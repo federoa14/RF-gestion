@@ -68,18 +68,105 @@ describe('Panel del comercio', () => {
     await context.close();
   });
 
-  test('catálogo: secciones agrupadas y diseño de tienda guardado', async () => {
+  test('catálogo: diseño de página guarda y publica el diseño de la tienda', async () => {
     const { page, fake, context } = await openPage(app.browser, fixtures.makeSeed());
     await loginAsOwner(page);
     await waitForPanel(page);
     await openCatalogSection(page, 'Configuración');
+    await page.locator('button', { hasText: 'Diseño de página' }).click();
     await page.locator('button', { hasText: 'Bordó' }).click();
     await page.locator('[role=radiogroup][aria-label="Estilo de las tarjetas"] button', { hasText: 'Con sombra' }).click();
-    await page.locator('form button[type=submit]', { hasText: /Guardar/ }).first().click();
-    await page.waitForTimeout(1500);
+    await page.locator('button', { hasText: 'Guardar diseño' }).click();
+    await page.waitForTimeout(2000);
     const published = fake.db.public_catalogs?.[0]?.snapshot;
     assert.equal(published?.storeTheme?.palette, 'bordo');
     assert.equal(published?.storeTheme?.cardStyle, 'sombra');
+    await context.close();
+  });
+
+  test('diseño de página: el panel toma el color elegido', async () => {
+    const { page, context } = await openPage(app.browser, fixtures.makeSeed());
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page, 'Configuración');
+    await page.locator('button', { hasText: 'Diseño de página' }).click();
+    await page.locator('button[role=tab]', { hasText: 'Panel de gestión' }).click();
+    await page.locator('button', { hasText: 'Bordó' }).click();
+    await page.locator('button', { hasText: 'Guardar diseño' }).click();
+    await page.waitForTimeout(800);
+    assert.equal(await page.locator('.rf-panel[data-themed="true"]').count(), 1);
+    assert.equal(
+      await page.locator('.rf-panel').evaluate((el) => el.style.getPropertyValue('--panel-primary')),
+      '#7F1D1D'
+    );
+    await context.close();
+  });
+
+  test('filtros: se pueden quitar los predeterminados y agregar propios, y se publican', async () => {
+    const { page, fake, context } = await openPage(app.browser, fixtures.makeSeed());
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page, 'Configuración');
+    const mainInput = page.locator('input[placeholder^="Agregar filtro principal"]');
+    await mainInput.scrollIntoViewIfNeeded();
+    // quita todos los filtros predeterminados
+    for (let i = 0; i < 12; i++) {
+      const del = page.locator('button[title^="Quitar "]').first();
+      if ((await del.count()) === 0) break;
+      const title = await del.getAttribute('title');
+      if (title && /Libros/.test(title)) break;
+      await del.click();
+      await page.waitForTimeout(150);
+    }
+    await mainInput.fill('Libros');
+    await mainInput.press('Enter');
+    await page.locator('input[placeholder^="Agregar subfiltro"]').fill('Infantiles');
+    await page.locator('input[placeholder^="Agregar subfiltro"]').press('Enter');
+    await page.waitForTimeout(2000);
+    const snap = fake.db.public_catalogs?.[0]?.snapshot;
+    assert.ok(snap, 'se publicó la tienda');
+    assert.deepEqual(snap.rubroFilters, ['Libros']);
+    assert.deepEqual(snap.customSubfilters, ['Infantiles']);
+    await context.close();
+  });
+
+  test('diseño de página: bloqueado en Plan 2', async () => {
+    const seed = fixtures.makeSeed();
+    seed.tables.businesses[0].data.subscription.planTier = 'web';
+    const { page, context } = await openPage(app.browser, seed);
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page, 'Configuración');
+    await page.locator('button', { hasText: 'Diseño de página' }).click();
+    await page.waitForSelector('text=exclusiva de', { timeout: 10_000 });
+    assert.equal(await page.locator('button', { hasText: 'Guardar diseño' }).isDisabled(), true);
+    assert.equal(await page.locator('button', { hasText: 'Bordó' }).isDisabled(), true);
+    await context.close();
+  });
+
+  test('términos y condiciones: obligatorios la primera vez y no se repiten', async () => {
+    const seed = fixtures.makeSeed();
+    seed.tables.businesses[0].data.subscription.termsAccepted = false;
+    delete seed.tables.businesses[0].data.subscription.termsVersion;
+    const { page, context } = await openPage(app.browser, seed);
+    await loginAsOwner(page);
+    await page.waitForSelector('[aria-label="Aceptar Términos y Condiciones"]', { timeout: 20_000 });
+    const accept = page.locator('button', { hasText: 'Aceptar y continuar' });
+    assert.equal(await accept.isDisabled(), true);
+    await page.locator('[aria-label="Aceptar Términos y Condiciones"] input[type=checkbox]').check();
+    await accept.click();
+    await waitForPanel(page);
+    assert.equal(await page.locator('[aria-label="Aceptar Términos y Condiciones"]').count(), 0);
+    await context.close();
+  });
+
+  test('venta de mostrador: se abre desde el encabezado', async () => {
+    const { page, context } = await openPage(app.browser, fixtures.makeSeed());
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await page.locator('button', { hasText: 'Cobrar / Venta' }).click();
+    await page.waitForSelector('[aria-label="Venta de mostrador"]', { timeout: 5_000 });
+    assert.ok((await page.locator('button', { hasText: 'Escanear código' }).count()) > 0);
     await context.close();
   });
 

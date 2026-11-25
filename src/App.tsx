@@ -284,14 +284,14 @@ export default function App() {
   // Global State (Tenant-partitioned data)
   // Los datos de cada empresa viven solo en su partición (loadTenantData). Nunca se leen de las claves
   // globales: ahí quedaban datos de la última empresa o del gestor general y aparecían en cuentas nuevas.
-  const initialTenantData = (() => {
+  const [initialTenantData] = useState(() => {
     const user = getCurrentSessionUser();
     if (user && user.role !== 'superadmin' && user.tenantId) {
       const t = loadTenants().find((x) => x.id === user.tenantId);
       if (t) return loadTenantData(t.id);
     }
     return null;
-  })();
+  });
   const [config, setConfig] = useState<DistributorConfig>(
     () => initialTenantData?.config || { ...DEFAULT_CONFIG, distributorName: '' }
   );
