@@ -635,6 +635,20 @@ export interface CatalogPromoBanner {
   active: boolean;
 }
 
+// Diseño de la tienda online (Plan 3). Sin definir = diseño estándar.
+export interface CatalogStoreTheme {
+  palette?: 'marino' | 'esmeralda' | 'bordo' | 'naranja' | 'violeta' | 'grafito' | 'personalizada';
+  primaryColor?: string; // #RRGGBB, solo con paleta personalizada
+  accentColor?: string; // #RRGGBB, solo con paleta personalizada
+  font?: 'jakarta' | 'inter' | 'nunito' | 'lora' | 'playfair';
+  fontSize?: 'normal' | 'grande';
+  cardStyle?: 'borde' | 'sombra' | 'plano';
+  cardCorners?: 'redondeado' | 'recto';
+  bannerColors?: 'propios' | 'tienda'; // 'propios' = el color elegido en cada banner
+  bannerBackground?: 'oscuro' | 'claro'; // con colores de la tienda
+  bannerTitleSize?: 'normal' | 'grande';
+}
+
 export interface CatalogLoyaltyTier {
   id: string;
   minPoints: number;
@@ -873,6 +887,7 @@ export interface OnlineCatalogSettings {
   paymentNote?: string;
   // Medios de pago que el comercio ofrece en la tienda (sin definir = todos, como antes)
   paymentMethods?: Partial<Record<'transferencia' | 'mercadopago' | 'efectivo' | 'acordar', boolean>>;
+  storeTheme?: CatalogStoreTheme;
   currencySymbol?: string;
   defaultLowStockThreshold?: number; // Alerta cuando queden <= N unidades (por defecto 2)
   cashOrTransferDiscountPercent?: number; // % descuento pagando Efectivo / Transferencia
@@ -1011,6 +1026,7 @@ export interface PublishedPublicCatalog {
   pickupInstructions?: string;
   paymentNote?: string;
   paymentMethods?: Partial<Record<'transferencia' | 'mercadopago' | 'efectivo' | 'acordar', boolean>>;
+  storeTheme?: CatalogStoreTheme;
   merchantPaymentAlias?: string;
   merchantPaymentCvu?: string;
   merchantPaymentBank?: string;

@@ -1,3 +1,4 @@
+import { getStoreThemeRootProps, resolveStoreTheme } from '../utils/storeTheme';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search,
@@ -685,6 +686,12 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
   const isFullWebFeatures =
     catalog?.canAccessFullFeatures !== false && catalog?.planTier !== 'web';
+
+  // Diseño de la tienda (Plan 3): colores, letra, tarjetas y banners
+  const storeThemeEnabled = isFullWebFeatures && Boolean(catalog?.storeTheme);
+  const storeThemeRootProps = getStoreThemeRootProps(catalog?.storeTheme, storeThemeEnabled);
+  const resolvedStoreTheme = resolveStoreTheme(catalog?.storeTheme);
+  const useStoreBannerColors = storeThemeEnabled && resolvedStoreTheme.bannerColors === 'tienda';
 
   // #9 Tick Flash Sale clock every 1s only if there are active timed flash offers (Plan Full)
   useEffect(() => {
@@ -2240,7 +2247,10 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const currency = catalog.currencySymbol || '$';
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col">
+    <div
+      {...storeThemeRootProps}
+      className={`${storeThemeRootProps.className} min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col`}
+    >
       {/* Top Navigation Header */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
@@ -2725,7 +2735,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
             <section className="space-y-2.5" aria-label="Promociones destacadas">
               <div className={`grid ${gridColsClass} gap-3`}>
                 {activeBanners.map((banner) => {
-                  const isLightTheme = banner.theme === 'amber';
+                  const isLightTheme = useStoreBannerColors
+                    ? resolvedStoreTheme.bannerBackground === 'claro'
+                    : banner.theme === 'amber';
                   const hasBannerImg =
                     banner.mode === 'image' &&
                     Boolean(banner.imageUrl?.trim()) &&
@@ -2743,7 +2755,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                         key={banner.id}
                         type="button"
                         onClick={() => handleBannerClick(banner)}
-                        className="group relative text-left rounded-2xl border border-slate-200 overflow-hidden bg-slate-900 transition-transform hover:-translate-y-0.5 cursor-pointer"
+                        className="rf-store-round group relative text-left rounded-2xl border border-slate-200 overflow-hidden bg-slate-900 transition-transform hover:-translate-y-0.5 cursor-pointer"
                       >
                         <div className="aspect-[16/6] sm:aspect-[16/5] w-full overflow-hidden bg-slate-100">
                           <img
@@ -2792,21 +2804,29 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       key={banner.id}
                       type="button"
                       onClick={() => handleBannerClick(banner)}
-                      className={`text-left rounded-2xl border p-4 sm:p-5 flex items-center justify-between gap-4 transition-transform hover:-translate-y-0.5 cursor-pointer ${
-                        themeClassMap[banner.theme || 'navy']
+                      className={`rf-store-round text-left rounded-2xl border p-4 sm:p-5 flex items-center justify-between gap-4 transition-transform hover:-translate-y-0.5 cursor-pointer ${
+                        useStoreBannerColors
+                          ? resolvedStoreTheme.bannerBackground === 'claro'
+                            ? 'rf-banner-store-light'
+                            : 'rf-banner-store-dark'
+                          : themeClassMap[banner.theme || 'navy']
                       }`}
                     >
                       <div className="min-w-0 space-y-1">
                         {banner.badgeText && (
                           <div
                             className={`text-[11px] font-bold tracking-wide uppercase ${
-                              isLightTheme ? 'text-amber-800' : 'text-emerald-300'
+                              useStoreBannerColors
+                                ? 'rf-banner-badge'
+                                : isLightTheme
+                                ? 'text-amber-800'
+                                : 'text-emerald-300'
                             }`}
                           >
                             {banner.badgeText}
                           </div>
                         )}
-                        <div className="text-base font-bold leading-snug">
+                        <div className="rf-banner-title text-base font-bold leading-snug">
                           {banner.title}
                         </div>
                         {banner.subtitle && (
@@ -2835,7 +2855,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       </div>
                       <span
                         className={`inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold shrink-0 whitespace-nowrap ${
-                          isLightTheme
+                          useStoreBannerColors
+                            ? 'rf-banner-cta'
+                            : isLightTheme
                             ? 'bg-[#0B1933] text-white'
                             : 'bg-white text-slate-900'
                         }`}
@@ -3021,7 +3043,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               return (
                 <article
                   key={product.id}
-                  className={`bg-white border rounded-2xl overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
+                  className={`rf-store-card bg-white border rounded-2xl overflow-hidden flex flex-col transition-shadow hover:shadow-md ${
                     isCardFullyOutOfStock ? 'border-slate-200 bg-slate-50/40' : 'border-slate-200'
                   }`}
                 >

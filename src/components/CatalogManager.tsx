@@ -1,3 +1,4 @@
+import { StoreDesignEditor } from './StoreDesignEditor';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Store,
@@ -409,6 +410,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
     paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
     paymentMethods: settings.paymentMethods,
+    storeTheme: settings.storeTheme,
     defaultLowStockThreshold: settings.defaultLowStockThreshold ?? 2,
     cashOrTransferDiscountPercent: settings.cashOrTransferDiscountPercent ?? 0,
     coupons: settings.coupons || [],
@@ -465,6 +467,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         'Coordinamos por WhatsApp cuando tu pedido esté armado para pasar a retirarlo.',
       paymentNote: settings.paymentNote || 'Efectivo, transferencia o link de pago',
       paymentMethods: settings.paymentMethods,
+      storeTheme: settings.storeTheme,
       defaultLowStockThreshold: settings.defaultLowStockThreshold ?? 2,
       cashOrTransferDiscountPercent: settings.cashOrTransferDiscountPercent ?? 0,
       coupons: settings.coupons || [],
@@ -8312,6 +8315,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               )}
             </div>
           </div>
+
+          <StoreDesignEditor
+            value={draftSettings.storeTheme}
+            onChange={(next) => setDraftSettings((prev) => ({ ...prev, storeTheme: next }))}
+            storeName={draftSettings.storeName || config.distributorName || 'Mi tienda'}
+            currencySymbol={currency}
+            locked={Boolean(planFeatureAccess && !planFeatureAccess.canAccessFullFeatures)}
+            onUpgrade={
+              onRequestUpgradePlan
+                ? () => requestPlanUpgrade('full_feature', 'Diseño de tu tienda')
+                : undefined
+            }
+          />
 
           <div className="pt-2 flex justify-end">
             <button

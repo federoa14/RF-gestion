@@ -89,3 +89,5 @@ Usá dos dispositivos: por ejemplo, la PC del dueño y el celular de un vendedor
 | 13 | "¿Olvidaste tu contraseña?" con un email real. | Llega el correo. El link abre el formulario de nueva clave y después se puede entrar. |
 | 14 | Ajustes → **Ejecutar depuración ahora**. | Solo desaparecen boletas **pagadas** hace más de 30 días. Las impagas siguen y la ficha del cliente se mantiene. |
 | 15 | En otro navegador, sin sesión, intentar ver datos de un comercio. | No se puede: solo se ven la tienda pública y los links de pago. |
+| 16 | Catálogo → **Pedidos Recibidos**: filtrar por estado, buscar un cliente y abrir el menú **Más** de un pedido. | Cada pedido se ve como una ficha: número, fecha, estado y total arriba, la tabla de productos con subtotales y las acciones abajo. |
+| 17 | Con Plan 3: Catálogo → Tienda, Envíos y Cobros → **Diseño de tu tienda**. Elegir otra paleta, letra y estilo de tarjetas, guardar y abrir la tienda. | La vista previa cambia al instante y la tienda pública queda con el diseño elegido. Con Plan 2 aparece el candado y la tienda sigue con el diseño estándar. |

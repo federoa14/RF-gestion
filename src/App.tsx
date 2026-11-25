@@ -1183,6 +1183,7 @@ export default function App() {
       pickupInstructions: nextSettings.pickupInstructions,
       paymentNote: nextSettings.paymentNote,
       paymentMethods: nextSettings.paymentMethods,
+      storeTheme: isFullFeatures ? nextSettings.storeTheme : undefined,
       merchantPaymentAlias: cfg.merchantPaymentAlias,
       merchantPaymentCvu: cfg.merchantPaymentCvu,
       merchantPaymentBank: cfg.merchantPaymentBank,
