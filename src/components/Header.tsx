@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  ShoppingBag,
   ChevronDown,
   UserCircle2,
   Clock,
@@ -28,6 +29,7 @@ interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onOpenNewBoleta: () => void;
+  onOpenCounterSale?: () => void;
   onOpenAlertsCenter: () => void;
   onOpenSettings: () => void;
   onOpenCriticalBubble?: () => void;
@@ -116,6 +118,7 @@ export const Header: React.FC<HeaderProps> = ({
   paidBoletas,
   activeTab,
   onOpenNewBoleta,
+  onOpenCounterSale,
   onOpenAlertsCenter,
   onOpenCriticalBubble,
   onOpenMobileMenu,
@@ -244,6 +247,19 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </button>
+
+          {onOpenCounterSale && (
+            <button
+              type="button"
+              onClick={onOpenCounterSale}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-white rounded-lg text-xs font-bold border border-emerald-300/60 transition-colors cursor-pointer shadow-xs"
+              title="Vender en el mostrador escaneando códigos de barras o cargando a mano"
+            >
+              <ShoppingBag className="w-3.5 h-3.5" />
+              <span className="sm:hidden">Cobrar</span>
+              <span className="hidden sm:inline">Cobrar / Venta</span>
+            </button>
+          )}
 
           <button
             type="button"

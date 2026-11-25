@@ -1,5 +1,6 @@
 import { isNewOrderSoundEnabled, playNewOrderChime, setNewOrderSoundEnabled } from '../utils/newOrderAlerts';
 import { DesignPageEditor } from './DesignPageEditor';
+import { BarcodeScannerModal } from './BarcodeScannerModal';
 import type { CatalogStoreTheme } from '../types';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
@@ -583,6 +584,33 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   // Errores de validación del formulario de producto, mostrados junto a cada campo
   const [productFormErrors, setProductFormErrors] = useState<{ name?: string; price?: string; stock?: string }>({});
   const [productSku, setProductSku] = useState('');
+  // Escáner de código de barras: para el formulario de producto o para un producto ya cargado
+  const [scanTarget, setScanTarget] = useState<{ kind: 'form' } | { kind: 'product'; productId: string } | null>(null);
+  const handleScannedBarcode = (rawCode: string) => {
+    const code = rawCode.trim();
+    if (!code || !scanTarget) return;
+    const norm = code.toLowerCase();
+    const editingId = scanTarget.kind === 'product' ? scanTarget.productId : editingProduct?.id;
+    const clash = products.find(
+      (p) => p.id !== editingId && (p.sku || '').trim().toLowerCase() === norm
+    );
+    if (clash) {
+      showToast(`El código ${code} ya está asignado a "${clash.name}".`);
+      return;
+    }
+    if (scanTarget.kind === 'form') {
+      setProductSku(code);
+      showToast(`Código leído: ${code}`);
+    } else {
+      const target = products.find((p) => p.id === scanTarget.productId);
+      onSaveProducts(
+        products.map((p) =>
+          p.id === scanTarget.productId ? { ...p, sku: code, updatedAt: new Date().toISOString() } : p
+        )
+      );
+      showToast(`Código ${code} guardado en "${target?.name || 'el producto'}".`);
+    }
+  };
   const [productPrice, setProductPrice] = useState('');
   const [productStockQuantity, setProductStockQuantity] = useState('');
   const [productVariants, setProductVariants] = useState<
@@ -4243,6 +4271,16 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                               </button>
                               <button
                                 type="button"
+                                onClick={() => setScanTarget({ kind: 'product', productId: product.id })}
+                                title={product.sku ? `Código actual: ${product.sku} (tocá para cambiarlo)` : 'Escanear código de barras'}
+                                className={`p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer ${
+                                  product.sku ? 'text-emerald-600' : 'text-amber-600'
+                                }`}
+                              >
+                                <Barcode className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => openEditProductModal(product)}
                                 title="Editar producto y stock"
                                 className="p-1.5 rounded-lg text-slate-500 hover:text-[#0B1933] hover:bg-slate-100 transition-colors cursor-pointer"
@@ -6835,6 +6873,17 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         })()}
 
       {/* SUB-TAB 3: CONFIGURACIÓN DE TIENDA, WHATSAPP Y RETIRO */}
+      <BarcodeScannerModal
+        isOpen={scanTarget !== null}
+        onClose={() => setScanTarget(null)}
+        onDetected={handleScannedBarcode}
+        title={
+          scanTarget?.kind === 'product'
+            ? `Código de barras de "${products.find((p) => p.id === scanTarget.productId)?.name || 'producto'}"`
+            : 'Escanear código del producto'
+        }
+      />
+
       {subTab === 'diseno' && (
         <DesignPageEditor
           storeTheme={settings.storeTheme}
@@ -8733,13 +8782,23 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     <Barcode className="w-3.5 h-3.5 text-slate-500" />
                     <span>Código / SKU (opcional)</span>
                   </label>
-                  <input
-                    type="text"
-                    value={productSku}
-                    onChange={(e) => setProductSku(e.target.value)}
-                    placeholder="Ej. COD-104, ART-22, 779..."
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={productSku}
+                      onChange={(e) => setProductSku(e.target.value)}
+                      placeholder="Ej. COD-104, ART-22, 779..."
+                      className="flex-1 min-w-0 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setScanTarget({ kind: 'form' })}
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white cursor-pointer shrink-0"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      Escanear
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-1">
