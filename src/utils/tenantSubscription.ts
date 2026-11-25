@@ -629,7 +629,7 @@ export function toggleTenantMonthlyPayment(
     );
     const coveredSet = new Set(monthKeysToCover);
     const remainingHistory = existingHistory.filter((p) => !coveredSet.has(p.monthKey));
-    const totalPaidValue = amount || (planType === 'annual' ? (sub.monthlyFee || 25000) * 12 : sub.monthlyFee || 25000);
+    const totalPaidValue = typeof amount === 'number' && amount >= 0 ? amount : (planType === 'annual' ? (sub.monthlyFee || 25000) * 12 : sub.monthlyFee || 25000);
     const perMonthEquivalent = Math.round(totalPaidValue / monthsCount);
     const untilMonthKey = monthKeysToCover[monthKeysToCover.length - 1];
     const nextMonthlyFee =

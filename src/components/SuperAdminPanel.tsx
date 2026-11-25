@@ -26,6 +26,7 @@ import {
   Share2,
   DollarSign,
   Calendar,
+  Gift,
   Clock,
   Flame,
   Check,
@@ -889,6 +890,30 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
     showToast(
       `✓ Plan Anual (12 meses, hasta ${untilLabel}) acreditado para "${tenant.name}" por $ ${annualAmount.toLocaleString('es-AR')}.`
     );
+  };
+
+  // Regalar 1 año (12 meses) sin cobro: queda registrado como cortesía con monto $ 0
+  const handleGiftOneYear = (tenant: Tenant) => {
+    const ok = window.confirm(
+      `¿Regalarle 1 año (12 meses) a "${tenant.name}" sin cobrarle? Quedará registrado como cortesía.`
+    );
+    if (!ok) return;
+    const updatedTenant = toggleTenantMonthlyPayment(
+      tenant,
+      monthInfo.monthKey,
+      true,
+      0,
+      `Año de cortesía (12 meses) otorgado por ${currentUser.fullName || 'Gestor General'}`,
+      currentUser.fullName || 'Super Administrador',
+      { paymentMethod: 'manual', planType: 'annual', monthsCount: 12 }
+    );
+    const updated = tenants.map((t) => (t.id === tenant.id ? updatedTenant : t));
+    setTenants(updated);
+    saveTenants(updated);
+    const untilLabel = updatedTenant.subscription?.annualPlanUntilMonth
+      ? formatMonthKeyEs(updatedTenant.subscription.annualPlanUntilMonth)
+      : '12 meses';
+    showToast(`🎁 Le regalaste 1 año a "${tenant.name}" (hasta ${untilLabel}).`);
   };
 
   // Prorrogar por 1 Mes el uso de la plataforma
@@ -3276,6 +3301,15 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
               </div>
             </div>
 
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-400/30 text-xs text-amber-100">
+              <Gift className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+              <span>
+                <strong>Regalar un año:</strong> en la columna de acciones de cada empresa tocá{' '}
+                <strong>“Regalar 1 año”</strong> (sin cobro, queda como cortesía). Si pagó el año completo, usá{' '}
+                <strong>“Año pagado (12M)”</strong>.
+              </span>
+            </div>
+
             {/* TABLA COMPLETA DE MONETIZACIÓN Y ESTADO DE ABONOS */}
             <div className="bg-slate-800/90 border border-slate-700/80 rounded-2xl overflow-hidden shadow-xs">
               <div className="overflow-x-auto">
@@ -3554,16 +3588,29 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                                   <span>{isPaid ? '✓ Pagado' : 'Tildar 1M'}</span>
                                 </button>
 
+                                {/* REGALAR 1 AÑO (SIN COBRO) */}
+                                {!(tenant.subscription?.annualPlanUntilMonth && tenant.subscription.annualPlanUntilMonth >= monthInfo.monthKey) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleGiftOneYear(tenant)}
+                                    className="py-1 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-[#091428] text-xs font-bold flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+                                    title="Regalar 1 año (12 meses) sin cobrarle"
+                                  >
+                                    <Gift className="w-3.5 h-3.5" />
+                                    <span>Regalar 1 año</span>
+                                  </button>
+                                )}
+
                                 {/* ACREDITAR PLAN ANUAL (12 MESES) */}
                                 {!(tenant.subscription?.annualPlanUntilMonth && tenant.subscription.annualPlanUntilMonth >= monthInfo.monthKey) && (
                                   <button
                                     type="button"
                                     onClick={() => handleApplyAnnualPayment(tenant)}
                                     className="py-1 px-2 rounded-lg bg-sky-600/20 hover:bg-sky-600/35 text-sky-300 border border-sky-500/35 text-xs font-bold flex items-center gap-1 cursor-pointer transition-all"
-                                    title="Acreditar pago anual por 12 meses consecutivos"
+                                    title="Registrar que pagó el año completo (12 meses), con el descuento anual"
                                   >
                                     <Calendar className="w-3 h-3" />
-                                    <span>+1 Año (12M)</span>
+                                    <span>Año pagado (12M)</span>
                                   </button>
                                 )}
 

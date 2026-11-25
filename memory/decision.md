@@ -64,3 +64,7 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Hallazgo:** un comercio no podía guardar cambios en su fila de `businesses` (upsert bloqueado por la política de alta, solo superadmin): la aceptación de términos, el cambio de plan y el diseño del panel no persistían desde su cuenta. Ahora usa `update` si no es superadmin.
 - **Pruebas:** `tests/e2e` cubre diseño de página, panel con color, filtros, Plan 2 bloqueado, términos y venta de mostrador.
 - **Pendiente:** `bun.lock` no incluye `@zxing/*` (solo `package-lock.json`); mover fotos a Storage; campo de TNA del BNA no se puede vaciar del todo.
+
+## 2026-11-25 — Regalar un año desde SuperGestión
+- **Decisión:** en la lista de empresas hay un botón visible "Regalar 1 año" (cortesía, sin cobro, queda registrado con monto $ 0 y pide confirmación) y un aviso sobre la tabla. El botón anterior pasó a llamarse "Año pagado (12M)" y registra el pago del año con descuento.
+- **Motivo:** el usuario no encontraba cómo dar un año gratis a un cliente.
