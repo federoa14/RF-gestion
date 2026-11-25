@@ -102,3 +102,23 @@ export function getStoreThemeRootProps(
     } as CSSProperties,
   };
 }
+
+/**
+ * Atributos para el contenedor del panel de gestión (.rf-panel). Solo cambia el color principal
+ * y la letra; ver las reglas ".rf-panel[data-themed]" en index.css.
+ */
+export function getPanelThemeRootProps(
+  theme: CatalogStoreTheme | undefined,
+  enabled: boolean
+): { 'data-themed'?: string; style?: CSSProperties } {
+  if (!enabled || !theme) return {};
+  const r = resolveStoreTheme(theme);
+  return {
+    'data-themed': 'true',
+    style: {
+      ['--panel-primary' as string]: r.primary,
+      ['--panel-accent' as string]: r.accent,
+      fontFamily: r.fontFamily,
+    } as CSSProperties,
+  };
+}

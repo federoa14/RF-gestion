@@ -80,6 +80,9 @@ import {
   saveRendiciones,
   resetOperationalData,
 } from './utils/storage';
+import { getPanelThemeRootProps } from './utils/storeTheme';
+import { TermsAcceptanceGate } from './components/TermsAcceptanceGate';
+import type { CatalogStoreTheme } from './types';
 import { ensureClientCreditHistory, getDaysElapsed } from './utils/retentionPurge';
 import { getSupabaseClient } from './utils/supabaseClient';
 import { describeCloudError, flushSupabaseSync } from './utils/supabaseSync';
@@ -2189,6 +2192,48 @@ export default function App() {
     );
   };
 
+  const needsTermsAcceptance = Boolean(
+    currentUser &&
+      currentUser.role !== 'superadmin' &&
+      selectedTenant &&
+      (!selectedTenant.subscription?.termsAccepted ||
+        selectedTenant.subscription?.termsVersion !== TERMS_VERSION)
+  );
+
+  const handleAcceptCurrentTerms = () => {
+    if (!selectedTenant) return;
+    const nowIso = new Date().toISOString();
+    const sub = ensureTenantSubscription(selectedTenant);
+    const updatedTenant: Tenant = {
+      ...selectedTenant,
+      subscription: {
+        ...sub,
+        termsAccepted: true,
+        termsAcceptedAt: nowIso,
+        termsVersion: TERMS_VERSION,
+      },
+    };
+    const freshTenants = allTenants.map((t) => (t.id === updatedTenant.id ? updatedTenant : t));
+    setAllTenants(freshTenants);
+    saveTenants(freshTenants);
+    setSelectedTenant(updatedTenant);
+  };
+
+  const handleSavePanelTheme = (panelTheme: CatalogStoreTheme | undefined) => {
+    const nextConfig: DistributorConfig = { ...config, panelTheme };
+    setConfig(nextConfig);
+    if (selectedTenant) {
+      const cur = loadTenantData(selectedTenant.id);
+      cur.config = nextConfig;
+      saveTenantData(selectedTenant.id, cur);
+      const freshTenants = allTenants.map((t) =>
+        t.id === selectedTenant.id ? { ...t, config: nextConfig } : t
+      );
+      setAllTenants(freshTenants);
+      saveTenants(freshTenants);
+    }
+  };
+
   const persistConfigUpdate = (updated: DistributorConfig, customToast?: string) => {
     const nextRubro: BusinessRubro = updated.businessRubro || config.businessRubro || 'distribuidora';
     const rawMpToken = updated.merchantMpAccessToken?.trim();
@@ -4071,7 +4116,16 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F4F6F9] dark:bg-[#071021] text-slate-800 dark:text-[#E2E8F0] font-sans flex">
+    <div
+      {...getPanelThemeRootProps(
+        config.panelTheme,
+        Boolean(selectedTenant && getTenantEffectiveFeatureAccess(selectedTenant).canAccessFullFeatures)
+      )}
+      className="rf-panel min-h-screen bg-[#F4F6F9] dark:bg-[#071021] text-slate-800 dark:text-[#E2E8F0] font-sans flex"
+    >
+      {needsTermsAcceptance && (
+        <TermsAcceptanceGate onAccept={handleAcceptCurrentTerms} onLogout={handleLogout} />
+      )}
       {/* Toast Notification */}
       {newOrderNotice && (
         <div
@@ -5392,6 +5446,7 @@ export default function App() {
         {activeTab === 'catalogo' && (
           <Suspense fallback={<LazyViewFallback />}>
             <CatalogManager
+              onSavePanelTheme={handleSavePanelTheme}
               focusRequest={catalogFocusRequest}
               config={config}
               tenant={selectedTenant}
