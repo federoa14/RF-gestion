@@ -42,3 +42,6 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 
 ## Preferencias nuevas
 - El usuario quiere poder pedir cambios de código directos para que la página quede según los colores que cada cliente elija.
+
+## 2026-11-25 — Diseño: solo Plan 3 (reconfirmado)
+- **Decisión:** únicamente Plan 3 puede modificar colores, letra y diseño (tienda y panel); en planes inferiores el editor queda bloqueado y el código descarta el diseño al guardar.

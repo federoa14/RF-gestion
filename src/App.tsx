@@ -1262,7 +1262,11 @@ export default function App() {
     void publishPublicCatalogToSupabase(snapshot);
   };
 
-  const handleSaveCatalogSettings = (updated: OnlineCatalogSettings) => {
+  const handleSaveCatalogSettings = (incoming: OnlineCatalogSettings) => {
+    // Solo el Plan 3 puede modificar el diseño de la tienda
+    const canDesign =
+      !selectedTenant || getTenantEffectiveFeatureAccess(selectedTenant).canAccessFullFeatures;
+    const updated: OnlineCatalogSettings = canDesign ? incoming : { ...incoming, storeTheme: undefined };
     setCatalogSettings(updated);
     if (selectedTenant) {
       const cur = loadTenantData(selectedTenant.id);
@@ -2220,6 +2224,8 @@ export default function App() {
   };
 
   const handleSavePanelTheme = (panelTheme: CatalogStoreTheme | undefined) => {
+    // Solo el Plan 3 puede modificar el diseño
+    if (!selectedTenant || !getTenantEffectiveFeatureAccess(selectedTenant).canAccessFullFeatures) return;
     const nextConfig: DistributorConfig = { ...config, panelTheme };
     setConfig(nextConfig);
     if (selectedTenant) {
