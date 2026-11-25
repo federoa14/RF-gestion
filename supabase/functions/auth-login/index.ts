@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
 
     let query = admin
       .from('profiles')
-      .select('id, business_id, active, businesses(code)')
+      .select('id, business_id, active, email, businesses(code)')
       .ilike('username', username);
     const { data: candidates, error } = await query;
     if (error) return jsonResponse({ error: 'No se pudo verificar el usuario.' }, 500);
@@ -40,9 +40,14 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Hay más de un usuario con ese nombre: completá el código de tu empresa.' }, 409);
     }
 
-    const { data: authUser, error: userErr } = await admin.auth.admin.getUserById(matches[0].id);
-    const email = authUser?.user?.email;
-    if (userErr || !email) return jsonResponse({ error: GENERIC_ERROR }, 401);
+    // El email está guardado en el perfil: se evita una consulta extra a Auth (más rápido).
+    // Si faltara, se busca en Auth como antes.
+    let email: string | undefined = matches[0].email || undefined;
+    if (!email) {
+      const { data: authUser, error: userErr } = await admin.auth.admin.getUserById(matches[0].id);
+      email = authUser?.user?.email;
+      if (userErr || !email) return jsonResponse({ error: GENERIC_ERROR }, 401);
+    }
 
     const anon = createClient(url, anonKey, { auth: { persistSession: false } });
     const { data: session, error: signErr } = await anon.auth.signInWithPassword({ email, password });
