@@ -13,7 +13,7 @@ export interface ArgentinaLiveRates {
 }
 
 export const DEFAULT_ARGENTINA_RATES_FALLBACK: ArgentinaLiveRates = {
-  personalLoansTna: 63.08,
+  personalLoansTna: 40,
   tamarTna: 24.31,
   badlarTna: 22.13,
   deposits30Tna: 21.22,
@@ -22,6 +22,39 @@ export const DEFAULT_ARGENTINA_RATES_FALLBACK: ArgentinaLiveRates = {
   fetchedAt: new Date().toISOString(),
   isLive: false,
 };
+
+/**
+ * TNA de referencia del Banco Nación (BNA). El BNA no publica una API: la tasa se toma de su
+ * cuadro de tasas (bna.com.ar) y el comercio la puede corregir cuando cambie. Se guarda en el navegador.
+ */
+export const BNA_DEFAULT_TNA = 40;
+export const BNA_RATES_URL = 'https://www.bna.com.ar/Personas/Prestamos';
+const BNA_TNA_STORAGE_KEY = 'cobranzas_bna_tna_v1';
+
+export function getBnaTna(): number {
+  try {
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(BNA_TNA_STORAGE_KEY) : null;
+    const n = raw ? Number(raw) : NaN;
+    if (Number.isFinite(n) && n > 0 && n <= 300) return n;
+  } catch {
+    // ignore
+  }
+  return BNA_DEFAULT_TNA;
+}
+
+export function isBnaTnaCustomized(): boolean {
+  return getBnaTna() !== BNA_DEFAULT_TNA;
+}
+
+export function setBnaTna(value: number | null): void {
+  try {
+    if (typeof window === 'undefined') return;
+    if (value && value > 0) window.localStorage.setItem(BNA_TNA_STORAGE_KEY, String(value));
+    else window.localStorage.removeItem(BNA_TNA_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 const STORAGE_CACHE_KEY = 'cobranzas_ar_live_rates_v1';
 const CACHE_TTL_MS = 20 * 60 * 1000; // 20 minutos en navegador
@@ -78,7 +111,7 @@ export function buildInstallmentSuggestionMap(
  * Consulta en vivo tasas referenciales de Argentina directamente desde ArgentinaDatos
  * (compatible con CORS en navegador, sin backend) con respaldo local automático.
  */
-export async function fetchArgentinaLiveRates(forceRefresh = false): Promise<ArgentinaLiveRates> {
+async function fetchBcraRates(forceRefresh = false): Promise<ArgentinaLiveRates> {
   const now = Date.now();
 
   if (!forceRefresh && memoryCache && now - memoryCache.savedAt < CACHE_TTL_MS) {
@@ -141,4 +174,17 @@ export async function fetchArgentinaLiveRates(forceRefresh = false): Promise<Arg
   }
 
   return memoryCache?.data || DEFAULT_ARGENTINA_RATES_FALLBACK;
+}
+
+/**
+ * Tasas para sugerir el interés de las cuotas: la TNA base es la del Banco Nación
+ * (editable por el comercio); BADLAR y depósitos siguen viniendo de BCRA como contexto.
+ */
+export async function fetchArgentinaLiveRates(forceRefresh = false): Promise<ArgentinaLiveRates> {
+  const bcra = await fetchBcraRates(forceRefresh);
+  return {
+    ...bcra,
+    personalLoansTna: getBnaTna(),
+    sourceLabel: isBnaTnaCustomized() ? 'Banco Nación (tasa ajustada por vos)' : 'Banco Nación (referencia)',
+  };
 }

@@ -417,10 +417,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [draftSettings, setDraftSettings] = useState<OnlineCatalogSettings>(() => ({
     published: settings.published !== false,
     catalogRubro: activeCatalogRubro,
-    rubroFilters:
-      normalizeFilterList(settings.rubroFilters).length > 0
-        ? normalizeFilterList(settings.rubroFilters)
-        : rubroPreset.defaultFilters,
+    // Solo se usan los predeterminados si nunca se configuró; una lista vacía guardada se respeta
+    rubroFilters: Array.isArray(settings.rubroFilters)
+      ? normalizeFilterList(settings.rubroFilters)
+      : rubroPreset.defaultFilters,
     customSubfilters: normalizeFilterList(settings.customSubfilters),
     storeName: settings.storeName || config.distributorName || tenant?.name || 'Mi Catálogo',
     tagline:
@@ -467,10 +467,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     const presetForSync = getCatalogRubroPreset(
       tenant?.catalogRubro || settings.catalogRubro || config.businessRubro || 'distribuidora'
     );
-    const resolvedFilters =
-      normalizeFilterList(settings.rubroFilters).length > 0
-        ? normalizeFilterList(settings.rubroFilters)
-        : presetForSync.defaultFilters;
+    const resolvedFilters = Array.isArray(settings.rubroFilters)
+      ? normalizeFilterList(settings.rubroFilters)
+      : presetForSync.defaultFilters;
 
     setInlineWhatsappDraft(resolvedPhone);
     setDraftSettings({
@@ -717,8 +716,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   );
 
   const activeRubroFilters = useMemo(() => {
-    const custom = normalizeFilterList(settings.rubroFilters);
-    return custom.length > 0 ? custom : rubroPreset.defaultFilters;
+    return Array.isArray(settings.rubroFilters)
+      ? normalizeFilterList(settings.rubroFilters)
+      : rubroPreset.defaultFilters;
   }, [settings.rubroFilters, rubroPreset]);
 
   const savedCustomSubfilters = useMemo(
@@ -1645,8 +1645,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       return;
     }
     const cleanRubroFilters = normalizeFilterList(draftSettings.rubroFilters);
-    const resolvedRubroFilters =
-      cleanRubroFilters.length > 0 ? cleanRubroFilters : rubroPreset.defaultFilters;
+    const resolvedRubroFilters = Array.isArray(draftSettings.rubroFilters)
+      ? cleanRubroFilters
+      : rubroPreset.defaultFilters;
     const cleanCustomSubfilters = normalizeFilterList(draftSettings.customSubfilters);
     if (isBasicWebPlan) {
       const combined = normalizeFilterList([...resolvedRubroFilters, ...cleanCustomSubfilters]);

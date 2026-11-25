@@ -839,7 +839,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
   const categories = useMemo(() => {
     const primaryFilters = normalizeFilterList(
-      catalog?.rubroFilters && catalog.rubroFilters.length > 0
+      Array.isArray(catalog?.rubroFilters)
         ? catalog.rubroFilters
         : rubroPreset?.defaultFilters
     );

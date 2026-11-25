@@ -32,6 +32,10 @@ import {
   buildInstallmentSuggestionMap,
   computeSuggestedInstallmentInterest,
   fetchArgentinaLiveRates,
+  getBnaTna,
+  setBnaTna,
+  isBnaTnaCustomized,
+  BNA_RATES_URL,
 } from '../utils/argentinaRates';
 import {
   Client,
@@ -177,7 +181,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
   const [saleMode, setSaleMode] = useState<SaleMode>('standard');
   const [downPaymentStr, setDownPaymentStr] = useState<string>('');
   const [installmentsCount, setInstallmentsCount] = useState<number>(3);
-  const [liveRates, setLiveRates] = useState<ArgentinaLiveRates>(DEFAULT_ARGENTINA_RATES_FALLBACK);
+  const [liveRates, setLiveRates] = useState<ArgentinaLiveRates>({ ...DEFAULT_ARGENTINA_RATES_FALLBACK, personalLoansTna: getBnaTna(), sourceLabel: 'Banco Nación (referencia)' });
   const [isLoadingLiveRates, setIsLoadingLiveRates] = useState<boolean>(false);
   const [hasManualInterestOverride, setHasManualInterestOverride] = useState<boolean>(false);
   const [interestPercentStr, setInterestPercentStr] = useState<string>(() =>
@@ -2219,14 +2223,33 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                             }`}
                           />
                           <strong className="text-[#0B1933] dark:text-white">
-                            Tasa Argentina ({liveRates.sourceLabel}):
+                            Tasa {liveRates.sourceLabel}:
                           </strong>
-                          <span>
-                            Prést. Personales{' '}
-                            <strong className="font-mono text-[#0B1933] dark:text-white">
-                              {liveRates.personalLoansTna}% TNA
-                            </strong>
-                          </span>
+                          <label className="inline-flex items-center gap-1">
+                            TNA
+                            <input
+                              type="number"
+                              min={1}
+                              max={300}
+                              step={0.5}
+                              value={liveRates.personalLoansTna}
+                              onChange={(e) => {
+                                const v = Math.max(0, Number(e.target.value) || 0);
+                                setBnaTna(v > 0 ? v : null);
+                                setLiveRates((prev) => ({
+                                  ...prev,
+                                  personalLoansTna: v > 0 ? v : getBnaTna(),
+                                  sourceLabel: isBnaTnaCustomized() ? 'Banco Nación (tasa ajustada por vos)' : 'Banco Nación (referencia)',
+                                }));
+                                setHasManualInterestOverride(false);
+                              }}
+                              className="w-16 px-1 py-0.5 rounded border border-[#CBD5E1] dark:border-[#B6C2D2]/25 bg-white dark:bg-[#071021] font-mono font-bold text-[#0B1933] dark:text-white"
+                            />
+                            %
+                          </label>
+                          <a href={BNA_RATES_URL} target="_blank" rel="noreferrer" className="underline text-sky-600">
+                            ver tasas BNA
+                          </a>
                           <span className="text-slate-400">·</span>
                           <span>BADLAR {liveRates.badlarTna}%</span>
                           <span className="text-slate-400">·</span>
