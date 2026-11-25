@@ -416,9 +416,12 @@ export async function hydrateForSession(
 
   // Datos de cada comercio
   const ids = isSuper ? businesses.map((b) => b.id) : profile.businessId ? [profile.businessId] : [];
-  for (const id of ids) {
-    const data = await withRetry(() => buildTenantData(id));
-    apply(`${TENANT_DATA_PREFIX}${id}`, JSON.stringify(data));
+  // En paralelo (de a pocos comercios a la vez) para que entrar no tarde más cuantos más comercios haya
+  const TENANT_CONCURRENCY = 4;
+  for (let i = 0; i < ids.length; i += TENANT_CONCURRENCY) {
+    const batch = ids.slice(i, i + TENANT_CONCURRENCY);
+    const results = await Promise.all(batch.map((id) => withRetry(() => buildTenantData(id))));
+    batch.forEach((id, idx) => apply(`${TENANT_DATA_PREFIX}${id}`, JSON.stringify(results[idx])));
   }
 
   hydrated = true;
