@@ -359,8 +359,8 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
 
       {/* Detailed Table View */}
       <div className="bg-white dark:bg-[#0B1933] rounded-xl border border-[#CBD5E1] dark:border-[#B6C2D2]/20 overflow-hidden shadow-2xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+        <div className="overflow-x-auto rt-cards-scroll">
+          <table className="rt-cards w-full text-left text-xs">
             <thead className="bg-[#0B1933] text-[#E2E8F0] font-semibold border-b border-[#B6C2D2]/25">
               <tr>
                 <th className="px-4 py-3.5">N° Boleta</th>
@@ -412,7 +412,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       }`}
                     >
                       {/* Nro Boleta */}
-                      <td className="px-4 py-3.5 font-mono font-bold text-slate-900 dark:text-white">
+                      <td className="px-4 py-3.5 font-mono font-bold text-slate-900 dark:text-white" data-label="N° Boleta">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span>#{boleta.boletaNumber}</span>
                           {boleta.isSigned && (
@@ -439,7 +439,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Cliente que debe la factura */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" data-label="Cliente">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-black text-slate-900 dark:text-white text-sm">
                             {boleta.clientName}
@@ -468,7 +468,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Monto y Saldo adeudado */}
-                      <td className="px-4 py-3.5 text-right font-mono tabular-nums">
+                      <td className="px-4 py-3.5 text-right font-mono tabular-nums" data-label="Monto y Saldo">
                         <span className="text-sm font-black text-slate-900 dark:text-white block">
                           {formatCurrency(balance.balanceDue, config.currencySymbol)}
                         </span>
@@ -487,7 +487,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Fecha de Venta (cuándo se hizo) */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" data-label="Fecha de Venta">
                         <span className="font-semibold text-slate-700 dark:text-slate-300 block">
                           {formatDateEs(boleta.saleDate)}
                         </span>
@@ -497,7 +497,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Fecha de Cobro Programada (cuándo se debió cobrar) */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" data-label="Vencimiento">
                         <span
                           className={`font-bold block ${
                             isCritical
@@ -523,7 +523,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Estado y Demora */}
-                      <td className="px-4 py-3.5">
+                      <td className="px-4 py-3.5" data-label="Estado / Demora">
                         <span
                           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border shadow-2xs ${status.badgeColor}`}
                         >
@@ -532,7 +532,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Vendedor a cargo */}
-                      <td className="px-4 py-3.5 text-slate-700 dark:text-slate-300">
+                      <td className="px-4 py-3.5 text-slate-700 dark:text-slate-300" data-label="Vendedor a Cargo">
                         <div className="flex items-center gap-1 font-semibold">
                           <Bike className="w-3.5 h-3.5 text-indigo-500" />
                           <span>{boleta.salespersonName}</span>
@@ -540,7 +540,7 @@ export const UnpaidBoletasView: React.FC<UnpaidBoletasViewProps> = ({
                       </td>
 
                       {/* Prórroga & Acciones Rápidas */}
-                      <td className="px-4 py-3.5 text-center">
+                      <td className="px-4 py-3.5 text-center" data-label="Prórroga & Acciones">
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           {/* BOTÓN PRORROGAR BOLETA */}
                           <button

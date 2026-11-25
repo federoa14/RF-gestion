@@ -321,8 +321,9 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Compact Silver-Lined Status Ticker Strip */}
       <div className="bg-[#081224] border-t border-[#B6C2D2]/15 px-4 sm:px-6 lg:px-8 py-2 text-xs">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-[#CBD5E1]">
-          <div className="flex items-center gap-4 sm:gap-5 flex-wrap">
+        {/* En celular: una sola línea que se desliza, para no ocupar media pantalla */}
+        <div className="max-w-7xl mx-auto flex md:flex-wrap items-center justify-between gap-3 text-[#CBD5E1] overflow-x-auto no-scrollbar whitespace-nowrap">
+          <div className="flex items-center gap-4 sm:gap-5 md:flex-wrap">
             <div className="flex items-center gap-1.5">
               <span className="text-[#8D9CB0]">En la calle:</span>
               <span className="font-mono tabular-nums font-bold text-white text-sm">

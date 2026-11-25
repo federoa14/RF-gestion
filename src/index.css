@@ -46,3 +46,92 @@
     color: black !important;
   }
 }
+
+/* ===========================================================================
+   VERSIÓN CELULAR (Fase 6): los vendedores usan la app en la calle.
+   - Todo lo que se toca mide al menos 44 px.
+   - Los campos usan 16 px de letra (el iPhone no hace zoom al tocarlos).
+   - Textos muy chicos se agrandan un poco para leer sin zoom.
+   Para un control que deba quedar chico a propósito: clase "tap-compact".
+   =========================================================================== */
+@media (max-width: 767px) {
+  button:not(.tap-compact),
+  [role='button']:not(.tap-compact),
+  select:not(.tap-compact),
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not(.tap-compact),
+  textarea {
+    min-height: 44px;
+  }
+
+  button:not(.tap-compact) {
+    min-width: 44px;
+  }
+
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 22px;
+    height: 22px;
+  }
+
+  .text-\[9px\],
+  .text-\[10px\] {
+    font-size: 11px !important;
+  }
+
+  /* Tablas que en celular se muestran como tarjetas (ver clase "rt-cards") */
+  table.rt-cards,
+  table.rt-cards tbody,
+  table.rt-cards tr,
+  table.rt-cards td {
+    display: block;
+    width: 100%;
+  }
+  table.rt-cards thead {
+    display: none;
+  }
+  table.rt-cards tr {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgb(226 232 240 / 0.8);
+  }
+  table.rt-cards td {
+    padding: 4px 0 !important;
+    border: 0 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    max-width: none !important;
+  }
+  table.rt-cards td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgb(100 116 139);
+    margin-bottom: 1px;
+    font-family: var(--font-sans);
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  table.rt-cards td.rt-hide-mobile {
+    display: none;
+  }
+  .rt-cards-scroll {
+    overflow-x: visible !important;
+  }
+}
+
+@media (max-width: 767px) {
+  /* Enlaces que funcionan como botones (WhatsApp, llamar, email) */
+  a[href*='wa.me']:not(.tap-compact),
+  a[href^='tel:']:not(.tap-compact),
+  a[href^='mailto:']:not(.tap-compact) {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}

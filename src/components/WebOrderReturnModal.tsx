@@ -579,7 +579,7 @@ export const WebOrderReturnModal: React.FC<WebOrderReturnModalProps> = ({
                       <div className="flex items-center gap-1.5 shrink-0">
                         <span className="text-[11px] text-slate-500">Cant.:</span>
                         <input
-                          type="number"
+                          type="number" inputMode="decimal"
                           min={0}
                           max={maxQty}
                           value={qtyVal}
@@ -661,7 +661,7 @@ export const WebOrderReturnModal: React.FC<WebOrderReturnModalProps> = ({
                   </select>
                 ) : (
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min={1}
                     value={replacementQty}
                     onChange={(e) => setReplacementQty(Math.max(1, Number(e.target.value) || 1))}
@@ -788,7 +788,7 @@ export const WebOrderReturnModal: React.FC<WebOrderReturnModalProps> = ({
                     <div className="flex items-center justify-between gap-2 text-xs pl-5">
                       <span className="text-slate-600 dark:text-slate-300">Puntos a restar:</span>
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min={0}
                         value={
                           customPointsToDeduct !== ''

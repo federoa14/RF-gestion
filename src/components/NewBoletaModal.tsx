@@ -942,8 +942,14 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative my-8">
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 overflow-y-auto">
+      {/* En celular ocupa toda la pantalla y el botón Guardar queda fijo abajo (uso con una mano) */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Cargar ${labels.saleSingular.toLowerCase()}`}
+        className="bg-white dark:bg-slate-900 sm:border border-slate-200 dark:border-slate-800 rounded-none sm:rounded-2xl max-w-2xl w-full min-h-full sm:min-h-0 px-4 pt-4 pb-0 sm:p-6 shadow-2xl relative my-0 sm:my-8"
+      >
         <div className="flex items-center justify-between border-b pb-4 border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#0B1933]/10 dark:bg-[#CBD5E1]/15 text-[#0B1933] dark:text-[#E2E8F0] flex items-center justify-center">
@@ -966,8 +972,10 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            aria-label="Cerrar"
+            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
           </button>
@@ -1120,6 +1128,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                     <div className="flex flex-wrap items-center gap-1.5">
                       <input
                         type="number"
+                  inputMode="decimal"
                         min="0"
                         step="1000"
                         placeholder="0 = sin tope"
@@ -1260,6 +1269,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                           <div className="flex items-center gap-1.5">
                             <input
                               type="number"
+                  inputMode="decimal"
                               min="0"
                               step="1000"
                               placeholder="0 = sin tope"
@@ -1385,6 +1395,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                             <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Tope Fiado ($):</label>
                             <input
                               type="number"
+                  inputMode="decimal"
                               min="0"
                               step="1000"
                               value={editClientDraft.creditLimit || ''}
@@ -1719,6 +1730,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                       </label>
                       <input
                         type="number"
+                  inputMode="decimal"
                         min="1"
                         step="1"
                         value={newItemQty}
@@ -1732,6 +1744,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                       </label>
                       <input
                         type="number"
+                  inputMode="decimal"
                         min="0"
                         step="10"
                         placeholder="15000"
@@ -1868,6 +1881,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                               </label>
                               <input
                                 type="number"
+                  inputMode="decimal"
                                 min="0"
                                 step="100"
                                 placeholder="0"
@@ -1940,6 +1954,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                                 </button>
                                 <input
                                   type="number"
+                  inputMode="decimal"
                                   min="0"
                                   max="300"
                                   step="0.5"
@@ -2070,6 +2085,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                       </label>
                       <input
                         type="number"
+                  inputMode="decimal"
                         min="0"
                         step="100"
                         placeholder="0 = sin seña"
@@ -2145,6 +2161,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                             </button>
                             <input
                               type="number"
+                  inputMode="decimal"
                               min="0"
                               max="300"
                               step="0.5"
@@ -2361,6 +2378,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                 </label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   step="0.01"
                   placeholder="150000"
                   value={amount}
@@ -2442,6 +2460,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
                 <span className="text-xs text-slate-500">Manual:</span>
                 <input
                   type="number"
+                  inputMode="decimal"
                   min="1"
                   max="180"
                   value={termDays}
@@ -2580,11 +2599,11 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
           )}
 
           {/* Submit Actions */}
-          <div className="flex flex-wrap items-center justify-end gap-2.5 pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div className="sticky bottom-0 z-10 -mx-4 px-4 py-3 sm:static sm:mx-0 sm:px-0 sm:py-0 sm:pt-4 bg-white dark:bg-slate-900 flex flex-col-reverse sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-end gap-2.5 border-t border-slate-100 dark:border-slate-800 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-0 shadow-[0_-6px_12px_-8px_rgba(0,0,0,0.15)] sm:shadow-none">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+              className="px-4 py-2 text-sm sm:text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
             >
               Cancelar
             </button>
@@ -2593,7 +2612,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
               <button
                 type="button"
                 onClick={() => processSubmission(true)}
-                className="px-4 py-2.5 text-xs font-bold rounded-lg bg-[#E9EEF5] hover:bg-[#DCE4F0] dark:bg-[#162E59] dark:hover:bg-[#1E3A6D] text-[#0B1933] dark:text-white border border-[#CBD5E1] dark:border-[#B6C2D2]/30 transition-colors cursor-pointer"
+                className="px-4 py-2.5 text-sm sm:text-xs font-bold rounded-lg bg-[#E9EEF5] hover:bg-[#DCE4F0] dark:bg-[#162E59] dark:hover:bg-[#1E3A6D] text-[#0B1933] dark:text-white border border-[#CBD5E1] dark:border-[#B6C2D2]/30 transition-colors cursor-pointer"
                 title="Guarda esta venta y mantiene el mismo cliente abierto para cargar otro producto uno por uno"
               >
                 Guardar y cargar otro al cliente
@@ -2603,7 +2622,7 @@ export const NewBoletaModal: React.FC<NewBoletaModalProps> = ({
             <button
               type="submit"
               disabled={isHardBlocked}
-              className={`px-5 py-2.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-2 ${
+              className={`px-5 py-3 sm:py-2.5 text-sm sm:text-xs font-bold rounded-lg transition-colors flex items-center justify-center gap-2 ${
                 isHardBlocked
                   ? 'bg-rose-900/40 text-rose-300 border border-rose-700/50 cursor-not-allowed opacity-90'
                   : 'bg-[#0B1933] hover:bg-[#162E59] dark:bg-[#E2E8F0] dark:hover:bg-white text-white dark:text-[#091428] cursor-pointer'

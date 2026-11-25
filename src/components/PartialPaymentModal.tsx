@@ -455,7 +455,7 @@ export const PartialPaymentModal: React.FC<PartialPaymentModalProps> = ({
             </div>
 
             <input
-              type="number"
+              type="number" inputMode="decimal"
               step="0.01"
               min="1"
               max={hasSiblingCuotas ? totalPlanRemainingDebt : balance.balanceDue}
@@ -652,7 +652,7 @@ export const PartialPaymentModal: React.FC<PartialPaymentModalProps> = ({
                   <div className="flex items-center gap-1.5">
                     <Percent className="w-3.5 h-3.5 text-amber-700 dark:text-amber-300" />
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       max="100"
                       step="0.5"

@@ -463,7 +463,7 @@ export const ClientAccountStatementModal: React.FC<ClientAccountStatementModalPr
                     Monto que entrega ({sym}) *
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     step="0.01"
                     min="1"
                     max={totalPendingDebt}

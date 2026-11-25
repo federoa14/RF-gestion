@@ -689,7 +689,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <div className="flex items-center gap-2">
                   <input
                     id="cfg-defaultTermDays"
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     max="90"
                     value={currentConfig.defaultTermDays}
@@ -713,7 +713,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <div className="flex items-center gap-2">
                   <input
                     id="cfg-defaultExtensionDays"
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     max="60"
                     value={currentConfig.defaultExtensionDays || 3}
@@ -749,7 +749,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <div className="flex items-center gap-2">
                   <input
                     id="cfg-vendedorReminderDays"
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     max="60"
                     value={currentConfig.vendedorReminderDays}
@@ -773,7 +773,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <div className="flex items-center gap-2">
                   <input
                     id="cfg-adminAlertDays"
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     max="90"
                     value={currentConfig.adminAlertDays}
@@ -797,7 +797,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <div className="flex items-center gap-2">
                   <input
                     id="cfg-saleAlertModeDays"
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     max="120"
                     value={currentConfig.saleAlertModeDays ?? draftThresholds.alertModeDays}
@@ -821,7 +821,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <div className="flex items-center gap-2">
                   <input
                     id="cfg-saleCriticalDays"
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     max="180"
                     value={currentConfig.saleCriticalDays ?? draftThresholds.criticalSaleDays}
@@ -854,7 +854,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 <div className="flex items-center gap-2">
                   <input
                     id="cfg-overdueGraceDays"
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     max="60"
                     value={currentConfig.overdueGraceDays ?? draftThresholds.overdueGraceDays}
@@ -904,7 +904,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-xs font-mono font-bold text-slate-500">{currentConfig.currencySymbol}</span>
               <input
-                type="number"
+                type="number" inputMode="decimal"
                 min="0"
                 step="1000"
                 placeholder="0 = sin tope"
@@ -1153,7 +1153,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                 </label>
                 <div className="flex items-center gap-2">
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     max="200"
                     step="0.5"
@@ -1196,7 +1196,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-slate-600 dark:text-[#CBD5E1]">Recargo sugerido:</span>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       max="100"
                       step="0.5"
@@ -1216,7 +1216,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-slate-600 dark:text-[#CBD5E1]">Aplicar tras:</span>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="1"
                       max="120"
                       disabled={!currentConfig.lateSurchargeEnabled}

@@ -4322,7 +4322,7 @@ export default function App() {
                     </div>
                   </div>
                   <div className="mt-2">
-                    <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#0B1933] dark:text-white tracking-tight">
+                    <span className="text-lg sm:text-2xl font-black font-mono whitespace-nowrap tabular-nums text-[#0B1933] dark:text-white tracking-tight">
                       {formatCurrency(totalPendingDebt, config.currencySymbol)}
                     </span>
                     <span className="block text-[11px] text-slate-500 dark:text-[#8D9CB0] font-medium mt-0.5 tabular-nums">
@@ -4358,7 +4358,7 @@ export default function App() {
                   </div>
                   <div className="mt-2 w-full">
                     <span
-                      className={`text-xl sm:text-2xl font-black font-mono tabular-nums tracking-tight ${
+                      className={`text-lg sm:text-2xl font-black font-mono whitespace-nowrap tabular-nums tracking-tight ${
                         criticalGraceOverdueDebt > 0
                           ? 'text-[#991B1B] dark:text-rose-400'
                           : 'text-[#0B1933] dark:text-white'
@@ -4394,7 +4394,7 @@ export default function App() {
                     </div>
                   </div>
                   <div className="mt-2">
-                    <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400 tracking-tight">
+                    <span className="text-lg sm:text-2xl font-black font-mono whitespace-nowrap tabular-nums text-emerald-700 dark:text-emerald-400 tracking-tight">
                       {formatCurrency(totalCollectedHistorical, config.currencySymbol)}
                     </span>
                     <span className="block text-[11px] text-slate-500 dark:text-[#8D9CB0] font-medium mt-0.5 tabular-nums">
@@ -4418,7 +4418,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="mt-2 w-full">
-                      <span className="text-xl sm:text-2xl font-black font-mono tabular-nums text-[#0B1933] dark:text-sky-300 tracking-tight">
+                      <span className="text-lg sm:text-2xl font-black font-mono whitespace-nowrap tabular-nums text-[#0B1933] dark:text-sky-300 tracking-tight">
                         {formatCurrency(totalWebSalesRevenue, config.currencySymbol)}
                       </span>
                       <div className="flex items-center justify-between gap-1 mt-0.5">
@@ -4449,7 +4449,7 @@ export default function App() {
                   </div>
                   <div className="mt-2">
                     <div className="flex items-baseline gap-1.5 tabular-nums">
-                      <span className="text-xl sm:text-2xl font-black font-mono text-[#0B1933] dark:text-white tracking-tight">
+                      <span className="text-lg sm:text-2xl font-black font-mono whitespace-nowrap text-[#0B1933] dark:text-white tracking-tight">
                         {config.totalPurgedBoletasCount || 0}
                       </span>
                       <span className="text-xs text-slate-500 dark:text-[#8D9CB0]">depuradas</span>

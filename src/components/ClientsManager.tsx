@@ -1347,7 +1347,7 @@ export const ClientsManager: React.FC<ClientsManagerProps> = ({
                 </div>
 
                 <input
-                  type="number"
+                  type="number" inputMode="decimal"
                   min="0"
                   step="1000"
                   placeholder="Ej. 300000 (Dejá vacío o en 0 si es sin límite fijo)"

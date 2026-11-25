@@ -3430,7 +3430,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     Porcentaje (% aumento o - descuento)
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     step="0.5"
                     value={bulkPercentInput}
                     onChange={(e) => setBulkPercentInput(e.target.value)}
@@ -3961,7 +3961,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
                             <div className="flex items-center gap-1.5">
                               <input
-                                type="number"
+                                type="number" inputMode="decimal"
                                 step="0.01"
                                 autoFocus
                                 value={quickPriceInput}
@@ -5726,7 +5726,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700">Monto ({currency}) *</label>
                 <input
-                  type="number"
+                  type="number" inputMode="decimal"
                   min="1"
                   step="0.01"
                   required
@@ -7346,7 +7346,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Descuento pagando en Efectivo / Transferencia (%)
                     </label>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       max="90"
                       step="1"
@@ -7371,7 +7371,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     Alerta de stock mínimo por defecto (unidades)
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="1"
                     value={draftSettings.defaultLowStockThreshold ?? 2}
@@ -7437,7 +7437,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     <option value="fixed">{currency} Monto fijo</option>
                   </select>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     step="0.01"
                     value={newCouponValue}
@@ -7447,7 +7447,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   />
                   <div className="col-span-2 sm:col-span-1 flex gap-1.5">
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       step="0.01"
                       value={newCouponMinPurchase}
@@ -8031,7 +8031,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           Puntos que suma cada prenda / unidad (por defecto)
                         </label>
                         <input
-                          type="number"
+                          type="number" inputMode="decimal"
                           min="1"
                           step="1"
                           value={draftSettings.loyaltyPointsPerUnit ?? 10}
@@ -8075,7 +8075,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             className="flex items-center gap-1.5 p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs"
                           >
                             <input
-                              type="number"
+                              type="number" inputMode="decimal"
                               min="1"
                               value={tier.minPoints}
                               onChange={(e) => {
@@ -8092,7 +8092,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             />
                             <span className="text-[11px] text-slate-500">pts →</span>
                             <input
-                              type="number"
+                              type="number" inputMode="decimal"
                               min="1"
                               max="90"
                               value={tier.discountPercent}
@@ -8134,7 +8134,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
                     <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="1"
                         step="1"
                         value={newLoyaltyMinPoints}
@@ -8143,7 +8143,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         className="w-36 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
                       />
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="1"
                         max="90"
                         step="1"
@@ -8455,7 +8455,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       : 'Cantidad en stock'}
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="1"
                     disabled={productVariants.length > 0}
@@ -8606,7 +8606,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             className="col-span-5 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-semibold text-slate-900"
                           />
                           <input
-                            type="number"
+                            type="number" inputMode="decimal"
                             min="0"
                             step="1"
                             value={draftVar.stockQuantity}
@@ -8634,7 +8634,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             className="col-span-2 px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[11px] font-mono text-slate-900"
                           />
                           <input
-                            type="number"
+                            type="number" inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={draftVar.price}
@@ -8683,7 +8683,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     Alerta stock bajo (opcional)
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="1"
                     value={productLowStockThreshold}
@@ -8700,7 +8700,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       <span>Puntos por unidad (Programa DNI)</span>
                     </label>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       step="1"
                       value={productLoyaltyPoints}
@@ -8737,7 +8737,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Cant. mínima precio mayorista (opcional)
                     </label>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="2"
                       step="1"
                       value={productWholesaleMinQty}
@@ -8751,7 +8751,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       Precio unitario mayorista ({currency})
                     </label>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       min="0"
                       step="0.01"
                       value={productWholesalePrice}
@@ -8785,7 +8785,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         Precio Oferta Relámpago ({currency})
                       </label>
                       <input
-                        type="number"
+                        type="number" inputMode="decimal"
                         min="0"
                         step="0.01"
                         value={productFlashSalePrice}

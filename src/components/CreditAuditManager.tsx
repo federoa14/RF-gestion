@@ -404,8 +404,8 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
 
           {/* Ranking Table of Problematic Clients */}
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+            <div className="overflow-x-auto rt-cards-scroll">
+              <table className="rt-cards w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-500 font-bold uppercase text-[10px]">
                     <th className="py-3 px-4">Posición / Riesgo</th>
@@ -435,7 +435,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                         }`}
                       >
                         {/* Position & Risk Badge */}
-                        <td className="py-3 px-4 whitespace-nowrap">
+                        <td className="py-3 px-4 whitespace-nowrap" data-label="Posición / Riesgo">
                           <div className="flex items-center gap-2">
                             <span className="font-mono font-bold text-slate-400 w-5">#{idx + 1}</span>
                             {isCritical ? (
@@ -458,7 +458,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                         </td>
 
                         {/* Client details */}
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4" data-label="Cliente & Contacto">
                           <span className="font-mono text-[10px] text-indigo-600 dark:text-indigo-400 font-bold block">
                             {item.client.clientNumber || 'S/N'}
                           </span>
@@ -471,7 +471,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                         </td>
 
                         {/* Assigned Salesperson */}
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4" data-label="Vendedor a cargo">
                           <div className="flex items-center gap-1.5">
                             <Bike className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                             <span className="font-semibold text-slate-800 dark:text-slate-200">
@@ -481,7 +481,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                         </td>
 
                         {/* Plazo vs Real Days */}
-                        <td className="py-3 px-4 whitespace-nowrap">
+                        <td className="py-3 px-4 whitespace-nowrap" data-label="Plazo vs Días Reales">
                           <div>
                             <span className="text-slate-500 block text-[11px]">
                               Plazo pactado: <strong>{item.avgTermDays} días</strong>
@@ -496,7 +496,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                         </td>
 
                         {/* % Exceso de Demora */}
-                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                        <td className="py-3 px-4 text-center whitespace-nowrap" data-label="% Exceso de Demora">
                           {item.delayPercentage > 0 ? (
                             <span
                               className={`inline-block font-black font-mono text-xs px-2.5 py-1 rounded-lg ${
@@ -515,7 +515,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                         </td>
 
                         {/* Pagos por Porcentajes / Cuotas */}
-                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                        <td className="py-3 px-4 text-center whitespace-nowrap" data-label="Pagos en Porcentajes">
                           <div>
                             <span
                               className={`font-mono font-bold text-xs ${
@@ -533,7 +533,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                         </td>
 
                         {/* Deuda Actual */}
-                        <td className="py-3 px-4 whitespace-nowrap">
+                        <td className="py-3 px-4 whitespace-nowrap" data-label="Deuda Actual en Calle">
                           {item.currentPendingBoleta ? (
                             <div>
                               <span className="font-mono font-black text-rose-600 dark:text-rose-400 text-sm block">
@@ -550,7 +550,7 @@ export const CreditAuditManager: React.FC<CreditAuditManagerProps> = ({
                         </td>
 
                         {/* WhatsApp Contact */}
-                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <td className="py-3 px-4 text-right whitespace-nowrap" data-label="Contacto">
                           {hasUsablePhone(item.client.phone) && (
                             <a
                               href={createWhatsAppUrl(

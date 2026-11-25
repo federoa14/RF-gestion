@@ -2881,7 +2881,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     Cuota Base Mensual ($ ARS):
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="500"
                     value={billingDefaultFeeInput}
@@ -2910,7 +2910,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                     Descuento Plan Anual (% · 12M):
                   </label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     max="50"
                     step="1"
@@ -2974,7 +2974,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                   <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl p-1.5 shrink-0">
                     <span className="text-[11px] font-bold text-slate-300 px-1.5">Ajustar %:</span>
                     <input
-                      type="number"
+                      type="number" inputMode="decimal"
                       step="1"
                       value={bulkPercentInput}
                       onChange={(e) => setBulkPercentInput(Number(e.target.value))}
@@ -3025,7 +3025,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                           Importe Mensual ($ ARS):
                         </label>
                         <input
-                          type="number"
+                          type="number" inputMode="decimal"
                           min="0"
                           step="500"
                           value={billingPricesInput[def.tier]}
@@ -3041,7 +3041,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       <div className="pt-1 flex items-center gap-1.5">
                         <span className="text-[10px] text-slate-400 shrink-0">Ajuste %:</span>
                         <input
-                          type="number"
+                          type="number" inputMode="decimal"
                           step="1"
                           value={perTierPercentInput[def.tier]}
                           onChange={(e) => {
@@ -5398,7 +5398,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                   Monto mensual a cobrar ($ ARS):
                 </label>
                 <input
-                  type="number"
+                  type="number" inputMode="decimal"
                   min="0"
                   step="500"
                   required
@@ -5508,7 +5508,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 <div>
                   <label className="block font-bold text-slate-300 mb-1">Cuota Mensual ($ ARS):</label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     step="500"
                     value={billingDefaultFeeInput}
@@ -5519,7 +5519,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 <div>
                   <label className="block font-bold text-emerald-300 mb-1">Desc. Plan Anual (%):</label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="0"
                     max="50"
                     step="1"
@@ -5727,7 +5727,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                 <div>
                   <label className="block font-bold text-slate-300 mb-1">Importe a Cobrar ($ ARS):</label>
                   <input
-                    type="number"
+                    type="number" inputMode="decimal"
                     min="1"
                     step="500"
                     value={paymentGenAmountInput}
