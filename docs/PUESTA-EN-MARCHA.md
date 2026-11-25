@@ -2,6 +2,12 @@
 
 Hacelo **en este orden**. Hasta el paso 9, la versión publicada en Vercel sigue siendo la vieja.
 
+> **Estado de tu proyecto "RF Gestion" en Supabase** (hecho con la herramienta de Supabase, sin pasos manuales tuyos):
+> esquema nuevo, datos copiados desde la tabla vieja, cuentas de Auth creadas, las 9 Edge Functions publicadas,
+> clave del cron generada dentro de Vault, y los cron de WhatsApp, respaldo semanal y depuración programados.
+> Lo que sigue pendiente es **D (Vercel)**, **E (WhatsApp de cada comercio)** y **F (cierre de la tabla vieja)**.
+> Los pasos A y B de abajo quedan como referencia para otro proyecto.
+
 ## A. Supabase (panel web)
 1. **Respaldo:** Database → Backups, o desde la app vieja: Ajustes → Exportar respaldo.
 2. **Extensiones:** Database → Extensions → activar `pg_cron` y `pg_net`.

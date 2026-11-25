@@ -13,13 +13,14 @@
 //
 // Credenciales: cada comercio conecta SU número desde la app (whatsapp-connect → business_secrets).
 // Variables de entorno (Supabase → Edge Functions → Secrets):
-//   CRON_SECRET               El mismo texto guardado en Vault como rf_cron_secret (obligatoria)
+//   CRON_SECRET               Opcional: por defecto se usa la clave guardada en Vault (rf_cron_secret)
 //   WHATSAPP_API_VERSION      Versión de la Graph API (opcional, por defecto v21.0)
 //   WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_TEMPLATE_LANG
 //                             Opcionales: número general de la plataforma, solo como respaldo
 //                             para comercios que no conectaron el suyo.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders, jsonResponse } from '../_shared/http.ts';
+import { isCronRequest } from '../_shared/cronAuth.ts';
 import {
   argentinaNow,
   businessCanDispatch,
@@ -228,8 +229,7 @@ Deno.serve(async (req) => {
 
   // ---- Cron programado
   if (body?.mode === 'cron') {
-    const secret = Deno.env.get('CRON_SECRET') || '';
-    if (!secret || req.headers.get('x-cron-secret') !== secret) return jsonResponse({ error: 'No autorizado.' }, 401);
+    if (!(await isCronRequest(req, db))) return jsonResponse({ error: 'No autorizado.' }, 401);
     const { timeStr } = argentinaNow();
     const { data: settings } = await db.from('business_settings').select('business_id, config');
     const summary = [];

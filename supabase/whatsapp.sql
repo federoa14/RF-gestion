@@ -128,3 +128,12 @@ end $$;
 --   select * from cron.job_run_details where jobid = (select jobid from cron.job where jobname = 'rf-whatsapp-dispatch') order by start_time desc limit 10;
 -- Ver los últimos envíos y errores:
 --   select created_at, business_id, kind, recipient_name, status, error from public.whatsapp_messages order by id desc limit 50;
+
+-- Clave del cron para las Edge Functions (whatsapp-dispatch y weekly-backup):
+-- la leen de Vault con esta función, que solo puede usar la service role.
+create or replace function public.rf_cron_secret()
+returns text language sql stable security definer set search_path = public as $$
+  select decrypted_secret from vault.decrypted_secrets where name = 'rf_cron_secret' limit 1
+$$;
+revoke all on function public.rf_cron_secret() from public, anon, authenticated;
+grant execute on function public.rf_cron_secret() to service_role;
