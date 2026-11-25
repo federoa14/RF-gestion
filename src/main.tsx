@@ -1,5 +1,4 @@
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
 import './index.css';
 import {initInternalDatabase, getStartupError} from './utils/localInternalDb';
 import {StartupErrorScreen} from './components/StartupErrorScreen';
@@ -34,6 +33,13 @@ initInternalDatabase({deferCloudHydration: isStandalonePublicRoute || isPassword
     root.render(<StartupErrorScreen kind="connection" error={getStartupError()} />);
   } else {
     if (!isStandalonePublicRoute && !isPasswordRecovery) restoreSessionUserFromCloud();
-    root.render(<App />);
+    // La tienda y los links de pago cargan solo lo suyo; el panel completo se descarga aparte
+    const showLoadError = (error: unknown) =>
+      root.render(<StartupErrorScreen kind="connection" error={String(error)} />);
+    if (isStandalonePublicRoute) {
+      import('./PublicRoot.tsx').then(({default: PublicRoot}) => root.render(<PublicRoot />), showLoadError);
+    } else {
+      import('./App.tsx').then(({default: App}) => root.render(<App />), showLoadError);
+    }
   }
 });
