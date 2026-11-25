@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard de tareas</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1c2330; --muted: #657084; --line: #dfe3ea;
+    --accent: #2f5bea; --alta: #d93a3a; --media: #d98a1c; --baja: #2f8f5b; --ok: #2f8f5b; --block: #8a5cd6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14171d; --card: #1d222b; --text: #e8ebf1; --muted: #98a2b5; --line: #2d3441; --accent: #7b9bff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 20px; grid-template-columns: 1fr 340px; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  h1 { grid-column: 1 / -1; margin: 0; font-size: 22px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  form.nueva { display: grid; gap: 8px; margin-bottom: 14px; }
+  input, textarea, select, button { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
+  textarea { resize: vertical; min-height: 56px; }
+  .fila { display: flex; gap: 8px; flex-wrap: wrap; }
+  .fila > input { flex: 1 1 200px; }
+  button { cursor: pointer; }
+  button.primario { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.peligro { color: var(--alta); }
+  .filtros { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .filtros button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  li.tarea { border: 1px solid var(--line); border-left: 5px solid var(--media); border-radius: 8px; padding: 10px 12px; }
+  li.tarea.alta { border-left-color: var(--alta); } li.tarea.baja { border-left-color: var(--baja); }
+  li.tarea.completada { opacity: .75; } li.tarea.completada .titulo { text-decoration: line-through; }
+  .titulo { font-weight: 600; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .desc, .resultado { margin: 6px 0 0; white-space: pre-wrap; }
+  .resultado { color: var(--muted); border-top: 1px dashed var(--line); padding-top: 6px; }
+  .etiqueta { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); margin-left: 6px; }
+  .etiqueta.completada { color: var(--ok); } .etiqueta.bloqueada { color: var(--block); }
+  .acciones { display: flex; gap: 6px; margin-top: 8px; }
+  .acciones button { padding: 3px 10px; font-size: 13px; }
+  .editor { display: grid; gap: 8px; }
+  pre#log { margin: 0; max-height: 480px; overflow: auto; font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
+  .vacio, .error { color: var(--muted); text-align: center; padding: 18px 0; } .error { color: var(--alta); padding: 6px 0; text-align: left; }
+  h2 { margin: 0 0 10px; font-size: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Dashboard de tareas</h1>
+  <section class="card">
+    <form class="nueva" id="form-nueva">
+      <div class="fila">
+        <input id="n-titulo" placeholder="Nueva tarea…" maxlength="200" required aria-label="Título">
+        <select id="n-prio" aria-label="Prioridad">
+          <option value="alta">Alta</option><option value="media" selected>Media</option><option value="baja">Baja</option>
+        </select>
+        <button class="primario" type="submit">Agregar</button>
+      </div>
+      <textarea id="n-desc" placeholder="Descripción / instrucciones (opcional)" aria-label="Descripción"></textarea>
+    </form>
+    <div class="error" id="error" role="alert"></div>
+    <div class="filtros" id="filtros"></div>
+    <ul id="lista"></ul>
+  </section>
+  <aside class="card">
+    <h2>Actividad (tasks.log)</h2>
+    <pre id="log"></pre>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const PRIO = { alta: 1, media: 2, baja: 3 };
+let tareas = [], filtro = 'todas', editando = null;
+
+async function api(metodo, ruta, cuerpo) {
+  const r = await fetch(ruta, { method: metodo, headers: { 'Content-Type': 'application/json' }, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'Error');
+  return d;
+}
+function mostrarError(e) { $('error').textContent = e ? e.message : ''; }
+function el(tag, props = {}, ...hijos) {
+  const n = Object.assign(document.createElement(tag), props);
+  n.append(...hijos); return n;
+}
+const fecha = (iso) => new Date(iso).toLocaleString('es');
+
+async function cargar() {
+  tareas = await api('GET', '/api/tasks');
+  const lineas = await api('GET', '/api/log');
+  const log = $('log'); const abajo = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+  log.textContent = lineas.join('\n') || 'Sin actividad todavía.';
+  if (abajo) log.scrollTop = log.scrollHeight;
+  pintar();
+}
+
+function pintar() {
+  const filtros = $('filtros'); filtros.replaceChildren();
+  for (const f of ['todas', 'pendiente', 'completada', 'bloqueada']) {
+    const n = f === 'todas' ? tareas.length : tareas.filter((t) => t.estado === f).length;
+    const b = el('button', { type: 'button', textContent: `${f[0].toUpperCase() + f.slice(1)} (${n})` });
+    b.setAttribute('aria-pressed', String(filtro === f));
+    b.onclick = () => { filtro = f; pintar(); };
+    filtros.append(b);
+  }
+  const lista = $('lista'); lista.replaceChildren();
+  const vis = tareas.filter((t) => filtro === 'todas' || t.estado === filtro);
+  if (!vis.length) lista.append(el('li', { className: 'vacio', textContent: 'No hay tareas.' }));
+  for (const t of vis) lista.append(t.id === editando ? editor(t) : tarjeta(t));
+}
+
+function tarjeta(t) {
+  const li = el('li', { className: `tarea ${t.prioridad} ${t.estado}` });
+  const cab = el('div', {}, el('span', { className: 'titulo', textContent: t.titulo }));
+  if (t.estado !== 'pendiente') cab.append(el('span', { className: `etiqueta ${t.estado}`, textContent: t.estado }));
+  li.append(cab, el('div', { className: 'meta', textContent: `Prioridad ${t.prioridad} · creada ${fecha(t.creada)}${t.completada ? ` · cerrada ${fecha(t.completada)}` : ''}` }));
+  if (t.descripcion) li.append(el('p', { className: 'desc', textContent: t.descripcion }));
+  if (t.resultado) li.append(el('p', { className: 'resultado', textContent: `Resultado: ${t.resultado}` }));
+  const ac = el('div', { className: 'acciones' });
+  ac.append(
+    el('button', { type: 'button', textContent: 'Editar', onclick: () => { editando = t.id; pintar(); } }),
+    el('button', { type: 'button', className: 'peligro', textContent: 'Eliminar', onclick: async () => {
+      if (!confirm(`¿Eliminar "${t.titulo}"?`)) return;
+      try { await api('DELETE', `/api/tasks/${t.id}`); mostrarError(); cargar(); } catch (e) { mostrarError(e); }
+    } }),
+  );
+  if (t.estado !== 'pendiente') ac.append(el('button', { type: 'button', textContent: 'Reabrir', onclick: async () => {
+    try { await api('PUT', `/api/tasks/${t.id}`, { estado: 'pendiente' }); mostrarError(); cargar(); } catch (e) { mostrarError(e); }
+  } }));
+  li.append(ac);
+  return li;
+}
+
+function editor(t) {
+  const li = el('li', { className: `tarea ${t.prioridad}` });
+  const titulo = el('input', { value: t.titulo, maxLength: 200 });
+  const prio = el('select'); for (const p of Object.keys(PRIO)) prio.append(el('option', { value: p, textContent: p, selected: p === t.prioridad }));
+  const desc = el('textarea', { value: t.descripcion });
+  const guardar = el('button', { type: 'button', className: 'primario', textContent: 'Guardar', onclick: async () => {
+    try { await api('PUT', `/api/tasks/${t.id}`, { titulo: titulo.value, prioridad: prio.value, descripcion: desc.value }); editando = null; mostrarError(); cargar(); } catch (e) { mostrarError(e); }
+  } });
+  const cancelar = el('button', { type: 'button', textContent: 'Cancelar', onclick: () => { editando = null; pintar(); } });
+  li.append(el('div', { className: 'editor' }, el('div', { className: 'fila' }, titulo, prio), desc, el('div', { className: 'acciones' }, guardar, cancelar)));
+  return li;
+}
+
+$('form-nueva').onsubmit = async (ev) => {
+  ev.preventDefault();
+  try {
+    await api('POST', '/api/tasks', { titulo: $('n-titulo').value, prioridad: $('n-prio').value, descripcion: $('n-desc').value });
+    $('n-titulo').value = ''; $('n-desc').value = ''; mostrarError(); cargar();
+  } catch (e) { mostrarError(e); }
+};
+
+cargar().catch(mostrarError);
+setInterval(() => { if (editando === null) cargar().catch(() => {}); }, 5000);
+</script>
+</body>
+</html>
