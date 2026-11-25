@@ -485,6 +485,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<CatalogProduct | null>(null);
   const [productName, setProductName] = useState('');
+  // Errores de validación del formulario de producto, mostrados junto a cada campo
+  const [productFormErrors, setProductFormErrors] = useState<{ name?: string; price?: string; stock?: string }>({});
   const [productSku, setProductSku] = useState('');
   const [productPrice, setProductPrice] = useState('');
   const [productStockQuantity, setProductStockQuantity] = useState('');
@@ -1005,6 +1007,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     setProductLoyaltyPoints('');
     setProductAvailable(true);
     setProductFeatured(false);
+    setProductFormErrors({});
     setIsProductModalOpen(true);
   };
 
@@ -1060,6 +1063,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     );
     setProductAvailable(product.available);
     setProductFeatured(Boolean(product.featured));
+    setProductFormErrors({});
     setIsProductModalOpen(true);
   };
 
@@ -1132,14 +1136,25 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       );
       return;
     }
-    const cleanName = productName.trim();
+    const cleanName = productName.trim().replace(/\s+/g, ' ');
     const numericPrice = Number(String(productPrice).replace(',', '.'));
-    if (!cleanName) {
-      showToast('Ingresá el nombre del producto.');
-      return;
+    const formErrors: { name?: string; price?: string; stock?: string } = {};
+    if (cleanName.length < 2) formErrors.name = 'Ingresá el nombre del producto (mínimo 2 caracteres).';
+    else if (cleanName.length > 80) formErrors.name = 'El nombre es muy largo (máximo 80 caracteres).';
+    if (String(productPrice).trim() === '' || !Number.isFinite(numericPrice) || numericPrice <= 0) {
+      formErrors.price = 'Ingresá un precio mayor a 0.';
+    } else if (numericPrice > 100000000) {
+      formErrors.price = 'El precio parece demasiado alto. Revisalo.';
     }
-    if (!Number.isFinite(numericPrice) || numericPrice < 0) {
-      showToast('Ingresá un precio válido.');
+    if (productVariants.length === 0 && productStockQuantity.trim() !== '') {
+      const st = Number(productStockQuantity.trim().replace(',', '.'));
+      if (!Number.isFinite(st) || st < 0 || !Number.isInteger(st)) {
+        formErrors.stock = 'El stock tiene que ser un número entero (0 o más). Dejalo vacío para stock libre.';
+      }
+    }
+    setProductFormErrors(formErrors);
+    if (formErrors.name || formErrors.price || formErrors.stock) {
+      showToast(formErrors.name || formErrors.price || formErrors.stock || 'Revisá los datos del producto.');
       return;
     }
 
@@ -1150,8 +1165,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       let vStock: number | undefined = undefined;
       if (draftVar.stockQuantity.trim() !== '') {
         const num = Number(draftVar.stockQuantity.trim());
-        if (!Number.isFinite(num) || num < 0) {
-          showToast(`Stock inválido en variante "${lbl}". Usá 0 o mayor, o dejalo vacío.`);
+        if (!Number.isFinite(num) || num < 0 || !Number.isInteger(num)) {
+          showToast(`Stock inválido en variante "${lbl}". Usá un número entero (0 o más), o dejalo vacío.`);
           return;
         }
         vStock = Math.floor(num);
@@ -8380,11 +8395,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     required
+                    maxLength={80}
                     value={productName}
-                    onChange={(e) => setProductName(e.target.value)}
+                    onChange={(e) => {
+                      setProductName(e.target.value);
+                      if (productFormErrors.name) setProductFormErrors((p) => ({ ...p, name: undefined }));
+                    }}
                     placeholder={rubroPreset.productPlaceholder}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900"
+                    aria-invalid={Boolean(productFormErrors.name)}
+                    className={`w-full px-3 py-2 bg-slate-50 border rounded-xl text-xs text-slate-900 ${
+                      productFormErrors.name ? 'border-rose-400 ring-2 ring-rose-100' : 'border-slate-200'
+                    }`}
                   />
+                  {productFormErrors.name && <p className="text-[11px] font-medium text-rose-600">{productFormErrors.name}</p>}
                 </div>
 
                 <div className="space-y-1">
@@ -8394,13 +8417,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="number"
                     required
-                    min="0"
+                    min="0.01"
                     step="0.01"
+                    inputMode="decimal"
                     value={productPrice}
-                    onChange={(e) => setProductPrice(e.target.value)}
+                    onChange={(e) => {
+                      setProductPrice(e.target.value);
+                      if (productFormErrors.price) setProductFormErrors((p) => ({ ...p, price: undefined }));
+                    }}
                     placeholder="0.00"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                    aria-invalid={Boolean(productFormErrors.price)}
+                    className={`w-full px-3 py-2 bg-slate-50 border rounded-xl text-xs font-mono text-slate-900 ${
+                      productFormErrors.price ? 'border-rose-400 ring-2 ring-rose-100' : 'border-slate-200'
+                    }`}
                   />
+                  {productFormErrors.price && <p className="text-[11px] font-medium text-rose-600">{productFormErrors.price}</p>}
                 </div>
 
                 <div className="space-y-1">
@@ -8440,14 +8471,21 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           : ''
                         : productStockQuantity
                     }
-                    onChange={(e) => setProductStockQuantity(e.target.value)}
+                    onChange={(e) => {
+                      setProductStockQuantity(e.target.value);
+                      if (productFormErrors.stock) setProductFormErrors((p) => ({ ...p, stock: undefined }));
+                    }}
                     placeholder={
                       productVariants.length > 0
                         ? 'Controlado por cada variante abajo'
                         : 'Vacío = stock libre'
                     }
-                    className="w-full px-3 py-2 bg-slate-50 disabled:opacity-70 border border-slate-200 rounded-xl text-xs font-mono text-slate-900"
+                    aria-invalid={Boolean(productFormErrors.stock)}
+                    className={`w-full px-3 py-2 bg-slate-50 disabled:opacity-70 border rounded-xl text-xs font-mono text-slate-900 ${
+                      productFormErrors.stock ? 'border-rose-400 ring-2 ring-rose-100' : 'border-slate-200'
+                    }`}
                   />
+                  {productFormErrors.stock && <p className="text-[11px] font-medium text-rose-600">{productFormErrors.stock}</p>}
                   {productVariants.length === 0 && (
                     <div className="flex flex-wrap items-center gap-1 pt-0.5">
                       <button
