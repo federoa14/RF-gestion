@@ -59,3 +59,8 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Hallazgo (logs de Supabase):** publicar la tienda (`public_catalogs`) fallaba con error 500 por "statement timeout": el documento pesaba ~6 MB porque las fotos van en base64. Por eso ni colores ni filtros llegaban a la tienda, aunque se guardaran en los ajustes.
 - **Decisión:** al publicar se achican las fotos y el logo (`src/utils/imageShrink.ts`) y, si la publicación falla, se avisa con un mensaje. Filtros y subfiltros se guardan y publican al instante, sin depender del botón Guardar de Configuración.
 - **Pendiente posible:** mover las fotos a Supabase Storage (URLs) en lugar de base64.
+
+## 2026-11-25 — Revisión de código y pruebas
+- **Hallazgo:** un comercio no podía guardar cambios en su fila de `businesses` (upsert bloqueado por la política de alta, solo superadmin): la aceptación de términos, el cambio de plan y el diseño del panel no persistían desde su cuenta. Ahora usa `update` si no es superadmin.
+- **Pruebas:** `tests/e2e` cubre diseño de página, panel con color, filtros, Plan 2 bloqueado, términos y venta de mostrador.
+- **Pendiente:** `bun.lock` no incluye `@zxing/*` (solo `package-lock.json`); mover fotos a Storage; campo de TNA del BNA no se puede vaciar del todo.

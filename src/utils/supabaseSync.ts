@@ -858,6 +858,14 @@ async function runOp(op: OutboxOp): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase no está configurado.');
   if (op.kind === 'upsert') {
+    // Un comercio solo puede modificar su propia fila de `businesses` (la política de alta es solo del
+    // superadmin y un upsert la evalúa aunque la fila exista): sin esto no se guardaba la aceptación
+    // de términos, el cambio de plan ni el diseño del panel desde la cuenta del comercio.
+    if (op.table === 'businesses' && session?.role !== 'superadmin') {
+      const { error, status } = await supabase.from('businesses').update({ data: op.row.data }).eq('id', op.pk);
+      if (error) throw Object.assign(error, { status });
+      return;
+    }
     const { error, status } = await supabase
       .from(op.table)
       .upsert(op.row, { onConflict: TABLE_CONFLICT[op.table] || 'business_id,id' });

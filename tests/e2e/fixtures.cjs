@@ -29,7 +29,7 @@ function makeSeed({ withOrders = true } = {}) {
         data: { id: 'biz1', tenantCode: 'DIST-001', name: 'Distribuidora Uno', status: 'active', phone: '1100', email: OWNER.email, createdAt: '2026-01-01',
           businessRubro: 'distribuidora', catalogEnabled: true,
           config: { distributorName: 'Distribuidora Uno', businessRubro: 'distribuidora' },
-          subscription: { monthlyFee: 28000, currency: '$', planTier: 'full', paymentWindowStartDay: 1, paymentWindowEndDay: 5, isPaused: false, lastPaidMonth: today().slice(0, 7), annualPlanUntilMonth: '2099-12', paymentHistory: [] } },
+          subscription: { monthlyFee: 28000, currency: '$', planTier: 'full', paymentWindowStartDay: 1, paymentWindowEndDay: 5, isPaused: false, termsAccepted: true, termsVersion: '2026.1', lastPaidMonth: today().slice(0, 7), annualPlanUntilMonth: '2099-12', paymentHistory: [] } },
       }],
       business_settings: [{ business_id: 'biz1', config: { distributorName: 'Distribuidora Uno', defaultTermDays: 7, vendedorReminderDays: 2, adminAlertDays: 6, overdueGraceDays: 5, currencySymbol: '$', businessRubro: 'distribuidora', tenantId: 'biz1', tenantCode: 'DIST-001' }, catalog_settings: { published: true }, extra: {} }],
       profiles: [{ id: OWNER.id, business_id: 'biz1', role: 'dueño', username: 'dueno', full_name: 'Dueño Prueba', email: OWNER.email, phone: '1100', active: true, legacy_user_id: null, created_at: '2026-01-01' }],
