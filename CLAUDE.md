@@ -25,3 +25,13 @@ Respeta lo que dicen. Si algo choca con lo que pide el usuario, gana el usuario:
 - Secretos, claves, tokens, contraseñas.
 - Datos personales sensibles (teléfonos, direcciones de email, documentos, domicilios).
 - Detalles pasajeros de una tarea que no sirven en la próxima sesión.
+
+## Registro de decisiones
+
+Cuando el usuario describa una decisión tomada, regístrala de inmediato en `decisiones.csv` (no esperes al final de la sesión):
+
+```bash
+python3 scripts/decisiones.py add "decisión" "razonamiento" "resultado esperado"
+```
+
+Se guarda con la fecha de hoy y una fecha de revisión a 30 días. Si falta el razonamiento o el resultado esperado, pregúntaselo antes de registrar. Un workflow diario (`.github/workflows/revision-decisiones.yml`) marca como `revision pendiente` las que vencen; `./review.sh` muestra solo esas. Cuando el usuario revise una, ejecuta `python3 scripts/decisiones.py done "texto de la decisión"`. Las decisiones importantes también van resumidas en `memory/decision.md`.
