@@ -6,6 +6,21 @@
   "cleanUrls": true,
   "rewrites": [
     {
+      "source": "/",
+      "has": [
+        {
+          "type": "query",
+          "key": "catalog"
+        },
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(WhatsApp|facebookexternalhit|Facebot|Twitterbot|TelegramBot|Slackbot|Discordbot|LinkedInBot|SkypeUriPreview|Applebot|Pinterest|Googlebot|bingbot).*"
+        }
+      ],
+      "destination": "/api/tienda-preview"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
