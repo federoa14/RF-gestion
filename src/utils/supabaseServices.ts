@@ -17,6 +17,7 @@ import type {
   TenantSubscriptionPayOrder,
 } from '../types';
 import { normalizeDni } from './catalogStock';
+import { getTenantEffectiveFeatureAccess } from './tenantSubscription';
 import { dbGetItem, dbSetItem } from './localInternalDb';
 import { getSupabaseClient, isSupabaseConfigured } from './supabaseClient';
 import {
@@ -917,10 +918,24 @@ export async function setPublicCatalogSuperAdminEnabledInSupabase(
   }
 
   const nowIso = new Date().toISOString();
+  const planAccess = getTenantEffectiveFeatureAccess(tenant);
+  let savedStoreTheme: PublishedPublicCatalog['storeTheme'];
+  try {
+    const rawTenantData = dbGetItem(`saas_distribuidora_data_v2_${tenant.id}`);
+    if (rawTenantData) savedStoreTheme = JSON.parse(rawTenantData)?.catalogSettings?.storeTheme;
+  } catch {
+    savedStoreTheme = undefined;
+  }
   if (existing) {
     const updated: PublishedPublicCatalog = {
       ...existing,
       enabledBySuperAdmin: enabled,
+      // Al cambiar de plan, la tienda pública debe enterarse: sin esto seguía "Plan 2" y sin diseño propio
+      planTier: planAccess.tier,
+      canAccessFullFeatures: planAccess.canAccessFullFeatures,
+      storeTheme: planAccess.canAccessFullFeatures
+        ? savedStoreTheme ?? existing.storeTheme
+        : undefined,
       logoUrl: tenant.config?.distributorLogoUrl || tenant.logoUrl || existing.logoUrl,
       icon: tenant.config?.distributorIcon || tenant.icon || existing.icon,
       merchantPaymentAlias:
