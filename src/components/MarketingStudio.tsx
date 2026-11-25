@@ -19,6 +19,13 @@ import {
 } from '../utils/storage';
 import { DistributorConfig } from '../types';
 import { createWhatsAppUrl } from '../utils/whatsapp';
+import {
+  FLYER_EXAMPLES,
+  FLYER_HEADLINE_IDEAS,
+  FLYER_STYLES,
+  FlyerStyleKey,
+  renderFlyer,
+} from '../utils/flyerRenderer';
 
 interface MarketingStudioProps {
   config: DistributorConfig;
@@ -28,9 +35,16 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
   const [activeTab, setActiveTab] = useState<'image' | 'video'>('image');
 
   // Image Generation States
-  const [imagePrompt, setImagePrompt] = useState(
-    'Promoción mayorista de bebidas y comestibles para almacenes y supermercados, estilo fotografía publicitaria profesional con iluminación comercial brillante.'
-  );
+  const [flyerStyle, setFlyerStyle] = useState<FlyerStyleKey>('vibrante');
+  const [flyerHeadline, setFlyerHeadline] = useState('Oferta de la semana');
+  const [flyerDetail, setFlyerDetail] = useState('');
+  const [flyerPrice, setFlyerPrice] = useState('');
+  const [flyerOldPrice, setFlyerOldPrice] = useState('');
+  const [flyerBadge, setFlyerBadge] = useState('');
+  const [flyerValidity, setFlyerValidity] = useState('');
+  const [flyerAccent, setFlyerAccent] = useState('');
+  const [flyerPhoto, setFlyerPhoto] = useState<string | null>(null);
+  const imagePrompt = flyerHeadline;
   const [imageSize, setImageSize] = useState<'1K' | '2K' | '4K'>('1K');
   const [imageAspectRatio, setImageAspectRatio] = useState<string>('1:1');
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -50,119 +64,37 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
   // Gallery of assets
   const [gallery, setGallery] = useState<MarketingAsset[]>(loadMarketingAssets);
 
-  // Preset prompts for distributor business
-  const distributorPresets = [
-    'Oferta mayorista de bebidas gaseosas, jugos y aguas minerales en pack cerrado con logo de distribuidora.',
-    'Promoción especial de harinas, aceites y alimentos secos con etiqueta de descuento por pago contado.',
-    'Flyer publicitario de productos de limpieza e higiene para almacenes y minimarkets.',
-    'Banner de catálogo de ofertas del mes para enviar a clientes por WhatsApp.',
-  ];
+  const handleFlyerPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setFlyerPhoto(reader.result as string);
+    reader.readAsDataURL(file);
+  };
 
-  // Helper to render crisp promotional flyer directly in browser via Canvas
-  const renderPromotionalFlyerDataUrl = async (
-    promptText: string,
-    aspectRatio: string,
-    resolution: '1K' | '2K' | '4K',
-    backgroundPhoto?: string
-  ): Promise<string> => {
+  const renderCurrentFlyer = (aspectRatio: string, resolution: '1K' | '2K' | '4K') => {
     const scale = resolution === '4K' ? 1.5 : resolution === '2K' ? 1.25 : 1;
-    let baseW = 1024;
-    let baseH = 1024;
-    if (aspectRatio === '16:9') {
-      baseW = 1280;
-      baseH = 720;
-    } else if (aspectRatio === '9:16') {
-      baseW = 720;
-      baseH = 1280;
-    } else if (aspectRatio === '4:3') {
-      baseW = 1024;
-      baseH = 768;
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(baseW * scale);
-    canvas.height = Math.round(baseH * scale);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('No se pudo inicializar el lienzo gráfico.');
-
-    const w = canvas.width;
-    const h = canvas.height;
-
-    const grad = ctx.createLinearGradient(0, 0, w, h);
-    grad.addColorStop(0, '#071021');
-    grad.addColorStop(0.55, '#0F2547');
-    grad.addColorStop(1, '#1E3A8A');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
-
-    if (backgroundPhoto) {
-      await new Promise<void>((resolve) => {
-        const img = new Image();
-        img.onload = () => {
-          ctx.save();
-          ctx.globalAlpha = 0.38;
-          const ratio = Math.max(w / img.width, h / img.height);
-          const drawW = img.width * ratio;
-          const drawH = img.height * ratio;
-          ctx.drawImage(img, (w - drawW) / 2, (h - drawH) / 2, drawW, drawH);
-          ctx.restore();
-          resolve();
-        };
-        img.onerror = () => resolve();
-        img.src = backgroundPhoto;
-      });
-    }
-
-    // Accent border & decorative shapes
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.45)';
-    ctx.lineWidth = Math.max(4, w * 0.008);
-    ctx.strokeRect(w * 0.04, h * 0.04, w * 0.92, h * 0.92);
-
-    // Header badge
-    ctx.fillStyle = '#38BDF8';
-    ctx.font = `800 ${Math.round(w * 0.032)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.fillText('PROMOCIÓN OFICIAL · CATÁLOGO COMERCIAL', w / 2, h * 0.16);
-
-    // Distributor name
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = `900 ${Math.round(w * 0.062)}px sans-serif`;
-    ctx.fillText((config.distributorName || 'MI DISTRIBUIDORA').toUpperCase(), w / 2, h * 0.27);
-
-    // Wrapped promo text
-    ctx.fillStyle = '#E2E8F0';
-    const fontSize = Math.round(w * 0.038);
-    ctx.font = `600 ${fontSize}px sans-serif`;
-    const words = promptText.trim().split(/\s+/);
-    const maxLineW = w * 0.78;
-    const lines: string[] = [];
-    let currentLine = '';
-    for (const word of words) {
-      const test = currentLine ? `${currentLine} ${word}` : word;
-      if (ctx.measureText(test).width > maxLineW && currentLine) {
-        lines.push(currentLine);
-        currentLine = word;
-      } else {
-        currentLine = test;
-      }
-    }
-    if (currentLine) lines.push(currentLine);
-
-    const startY = h * 0.44;
-    const lineHeight = fontSize * 1.45;
-    lines.slice(0, 7).forEach((line, idx) => {
-      ctx.fillText(line, w / 2, startY + idx * lineHeight);
+    let baseW = 1080;
+    let baseH = 1080;
+    if (aspectRatio === '16:9') [baseW, baseH] = [1280, 720];
+    else if (aspectRatio === '9:16') [baseW, baseH] = [720, 1280];
+    else if (aspectRatio === '4:3') [baseW, baseH] = [1080, 810];
+    return renderFlyer({
+      style: flyerStyle,
+      headline: flyerHeadline,
+      detail: flyerDetail,
+      price: flyerPrice,
+      oldPrice: flyerOldPrice,
+      badge: flyerBadge,
+      validity: flyerValidity,
+      storeName: config.distributorName,
+      phone: config.distributorPhone || config.senderPhone,
+      logoUrl: config.distributorLogoUrl,
+      photoUrl: flyerPhoto || undefined,
+      accent: flyerAccent || undefined,
+      width: Math.round(baseW * scale),
+      height: Math.round(baseH * scale),
     });
-
-    // Footer contact pill
-    const footerText = config.distributorPhone
-      ? `📲 Pedidos y consultas por WhatsApp: ${config.distributorPhone}`
-      : '📲 Consultá disponibilidad y precios con tu vendedor';
-    ctx.fillStyle = '#10B981';
-    ctx.font = `700 ${Math.round(w * 0.03)}px sans-serif`;
-    ctx.fillText(footerText, w / 2, h * 0.86);
-
-    return canvas.toDataURL('image/png');
   };
 
   // 1. Image Generation Handler (100% client-side, saved to Supabase)
@@ -172,11 +104,7 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
     setImageError(null);
 
     try {
-      const imageUrl = await renderPromotionalFlyerDataUrl(
-        imagePrompt,
-        imageAspectRatio,
-        imageSize
-      );
+      const imageUrl = await renderCurrentFlyer(imageAspectRatio, imageSize);
 
       setGeneratedImageUrl(imageUrl);
 
@@ -226,12 +154,23 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
     try {
       // Compose an animated WebM clip directly on client Canvas using MediaRecorder when available,
       // or save a styled high-resolution promotional image composite into gallery + Supabase.
-      const flyerDataUrl = await renderPromotionalFlyerDataUrl(
-        videoPrompt || `Oferta destacada de ${config.distributorName}`,
-        videoAspectRatio,
-        '1K',
-        uploadedPhotoBase64
-      );
+      const vw = videoAspectRatio === '16:9' ? 1280 : 720;
+      const vh = videoAspectRatio === '16:9' ? 720 : 1280;
+      const flyerDataUrl = await renderFlyer({
+        style: 'moderno',
+        headline: `Oferta destacada de ${config.distributorName || 'tu comercio'}`,
+        detail: '',
+        price: '',
+        oldPrice: '',
+        badge: '',
+        validity: '',
+        storeName: config.distributorName,
+        phone: config.distributorPhone || config.senderPhone,
+        logoUrl: config.distributorLogoUrl,
+        photoUrl: uploadedPhotoBase64,
+        width: vw,
+        height: vh,
+      });
       setGeneratedVideoUrl(null);
       setGeneratedImageUrl(flyerDataUrl);
 
@@ -306,33 +245,111 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
       {activeTab === 'image' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
           <div className="space-y-4">
+            {/* Estilo */}
             <div>
-              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
-                Descripción de la Promoción o Flyer del Producto:
-              </label>
-              <textarea
-                value={imagePrompt}
-                onChange={(e) => setImagePrompt(e.target.value)}
-                rows={4}
-                className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
-                placeholder="Describe el producto o banner promocional..."
-              />
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">Estilo del flyer:</label>
+              <div className="grid grid-cols-2 gap-2">
+                {FLYER_STYLES.map((st) => (
+                  <button
+                    key={st.key}
+                    type="button"
+                    onClick={() => {
+                      setFlyerStyle(st.key);
+                      setFlyerAccent('');
+                    }}
+                    className={`text-left p-2.5 rounded-xl border transition-all ${
+                      flyerStyle === st.key
+                        ? 'border-purple-600 bg-purple-50 dark:bg-purple-950/60 ring-1 ring-purple-500'
+                        : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-100">
+                      <span className="w-3.5 h-3.5 rounded-full border border-white shadow" style={{ backgroundColor: st.accent }} />
+                      {st.label}
+                    </span>
+                    <span className="block text-[10px] text-slate-500 mt-0.5">{st.note}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Quick Presets */}
+            {/* Textos */}
+            <div className="space-y-2.5">
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">Titular:</label>
+                <input type="text" value={flyerHeadline} onChange={(e) => setFlyerHeadline(e.target.value)} maxLength={60} className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. Oferta de la semana" />
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {FLYER_HEADLINE_IDEAS.map((idea) => (
+                    <button key={idea} type="button" onClick={() => setFlyerHeadline(idea)} className="text-[10px] px-2 py-1 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                      ✨ {idea}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">Detalle del producto o promo:</label>
+                <input type="text" value={flyerDetail} onChange={(e) => setFlyerDetail(e.target.value)} maxLength={110} className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Ej. Pack de gaseosas 2.25 L x 6 unidades" />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">Precio:</label>
+                  <input type="text" value={flyerPrice} onChange={(e) => setFlyerPrice(e.target.value)} maxLength={14} className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="$14.900" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">Precio anterior (opcional):</label>
+                  <input type="text" value={flyerOldPrice} onChange={(e) => setFlyerOldPrice(e.target.value)} maxLength={14} className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="$18.500" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">Sello (opcional):</label>
+                  <input type="text" value={flyerBadge} onChange={(e) => setFlyerBadge(e.target.value)} maxLength={12} className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="-20%, 2x1, Nuevo" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">Vigencia (opcional):</label>
+                  <input type="text" value={flyerValidity} onChange={(e) => setFlyerValidity(e.target.value)} maxLength={36} className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500" placeholder="Hasta agotar stock" />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Color de la marca:
+                  <input
+                    type="color"
+                    value={flyerAccent || (FLYER_STYLES.find((x) => x.key === flyerStyle)?.accent ?? '#0B1933')}
+                    onChange={(e) => setFlyerAccent(e.target.value.toUpperCase())}
+                    className="w-9 h-9 rounded-lg border border-slate-200 cursor-pointer p-0.5"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  {flyerPhoto ? 'Cambiar foto del producto' : 'Foto del producto'}
+                  <input type="file" accept="image/*" onChange={handleFlyerPhoto} className="hidden" />
+                </label>
+                {flyerPhoto && (
+                  <button type="button" onClick={() => setFlyerPhoto(null)} className="text-[11px] font-semibold text-rose-600">Quitar foto</button>
+                )}
+              </div>
+            </div>
+
+            {/* Ejemplos listos */}
             <div>
-              <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">
-                Ideas rápidas de catálogo mayorista:
-              </span>
+              <span className="text-[11px] font-semibold text-slate-400 block mb-1.5">Ejemplos para empezar:</span>
               <div className="flex flex-wrap gap-1.5">
-                {distributorPresets.map((preset, idx) => (
+                {FLYER_EXAMPLES.map((ex, idx) => (
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => setImagePrompt(preset)}
-                    className="text-[10px] text-left p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors"
+                    onClick={() => {
+                      setFlyerStyle(ex.style);
+                      setFlyerAccent('');
+                      setFlyerHeadline(ex.headline);
+                      setFlyerDetail(ex.detail);
+                      setFlyerPrice(ex.price);
+                      setFlyerOldPrice(ex.oldPrice);
+                      setFlyerBadge(ex.badge);
+                      setFlyerValidity(ex.validity);
+                    }}
+                    className="text-[10px] text-left px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 transition-colors"
                   >
-                    💡 {preset.slice(0, 42)}...
+                    💡 {ex.headline} · {FLYER_STYLES.find((x) => x.key === ex.style)?.label}
                   </button>
                 ))}
               </div>
@@ -341,10 +358,7 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
             {/* Resolution Selector: 1K, 2K, 4K affordance */}
             <div>
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between mb-1.5">
-                <span>Resolución de Imagen (Affordance):</span>
-                <span className="text-[11px] text-purple-600 dark:text-purple-400 font-semibold">
-                  Modelo: gemini-3-pro-image-preview
-                </span>
+                <span>Calidad de la imagen:</span>
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {(['1K', '2K', '4K'] as const).map((size) => (
@@ -358,7 +372,7 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
                         : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400'
                     }`}
                   >
-                    {size} Resolution
+                    {size === '1K' ? 'Normal' : size === '2K' ? 'Alta' : 'Máxima'} ({size})
                   </button>
                 ))}
               </div>
@@ -407,12 +421,12 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
               {isGeneratingImage ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Generando Imagen {imageSize} en Alta Definición...</span>
+                  <span>Armando tu flyer...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  <span>Generar Imagen Publicitaria ({imageSize})</span>
+                  <span>Crear flyer</span>
                 </>
               )}
             </button>
@@ -425,7 +439,7 @@ export const MarketingStudio: React.FC<MarketingStudioProps> = ({ config }) => {
                 <div className="max-h-[360px] rounded-xl overflow-hidden shadow-lg border border-slate-200 dark:border-slate-700">
                   <img
                     src={generatedImageUrl}
-                    alt="Generado por IA"
+                    alt="Flyer generado"
                     className="max-h-[360px] object-contain rounded-xl"
                   />
                 </div>

@@ -1,11 +1,13 @@
 import { isNewOrderSoundEnabled, playNewOrderChime, setNewOrderSoundEnabled } from '../utils/newOrderAlerts';
-import { StoreDesignEditor } from './StoreDesignEditor';
+import { DesignPageEditor } from './DesignPageEditor';
+import type { CatalogStoreTheme } from '../types';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Store,
   Plus,
   Image as ImageIcon,
   Upload,
+  Camera,
   Link2,
   Copy,
   Check,
@@ -153,6 +155,7 @@ import { QrCodeSvg } from './QrCodeSvg';
 interface CatalogManagerProps {
   // Al cambiar n, abre esa pestaña (por ejemplo 'pedidos' desde el aviso de pedido nuevo)
   focusRequest?: { subTab: 'pedidos' | 'productos' | 'configuracion'; n: number };
+  onSavePanelTheme?: (theme: CatalogStoreTheme | undefined) => void;
   config: DistributorConfig;
   tenant: Tenant | null;
   settings: OnlineCatalogSettings;
@@ -298,12 +301,13 @@ type CatalogSubTabKey =
   | 'club_promos'
   | 'clientes_web'
   | 'estadisticas'
-  | 'configuracion';
+  | 'configuracion'
+  | 'diseno';
 const CATALOG_TAB_GROUPS: Array<{ id: 'productos' | 'pedidos' | 'clientes' | 'config'; label: string; tabs: CatalogSubTabKey[] }> = [
   { id: 'productos', label: 'Productos', tabs: ['productos', 'avisos_stock'] },
   { id: 'pedidos', label: 'Pedidos y ventas', tabs: ['pedidos', 'carritos_abandonados', 'estadisticas'] },
   { id: 'clientes', label: 'Clientes y promos', tabs: ['clientes_web', 'club_promos', 'gift_cards'] },
-  { id: 'config', label: 'Configuración', tabs: ['configuracion'] },
+  { id: 'config', label: 'Configuración', tabs: ['configuracion', 'diseno'] },
 ];
 function catalogGroupOf(tab: CatalogSubTabKey) {
   return (CATALOG_TAB_GROUPS.find((g) => g.tabs.includes(tab)) || CATALOG_TAB_GROUPS[0]).id;
@@ -372,6 +376,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   onRequestUpgradePlan,
   showToast,
   focusRequest,
+  onSavePanelTheme,
 }) => {
   const [subTab, setSubTab] = useState<
     | 'productos'
@@ -383,6 +388,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     | 'clientes_web'
     | 'estadisticas'
     | 'configuracion'
+    | 'diseno'
   >(() => focusRequest?.subTab || 'productos');
   useEffect(() => {
     if (focusRequest?.n) setSubTab(focusRequest.subTab);
@@ -701,6 +707,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const galleryFileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryCameraInputRef = useRef<HTMLInputElement | null>(null);
 
   const isServiceEnabledBySuperAdmin = tenant?.catalogEnabled !== false;
   const currency = settings.currencySymbol || config.currencySymbol || '$';
@@ -1673,6 +1681,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     }
     const next: OnlineCatalogSettings = {
       ...draftSettings,
+      storeTheme: settings.storeTheme,
       catalogRubro: activeCatalogRubro,
       rubroFilters: resolvedRubroFilters,
       customSubfilters: cleanCustomSubfilters,
@@ -3278,6 +3287,18 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               }`}
             >
               Tienda, Envíos y Cobros
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubTab('diseno')}
+              className={`${catalogTabHiddenClass('diseno')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'diseno'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Palette className="w-3.5 h-3.5 text-[#0B1933]" />
+              <span>Diseño de página</span>
             </button>
           </div>
 
@@ -6814,6 +6835,26 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         })()}
 
       {/* SUB-TAB 3: CONFIGURACIÓN DE TIENDA, WHATSAPP Y RETIRO */}
+      {subTab === 'diseno' && (
+        <DesignPageEditor
+          storeTheme={settings.storeTheme}
+          panelTheme={config.panelTheme}
+          onSaveStoreTheme={(next) =>
+            onSaveSettings({ ...settings, storeTheme: next, updatedAt: new Date().toISOString() })
+          }
+          onSavePanelTheme={onSavePanelTheme}
+          storeName={draftSettings.storeName || config.distributorName || 'Mi tienda'}
+          currencySymbol={currency}
+          locked={Boolean(planFeatureAccess && !planFeatureAccess.canAccessFullFeatures)}
+          onUpgrade={
+            onRequestUpgradePlan
+              ? () => requestPlanUpgrade('full_feature', 'Diseño de tu página')
+              : undefined
+          }
+          showToast={showToast}
+        />
+      )}
+
       {subTab === 'configuracion' && (
         <form
           onSubmit={handleSaveSettingsSubmit}
@@ -8426,18 +8467,6 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
           </div>
 
-          <StoreDesignEditor
-            value={draftSettings.storeTheme}
-            onChange={(next) => setDraftSettings((prev) => ({ ...prev, storeTheme: next }))}
-            storeName={draftSettings.storeName || config.distributorName || 'Mi tienda'}
-            currencySymbol={currency}
-            locked={Boolean(planFeatureAccess && !planFeatureAccess.canAccessFullFeatures)}
-            onUpgrade={
-              onRequestUpgradePlan
-                ? () => requestPlanUpgrade('full_feature', 'Diseño de tu tienda')
-                : undefined
-            }
-          />
 
           <div className="pt-2 flex justify-end">
             <button
@@ -8515,6 +8544,24 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         <span>{isCompressingImage ? 'Procesando...' : 'Subir Imagen'}</span>
                       </button>
 
+                      <input
+                        ref={cameraInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleImageUpload}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        disabled={isCompressingImage}
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 hover:bg-slate-50 text-slate-900 cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Tomar foto</span>
+                      </button>
+
                       {productImageUrl && (
                         <button
                           type="button"
@@ -8558,6 +8605,23 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     >
                       <Plus className="w-3 h-3" />
                       <span>Agregar más fotos</span>
+                    </button>
+                    <input
+                      ref={galleryCameraInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleAdditionalGalleryUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      disabled={isCompressingImage || productAdditionalImages.length >= 3}
+                      onClick={() => galleryCameraInputRef.current?.click()}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-800 cursor-pointer"
+                    >
+                      <Camera className="w-3 h-3" />
+                      <span>Tomar foto</span>
                     </button>
                   </div>
 

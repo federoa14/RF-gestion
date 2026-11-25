@@ -196,3 +196,15 @@
   color: var(--store-on-accent);
 }
 .rf-store[data-banner-title='grande'] .rf-banner-title { font-size: 1.375rem; line-height: 1.2; }
+
+/* ===== Diseño del panel de gestión (Plan 3) =====
+   Reemplaza el azul marino fijo del panel por el color elegido por la empresa. */
+.rf-panel[data-themed] {
+  --panel-primary-hover: color-mix(in srgb, var(--panel-primary) 82%, white);
+}
+.rf-panel[data-themed] .bg-\[\#0B1933\] { background-color: var(--panel-primary); }
+.rf-panel[data-themed] .bg-\[\#13264A\] { background-color: var(--panel-primary-hover); }
+.rf-panel[data-themed] .text-\[\#0B1933\] { color: var(--panel-primary); }
+.rf-panel[data-themed] .border-\[\#0B1933\] { border-color: var(--panel-primary); }
+.rf-panel[data-themed] .hover\:bg-\[\#13264A\]:hover { background-color: var(--panel-primary-hover); }
+.rf-panel[data-themed] .hover\:border-\[\#0B1933\]:hover { border-color: var(--panel-primary); }
