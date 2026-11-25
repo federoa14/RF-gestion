@@ -1913,7 +1913,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('tenants')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+              className={`shrink-0 px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'tenants'
                   ? 'bg-[#E2E8F0] text-[#091428]'
                   : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
@@ -1926,7 +1926,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('billing')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+              className={`shrink-0 px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'billing'
                   ? 'bg-[#E2E8F0] text-[#091428]'
                   : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
@@ -1939,7 +1939,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('users')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+              className={`shrink-0 px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'users'
                   ? 'bg-[#E2E8F0] text-[#091428]'
                   : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
@@ -1952,7 +1952,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('support')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+              className={`shrink-0 px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'support'
                   ? 'bg-[#E2E8F0] text-[#091428]'
                   : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
@@ -1965,7 +1965,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('errors')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+              className={`shrink-0 px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'errors'
                   ? 'bg-[#E2E8F0] text-[#091428]'
                   : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
@@ -1978,7 +1978,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('announcements')}
-              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+              className={`shrink-0 px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
                 activeTab === 'announcements'
                   ? 'bg-[#E2E8F0] text-[#091428]'
                   : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
