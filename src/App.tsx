@@ -3755,6 +3755,15 @@ export default function App() {
             showToast('Perfil de Administrador actualizado.');
           }}
         />
+        {toastMessage && (
+          <div
+            role="status"
+            className="fixed bottom-5 right-5 z-[100] bg-[#E2E8F0] text-[#091428] border border-[#B6C2D2]/40 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold max-w-[90vw]"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+        )}
       </>
     );
   }

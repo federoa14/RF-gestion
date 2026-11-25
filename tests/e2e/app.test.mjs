@@ -2,7 +2,7 @@
 // Correr con: npm run test:e2e
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { fixtures, horizontalOverflow, loginAsOwner, openCatalogSection, openPage, startApp, waitForPanel } from './helpers.mjs';
+import { fixtures, horizontalOverflow, loginAsOwner, loginAsSuper, openCatalogSection, openPage, startApp, waitForPanel } from './helpers.mjs';
 
 let app;
 before(async () => {
@@ -206,5 +206,34 @@ describe('Tienda pública', () => {
       assert.ok(font.includes(expected), `${font} debería incluir ${expected}`);
       await context.close();
     }
+  });
+});
+
+describe('SuperGestión', () => {
+  test('regalar 1 año: botón visible, pide confirmación y deja 12 meses cubiertos', async () => {
+    const { page, fake, context, pageErrors } = await openPage(app.browser, fixtures.makeSuperSeed());
+    await page.waitForSelector('input[placeholder="Usuario o correo electrónico"]', { timeout: 20_000 });
+    await loginAsSuper(page);
+    await page.waitForSelector('text=Cobranzas y Monetización', { timeout: 20_000 });
+    await page.locator('button', { hasText: 'Cobranzas y Monetización' }).click();
+    await page.waitForSelector('text=Regalar un año:', { timeout: 10_000 });
+    const gift = page.locator('button', { hasText: 'Regalar 1 año' }).first();
+    await gift.waitFor({ timeout: 10_000 });
+    let dialogText = '';
+    page.once('dialog', (d) => {
+      dialogText = d.message();
+      d.accept();
+    });
+    await gift.click();
+    await page.waitForSelector('text=Le regalaste 1 año', { timeout: 10_000 });
+    assert.match(dialogText, /sin cobrarle/);
+    await page.waitForTimeout(2500);
+    const sub = fake.db.businesses.find((b) => b.id === 'biz1')?.data?.subscription;
+    assert.ok(sub?.annualPlanUntilMonth, 'quedó cubierto el año');
+    assert.equal((sub.paymentHistory || []).length, 12);
+    assert.equal((sub.paymentHistory || []).reduce((a, p) => a + p.amountPaid, 0), 0);
+    assert.equal(await page.locator('button', { hasText: 'Regalar 1 año' }).count(), 0, 'ya no se ofrece');
+    assert.deepEqual(pageErrors, []);
+    await context.close();
   });
 });

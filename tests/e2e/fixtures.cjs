@@ -53,4 +53,16 @@ function makeStoreSeed(catalogOverrides = {}) {
   };
 }
 
-module.exports = { OWNER, makeSeed, makeStoreSeed, mkOrder };
+const SUPER = { id: '00000000-0000-0000-0000-0000000000s1'.replace('s', '5'), email: 'super@prueba.test', password: 'secreto2' };
+
+/** Como makeSeed, pero entra un superadmin (sin empresa propia) y la empresa no tiene año cubierto. */
+function makeSuperSeed() {
+  const seed = makeSeed();
+  seed.users = [SUPER];
+  seed.tables.profiles = [{ id: SUPER.id, business_id: null, role: 'superadmin', username: 'super', full_name: 'Gestor Prueba', email: SUPER.email, phone: '', active: true, legacy_user_id: null, created_at: '2026-01-01' }];
+  seed.tables.businesses[0].data.subscription.annualPlanUntilMonth = undefined;
+  seed.tables.businesses[0].data.subscription.lastPaidMonth = undefined;
+  return seed;
+}
+
+module.exports = { OWNER, SUPER, makeSeed, makeSuperSeed, makeStoreSeed, mkOrder };
