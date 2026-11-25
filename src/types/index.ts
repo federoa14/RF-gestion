@@ -309,6 +309,8 @@ export interface DistributorConfig {
   lateSurchargePercent?: number; // Ej. 5% opcional tras vencimiento en plazos largos o saldo impago
   lateSurchargeAfterDays?: number; // Días posteriores al vencimiento para sugerir/aplicar recargo
   defaultInstallmentInterestPercent?: number; // % de interés sugerido para cuotas personales (2 a 6)
+  termsAcceptedAt?: string; // Fecha en que la empresa aceptó los Términos y Condiciones (se pide una sola vez)
+  termsVersion?: string;
   panelTheme?: CatalogStoreTheme; // Diseño del panel de gestión de la empresa (colores y letra, Plan 3)
 }
 

@@ -13,7 +13,7 @@ export async function shrinkDataUrl(
   maxSide: number,
   quality = 0.72
 ): Promise<string | undefined> {
-  if (!src || !src.startsWith('data:image') || src.length < 70_000) return src;
+  if (!src || !src.startsWith('data:image') || src.length < 40_000) return src;
   if (typeof document === 'undefined') return src;
   const key = `${src.length}:${src.slice(-48)}:${maxSide}`;
   const hit = cache.get(key);
@@ -54,9 +54,9 @@ export async function slimCatalogSnapshotImages(
   const products = await Promise.all(
     (snapshot.products || []).map(async (p) => ({
       ...p,
-      imageUrl: await shrinkDataUrl(p.imageUrl, 560),
+      imageUrl: await shrinkDataUrl(p.imageUrl, 480, 0.65),
       additionalImageUrls: p.additionalImageUrls
-        ? (await Promise.all(p.additionalImageUrls.slice(0, 3).map((u) => shrinkDataUrl(u, 480)))).filter(
+        ? (await Promise.all(p.additionalImageUrls.slice(0, 3).map((u) => shrinkDataUrl(u, 400, 0.6)))).filter(
             (u): u is string => Boolean(u)
           )
         : undefined,
