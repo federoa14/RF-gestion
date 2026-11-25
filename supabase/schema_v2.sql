@@ -978,3 +978,23 @@ end $$;
 --   select id, 'superadmin', 'Administrador', email from auth.users where email = 'TU_EMAIL'
 --   on conflict (id) do update set role = 'superadmin', business_id = null;
 -- -----------------------------------------------------------------------------
+
+-- -----------------------------------------------------------------------------
+-- Endurecimiento (avisos del análisis de seguridad de Supabase)
+--   · search_path fijo en las funciones auxiliares.
+--   · Las funciones de trigger no se pueden llamar desde la API.
+-- -----------------------------------------------------------------------------
+do $$
+declare f record;
+begin
+  for f in
+    select p.oid::regprocedure as sig
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public'
+      and p.proname in ('touch_app_cloud_store_updated_at','touch_updated_at','safe_numeric','safe_date','safe_ts','_legacy_json','set_updated_at')
+  loop
+    execute format('alter function %s set search_path = public, pg_temp', f.sig);
+  end loop;
+end $$;
+revoke execute on function public.handle_new_auth_user() from public, anon, authenticated;
+revoke execute on function public.protect_profile_fields() from public, anon, authenticated;
