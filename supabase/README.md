@@ -20,6 +20,8 @@ y el dueño y los vendedores ven lo mismo desde cualquier dispositivo.
 | `functions/whatsapp-dispatch` | Envíos de WhatsApp Business (hoja de ruta, alertas al dueño, cierre) desde el servidor. |
 | `functions/whatsapp-connect` | El comercio conecta su número de WhatsApp Business (se valida contra Meta). |
 | `functions/mp-test-connection` | Prueba el token de Mercado Pago del comercio desde el servidor. |
+| `monitoring.sql` | Registro de errores de la app (tabla `app_errors`, solo superadmin), bucket privado `backups` y cron del respaldo semanal. |
+| `functions/weekly-backup` | Respaldo semanal de cada comercio en Storage (`backups/<business_id>/AAAA-MM-DD.json`, últimos 8). |
 
 WhatsApp: seguí `../docs/WHATSAPP-META.md`.
 

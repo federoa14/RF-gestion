@@ -1,3 +1,4 @@
+import { AutoBackupsPanel } from './AutoBackupsPanel';
 import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck,
@@ -1429,6 +1430,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
             {backupFeedback.text}
           </div>
         )}
+
+        {currentConfig.tenantId && <AutoBackupsPanel businessId={currentConfig.tenantId} />}
       </div>
 
       {/* Danger Zone */}

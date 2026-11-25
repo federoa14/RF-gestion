@@ -71,3 +71,58 @@ begin
       $job$ delete from public.app_errors where last_seen_at < now() - interval '30 days' $job$);
   end if;
 end $$;
+
+-- -----------------------------------------------------------------------------
+-- 2. Respaldo semanal automático (Edge Function weekly-backup)
+--    Un JSON por comercio en Storage → bucket privado "backups", carpeta <business_id>.
+--    Se guardan los últimos 8 (unos 2 meses). Los tokens nunca se incluyen.
+-- -----------------------------------------------------------------------------
+
+insert into storage.buckets (id, name, public)
+values ('backups', 'backups', false)
+on conflict (id) do update set public = false;
+
+-- Dueños y administradores pueden descargar los respaldos de SU comercio; el superadmin, todos.
+-- Escribir y borrar: solo la función (con la service role key).
+drop policy if exists rf_backups_read on storage.objects;
+create policy rf_backups_read on storage.objects
+  for select to authenticated
+  using (
+    bucket_id = 'backups'
+    and (
+      public.is_superadmin()
+      or ((storage.foldername(name))[1] = public.auth_business_id()
+          and public.auth_role() in ('dueño', 'administrador'))
+    )
+  );
+
+-- Todos los domingos a las 03:23 (hora de Argentina = 06:23 UTC).
+-- Usa los mismos secretos de Vault que el cron de WhatsApp (rf_functions_url y rf_cron_secret).
+do $$
+begin
+  create extension if not exists pg_net;
+  create extension if not exists pg_cron;
+  if exists (select 1 from cron.job where jobname = 'rf-weekly-backup') then
+    perform cron.unschedule('rf-weekly-backup');
+  end if;
+  perform cron.schedule(
+    'rf-weekly-backup',
+    '23 6 * * 0',
+    $job$
+      select net.http_post(
+        url := (select decrypted_secret from vault.decrypted_secrets where name = 'rf_functions_url') || '/weekly-backup',
+        headers := jsonb_build_object(
+          'Content-Type', 'application/json',
+          'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'rf_cron_secret')
+        ),
+        body := '{"mode":"cron"}'::jsonb,
+        timeout_milliseconds := 300000
+      );
+    $job$
+  );
+exception when others then
+  raise notice 'No se pudo programar el respaldo semanal (%). Activá pg_cron y pg_net y volvé a correr este bloque.', sqlerrm;
+end $$;
+
+-- Ver los respaldos guardados:
+--   select name, created_at from storage.objects where bucket_id = 'backups' order by created_at desc limit 50;

@@ -13,7 +13,7 @@ Hacelo **en este orden**. Hasta el paso 9, la versión publicada en Vercel sigue
    select vault.create_secret('https://TU-PROYECTO.supabase.co/functions/v1', 'rf_functions_url');
    select vault.create_secret('UNA-CLAVE-LARGA-AL-AZAR', 'rf_cron_secret');
    ```
-5. **SQL Editor:** correr `supabase/whatsapp.sql`.
+5. **SQL Editor:** correr `supabase/whatsapp.sql` y después `supabase/monitoring.sql` (registro de errores y respaldo semanal).
 6. **Authentication → URL Configuration:**
    - *Site URL* = tu dominio de Vercel.
    - *Redirect URLs* = agregar `https://TU-DOMINIO/?recuperar=1`.
@@ -35,7 +35,7 @@ supabase functions deploy auth-login --no-verify-jwt
 supabase functions deploy whatsapp-dispatch --no-verify-jwt
 ```
 ```bash
-supabase functions deploy admin-users whatsapp-connect mp-test-connection mp-create-preference mp-verify-payment mp-webhook
+supabase functions deploy admin-users whatsapp-connect mp-test-connection mp-create-preference mp-verify-payment mp-webhook weekly-backup
 ```
 
 ## C. Usuarios
@@ -91,3 +91,5 @@ Usá dos dispositivos: por ejemplo, la PC del dueño y el celular de un vendedor
 | 15 | En otro navegador, sin sesión, intentar ver datos de un comercio. | No se puede: solo se ven la tienda pública y los links de pago. |
 | 16 | Catálogo → **Pedidos y ventas** → Pedidos Recibidos: filtrar por estado, buscar un cliente y abrir el menú **Más** de un pedido. | Cada pedido se ve como una ficha: número, fecha, estado y total arriba, la tabla de productos con subtotales y las acciones abajo. |
 | 17 | Con Plan 3: Catálogo → Configuración → **Diseño de tu tienda**. Elegir otra paleta, letra y estilo de tarjetas, guardar y abrir la tienda. | La vista previa cambia al instante y la tienda pública queda con el diseño elegido. Con Plan 2 aparece el candado y la tienda sigue con el diseño estándar. |
+| 18 | Superadmin → **Errores de la app**. | Muestra los errores de los últimos 30 días (si no hubo, dice "Sin errores registrados"). |
+| 19 | Ajustes → **Respaldos automáticos** → "Hacer un respaldo ahora". | Aparece el respaldo de hoy en la lista y se puede descargar. Los domingos se hace solo. |
