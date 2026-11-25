@@ -1,1 +1,2 @@
 fecha,decision,razonamiento,resultado_esperado,fecha_revision,estado
+2026-11-25,"Sugerir el interés de las cuotas según la TNA del Banco Nación, editable por el comercio",El usuario quiere referencia del BNA pero con libertad de poner el interés que quiera,"Interés sugerido por cantidad de cuotas basado en BNA, corregible a mano",2026-12-25,

@@ -14,3 +14,14 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - IA del lado del servidor con Gemini (`@google/genai`).
 - Alertas por WhatsApp (API de Meta, ver `docs/WHATSAPP-META.md`) y por email.
 - Planes de suscripción: prueba gratis de 30 días con el Plan 2 (con sus límites).
+
+## 2026-11-25 — Interés de cuotas según Banco Nación
+- **Decisión:** el interés sugerido de las cuotas parte de la TNA del Banco Nación (referencia 40%, editable y guardada en el navegador); el interés final siempre se puede cambiar a mano.
+- **Motivo:** el BNA no tiene API pública; la tasa se corrige cuando cambie. Pendiente: confirmar la tasa vigente en bna.com.ar.
+
+## 2026-11-25 — Filtros del catálogo
+- **Decisión:** una lista de filtros vacía guardada se respeta; solo se usan los predeterminados del rubro si nunca se configuró.
+
+## 2026-11-25 — Diseño de tienda solo en Plan 3
+- **Decisión:** colores y letra de la tienda siguen siendo exclusivos del Plan 3 (no se abren a Plan 2 ni a la prueba gratis).
+- **Motivo:** el usuario confirmó que es función del plan más alto; si no se ve el cambio, primero revisar el plan de la empresa.
