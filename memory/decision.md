@@ -80,3 +80,9 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 
 ## 2026-11-25 — Nombres de la oficina: discípulos de Jesús
 - **Decisión:** las personas a cargo de cada departamento llevan nombres de los discípulos: Pedro (Marketing), Mateo (Ventas), Juan (Diseño), Felipe (Gestión), Tomás (Actualización), Andrés (Evolución), Bartolomé (Asistencia), Simón el Zelote (Legal y Finanzas). Reserva en orden en `nombresReservados` (discípulos que faltan, luego personajes bíblicos trascendentes). Nunca Judas Iscariote.
+
+## 2026-11-25 — La oficina virtual vive en la app de la distribuidora (Supabase)
+- **Decisión:** pestaña «Oficina» dentro del panel superadmin de la app, misma dirección y login. Datos en tablas nuevas de Supabase (`oficina_tareas`, `oficina_log`, `oficina_redes`) con acceso solo para superadmin (`is_superadmin()`); no tocan ni leen datos de los comercios.
+- **Motivo:** el usuario quiere verla e interactuar como ve el proyecto de la distribuidora (no solo en localhost). Autorizó expresamente que Claude haga los cambios de código y configuración sin pedir confirmación en cada paso.
+- **Cómo opera Claude:** órdenes del chat → SQL por MCP de Supabase en esas tablas. El reglamento (`tareas/departamentos.json`) y las rutinas (`tareas/rutinas.json`) son la única fuente y los usa también la app.
+- **Pendiente:** publicar en producción (merge a `main` por pull request); la tarea horaria autónoma aún trabaja sobre archivos locales, no sobre Supabase.

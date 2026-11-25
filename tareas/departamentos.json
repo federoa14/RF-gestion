@@ -344,7 +344,7 @@
       "id": "legal",
       "nombre": "Legal y Finanzas",
       "emoji": "⚖️",
-      "color": "#475569",
+      "color": "#7c8aa5",
       "persona": {
         "nombre": "Simón el Zelote",
         "cargo": "Legal, Finanzas y Cumplimiento",
@@ -352,7 +352,7 @@
         "piel": "#ecc6a0",
         "pelo": "#6b6b6b",
         "estiloPelo": "corto",
-        "camisa": "#475569",
+        "camisa": "#7c8aa5",
         "lentes": true
       },
       "mision": "Que la empresa cumpla la ley y cuide su plata.",

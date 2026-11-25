@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import {
   Bug,
   Building2,
@@ -117,6 +117,8 @@ import {
   setPublicCatalogSuperAdminEnabledInSupabase,
 } from '../utils/supabaseServices';
 
+const OficinaVirtual = lazy(() => import('./OficinaVirtual').then((m) => ({ default: m.OficinaVirtual })));
+
 interface SuperAdminPanelProps {
   currentUser: PlatformUser;
   onLogout: () => void;
@@ -158,7 +160,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   showToast,
   onOpenUserProfile,
 }) => {
-  const [activeTab, setActiveTab] = useState<'tenants' | 'billing' | 'users' | 'support' | 'announcements' | 'errors'>('tenants');
+  const [activeTab, setActiveTab] = useState<'tenants' | 'billing' | 'users' | 'support' | 'announcements' | 'errors' | 'oficina'>('tenants');
 
   const [tenants, setTenants] = useState<Tenant[]>(loadTenants);
   const [users, setUsers] = useState<PlatformUser[]>(loadPlatformUsers);
@@ -1833,7 +1835,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       type="button"
                       onClick={() => {
                         setPlanSectionFilter(isActiveSection ? 'all' : def.tier);
-                        if (activeTab === 'users' || activeTab === 'support' || activeTab === 'announcements' || activeTab === 'errors') {
+                        if (activeTab === 'users' || activeTab === 'support' || activeTab === 'announcements' || activeTab === 'errors' || activeTab === 'oficina') {
                           setActiveTab('tenants');
                         }
                       }}
@@ -1935,6 +1937,19 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             >
               <Headphones className="w-4 h-4" />
               <span>Canales de Contacto</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('oficina')}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+                activeTab === 'oficina'
+                  ? 'bg-[#E2E8F0] text-[#091428]'
+                  : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
+              }`}
+            >
+              <Building2 className="w-4 h-4" />
+              <span>Oficina</span>
             </button>
 
             <button
@@ -3798,6 +3813,12 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
         )}
 
         {/* TAB 4: CANALES DE CONTACTO Y ASISTENCIA TÉCNICA */}
+        {activeTab === 'oficina' && (
+          <Suspense fallback={<div className="text-sm text-[#94A3B8] p-6">Abriendo la oficina…</div>}>
+            <OficinaVirtual />
+          </Suspense>
+        )}
+
         {activeTab === 'errors' && (
           <AppErrorsPanel tenantNames={Object.fromEntries(tenants.map((t) => [t.id, t.name]))} />
         )}
