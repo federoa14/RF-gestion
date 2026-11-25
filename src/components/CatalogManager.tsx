@@ -151,7 +151,8 @@ import { WebLoyaltyClientsPanel } from './WebLoyaltyClientsPanel';
 import { QrCodeSvg } from './QrCodeSvg';
 
 interface CatalogManagerProps {
-  focusOrdersToken?: number; // al cambiar, abre la pestaña de pedidos
+  // Al cambiar n, abre esa pestaña (por ejemplo 'pedidos' desde el aviso de pedido nuevo)
+  focusRequest?: { subTab: 'pedidos' | 'productos' | 'configuracion'; n: number };
   config: DistributorConfig;
   tenant: Tenant | null;
   settings: OnlineCatalogSettings;
@@ -348,7 +349,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   planFeatureAccess,
   onRequestUpgradePlan,
   showToast,
-  focusOrdersToken,
+  focusRequest,
 }) => {
   const [subTab, setSubTab] = useState<
     | 'productos'
@@ -360,10 +361,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     | 'clientes_web'
     | 'estadisticas'
     | 'configuracion'
-  >(() => (focusOrdersToken ? 'pedidos' : 'productos'));
+  >(() => focusRequest?.subTab || 'productos');
   useEffect(() => {
-    if (focusOrdersToken) setSubTab('pedidos');
-  }, [focusOrdersToken]);
+    if (focusRequest?.n) setSubTab(focusRequest.subTab);
+  }, [focusRequest?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const [orderSoundOn, setOrderSoundOn] = useState(isNewOrderSoundEnabled);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');

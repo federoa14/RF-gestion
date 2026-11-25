@@ -100,6 +100,7 @@ import { Header } from './components/Header';
 import { SidebarNav } from './components/SidebarNav';
 import { QuickGuideModal } from './components/QuickGuideModal';
 import { EditBrandModal } from './components/EditBrandModal';
+import { OnboardingChecklist, type OnboardingStep } from './components/OnboardingChecklist';
 import { BoletaCard } from './components/BoletaCard';
 import type { BasketCheckoutPayload } from './components/NewBoletaModal';
 import { MarkAsPaidModal } from './components/MarkAsPaidModal';
@@ -462,7 +463,13 @@ export default function App() {
 
   // Aviso de pedidos nuevos del catálogo (llegan por tiempo real o al sincronizar)
   const [newOrderNotice, setNewOrderNotice] = useState<CatalogPickupOrder | null>(null);
-  const [focusCatalogOrdersToken, setFocusCatalogOrdersToken] = useState(0);
+  const [catalogFocusRequest, setCatalogFocusRequest] = useState<
+    { subTab: 'pedidos' | 'productos' | 'configuracion'; n: number } | undefined
+  >(undefined);
+  const openCatalogSubTab = (subTab: 'pedidos' | 'productos' | 'configuracion') => {
+    handleSelectTab('catalogo');
+    setCatalogFocusRequest((prev) => ({ subTab, n: (prev?.n || 0) + 1 }));
+  };
   const knownOrderIdsRef = useRef<{ tenantId: string | null; ids: Set<string> }>({ tenantId: null, ids: new Set() });
   useEffect(() => {
     const tenantId = selectedTenant?.id || null;
@@ -3690,6 +3697,62 @@ export default function App() {
       };
   const planDefinitions = getSubscriptionPlanDefinitions(platformBillingCfg);
 
+  // Primeros pasos del comercio (se muestran en el Panel de Boletas hasta completarlos)
+  const onboardingSteps: OnboardingStep[] = [
+    {
+      id: 'logo',
+      label: 'Subí el logo de tu comercio',
+      hint: 'Aparece en la tienda, los comprobantes y los mensajes.',
+      done: Boolean((config.distributorLogoUrl || selectedTenant?.logoUrl || '').trim()),
+      actionLabel: 'Subir',
+      onAction: () => setIsEditBrandModalOpen(true),
+    },
+    {
+      id: 'whatsapp',
+      label: 'Cargá tu WhatsApp',
+      hint: 'Ahí te llegan los pedidos y las alertas.',
+      done: Boolean((catalogSettings.whatsappPhone || config.senderPhone || config.distributorPhone || '').trim()),
+      actionLabel: 'Cargar',
+      onAction: () => handleSelectTab('administradores'),
+    },
+    {
+      id: 'cliente',
+      label: 'Cargá tu primer cliente',
+      hint: 'Para empezar a registrar boletas fiadas.',
+      done: clients.length > 0,
+      actionLabel: 'Ir',
+      onAction: () => handleSelectTab('clientes'),
+    },
+    {
+      id: 'vendedor',
+      label: 'Sumá un vendedor',
+      hint: 'Recibe su hoja de ruta y ve sus clientes.',
+      done: salespeople.length > 0,
+      actionLabel: 'Ir',
+      onAction: () => handleSelectTab('vendedores'),
+    },
+    ...(tenantFeatureAccess.canAccessWebCatalog
+      ? [
+          {
+            id: 'alias',
+            label: 'Cargá tu alias o CVU',
+            hint: 'Para cobrar por transferencia en la tienda.',
+            done: Boolean((config.merchantPaymentAlias || config.merchantPaymentCvu || '').trim()),
+            actionLabel: 'Cargar',
+            onAction: () => openCatalogSubTab('configuracion'),
+          },
+          {
+            id: 'producto',
+            label: 'Publicá tu primer producto',
+            hint: 'Con foto y precio, para que lo vean en tu tienda.',
+            done: catalogProducts.length > 0,
+            actionLabel: 'Agregar',
+            onAction: () => openCatalogSubTab('productos'),
+          },
+        ]
+      : []),
+  ];
+
   // 3 & 3B. If Company is Paused (or suspended) OR 30-Day Trial Expired -> Show the 3 Plan Tiers (Plan 1, Plan 2, Plan 3) with amounts + feature comparison & direct pay redirect
   if (
     selectedTenant &&
@@ -4033,8 +4096,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setNewOrderNotice(null);
-                  handleSelectTab('catalogo');
-                  setFocusCatalogOrdersToken((n) => n + 1);
+                  openCatalogSubTab('pedidos');
                 }}
                 className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer"
               >
@@ -4391,6 +4453,9 @@ export default function App() {
           {/* TAB 1: PENDING BOLETAS */}
           {activeTab === 'boletas' && (
             <div className="space-y-5">
+              {selectedTenant && currentUser.role !== 'vendedor' && (
+                <OnboardingChecklist tenantId={selectedTenant.id} steps={onboardingSteps} />
+              )}
               {/* Executive KPI Summary Dashboard */}
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
                 {/* Card 1: Total Fiado en la Calle */}
@@ -5328,7 +5393,7 @@ export default function App() {
         {activeTab === 'catalogo' && (
           <Suspense fallback={<LazyViewFallback />}>
             <CatalogManager
-              focusOrdersToken={focusCatalogOrdersToken}
+              focusRequest={catalogFocusRequest}
               config={config}
               tenant={selectedTenant}
               settings={catalogSettings}
