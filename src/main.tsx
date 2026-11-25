@@ -2,6 +2,8 @@ import {createRoot} from 'react-dom/client';
 import './index.css';
 import {initInternalDatabase, getStartupError} from './utils/localInternalDb';
 import {StartupErrorScreen} from './components/StartupErrorScreen';
+import {AppErrorBoundary} from './components/AppErrorBoundary';
+import {installErrorReporter} from './utils/errorReporter';
 import {isSupabaseConfigured} from './utils/supabaseClient';
 import {restoreSessionUserFromCloud} from './utils/multiTenantStorage';
 
@@ -12,6 +14,9 @@ const isStandalonePublicRoute = Boolean(
     searchParams?.get('pay_client')?.trim() ||
     searchParams?.get('sub_pay')?.trim()
 );
+// Errores de los usuarios: se registran para verlos en el panel de Superadmin
+installErrorReporter(searchParams?.get('catalog')?.trim() ? 'tienda' : 'panel');
+
 // Al volver desde el link de "recuperar contraseña" no se entra directo: se muestra el formulario de nueva clave
 const isPasswordRecovery =
   typeof window !== 'undefined' &&
@@ -37,9 +42,9 @@ initInternalDatabase({deferCloudHydration: isStandalonePublicRoute || isPassword
     const showLoadError = (error: unknown) =>
       root.render(<StartupErrorScreen kind="connection" error={String(error)} />);
     if (isStandalonePublicRoute) {
-      import('./PublicRoot.tsx').then(({default: PublicRoot}) => root.render(<PublicRoot />), showLoadError);
+      import('./PublicRoot.tsx').then(({default: PublicRoot}) => root.render(<AppErrorBoundary><PublicRoot /></AppErrorBoundary>), showLoadError);
     } else {
-      import('./App.tsx').then(({default: App}) => root.render(<App />), showLoadError);
+      import('./App.tsx').then(({default: App}) => root.render(<AppErrorBoundary><App /></AppErrorBoundary>), showLoadError);
     }
   }
 });

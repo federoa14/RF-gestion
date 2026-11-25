@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Bug,
   Building2,
   Users,
   PlusCircle,
@@ -90,6 +91,7 @@ import {
 } from '../utils/multiTenantStorage';
 import { DEFAULT_CONFIG } from '../utils/storage';
 import { BrandMark } from './BrandMark';
+import { AppErrorsPanel } from './AppErrorsPanel';
 import {
   getCurrentMonthInfo,
   getTenantSubscriptionStatus,
@@ -156,7 +158,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
   showToast,
   onOpenUserProfile,
 }) => {
-  const [activeTab, setActiveTab] = useState<'tenants' | 'billing' | 'users' | 'support' | 'announcements'>('tenants');
+  const [activeTab, setActiveTab] = useState<'tenants' | 'billing' | 'users' | 'support' | 'announcements' | 'errors'>('tenants');
 
   const [tenants, setTenants] = useState<Tenant[]>(loadTenants);
   const [users, setUsers] = useState<PlatformUser[]>(loadPlatformUsers);
@@ -1831,7 +1833,7 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
                       type="button"
                       onClick={() => {
                         setPlanSectionFilter(isActiveSection ? 'all' : def.tier);
-                        if (activeTab === 'users' || activeTab === 'support' || activeTab === 'announcements') {
+                        if (activeTab === 'users' || activeTab === 'support' || activeTab === 'announcements' || activeTab === 'errors') {
                           setActiveTab('tenants');
                         }
                       }}
@@ -1933,6 +1935,19 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
             >
               <Headphones className="w-4 h-4" />
               <span>Canales de Contacto</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('errors')}
+              className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap ${
+                activeTab === 'errors'
+                  ? 'bg-[#E2E8F0] text-[#091428]'
+                  : 'text-[#94A3B8] hover:text-white hover:bg-[#13264A]'
+              }`}
+            >
+              <Bug className="w-4 h-4" />
+              <span>Errores de la app</span>
             </button>
 
             <button
@@ -3783,6 +3798,10 @@ export const SuperAdminPanel: React.FC<SuperAdminPanelProps> = ({
         )}
 
         {/* TAB 4: CANALES DE CONTACTO Y ASISTENCIA TÉCNICA */}
+        {activeTab === 'errors' && (
+          <AppErrorsPanel tenantNames={Object.fromEntries(tenants.map((t) => [t.id, t.name]))} />
+        )}
+
         {activeTab === 'support' && (
           <div className="space-y-6">
             <form
