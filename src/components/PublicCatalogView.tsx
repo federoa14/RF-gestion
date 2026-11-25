@@ -2260,6 +2260,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               icon={catalog.icon}
               name={catalog.storeName}
               size="sm"
+              initialFallback
             />
             <div className="min-w-0">
               <h1 className="text-sm sm:text-base font-bold text-slate-900 truncate">
@@ -2268,31 +2269,6 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               <p className="text-[11px] text-slate-500 truncate">
                 {rubroPreset ? `${rubroPreset.shortLabel} · ` : ''}Catálogo Online · Carrito por WhatsApp
               </p>
-            </div>
-          </div>
-
-          {/* Quick Header Search Bar on desktop */}
-          <div className="hidden md:block flex-1 max-w-sm mx-4">
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="search"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nombre o descripción..."
-                aria-label="Buscar productos por nombre o descripción"
-                className="w-full pl-9 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#0B1933]/20"
-              />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm('')}
-                  aria-label="Limpiar búsqueda"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-slate-400 hover:text-slate-700 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
             </div>
           </div>
 
@@ -2323,6 +2299,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                 icon={catalog.icon}
                 name={catalog.storeName}
                 size="lg"
+                initialFallback
               />
             </div>
             <div className="space-y-2 min-w-0">
