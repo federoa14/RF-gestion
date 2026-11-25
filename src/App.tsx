@@ -81,6 +81,7 @@ import {
   resetOperationalData,
 } from './utils/storage';
 import { getPanelThemeRootProps } from './utils/storeTheme';
+import { slimCatalogSnapshotImages } from './utils/imageShrink';
 import { TermsAcceptanceGate } from './components/TermsAcceptanceGate';
 import { CounterSaleModal } from './components/CounterSaleModal';
 import type { CatalogStoreTheme } from './types';
@@ -1261,7 +1262,13 @@ export default function App() {
       products: scopedProducts,
       updatedAt: new Date().toISOString(),
     };
-    void publishPublicCatalogToSupabase(snapshot);
+    void (async () => {
+      const slim = await slimCatalogSnapshotImages(snapshot);
+      const ok = await publishPublicCatalogToSupabase(slim);
+      if (!ok) {
+        showToast('No se pudo publicar la tienda. Revisá tu conexión y volvé a guardar.');
+      }
+    })();
   };
 
   const handleSaveCatalogSettings = (incoming: OnlineCatalogSettings) => {

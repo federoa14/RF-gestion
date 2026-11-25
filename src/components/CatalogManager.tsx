@@ -1011,6 +1011,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     showToast(`WhatsApp del carrito web actualizado a ${cleaned} y publicado.`);
   };
 
+  // Filtros y subfiltros se guardan y publican al instante (sin depender del botón Guardar de Configuración)
+  const persistFilters = (mainFilters: string[], subFilters: string[]) => {
+    setDraftSettings((prev) => ({ ...prev, rubroFilters: mainFilters, customSubfilters: subFilters }));
+    onSaveSettings({
+      ...settings,
+      catalogRubro: activeCatalogRubro,
+      rubroFilters: mainFilters,
+      customSubfilters: subFilters,
+      updatedAt: new Date().toISOString(),
+    });
+    showToast('Filtros guardados y publicados en la tienda.');
+  };
+
   const handleAddCustomSubfilter = (rawValue: string) => {
     const clean = rawValue.trim();
     if (!clean) return;
@@ -7181,10 +7194,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                       <button
                         type="button"
                         onClick={() =>
-                          setDraftSettings((prev) => ({
-                            ...prev,
-                            rubroFilters: (prev.rubroFilters || []).filter((x) => x !== f),
-                          }))
+                          persistFilters(
+                            normalizeFilterList(draftSettings.rubroFilters).filter((x) => x !== f),
+                            normalizeFilterList(draftSettings.customSubfilters)
+                          )
                         }
                         className="hover:text-rose-200 cursor-pointer"
                         title={`Quitar ${f}`}
@@ -7219,10 +7232,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             return;
                           }
                         }
-                        setDraftSettings((prev) => ({
-                          ...prev,
-                          rubroFilters: normalizeFilterList([...(prev.rubroFilters || []), clean]),
-                        }));
+                        persistFilters(
+                          normalizeFilterList([...normalizeFilterList(draftSettings.rubroFilters), clean]),
+                          normalizeFilterList(draftSettings.customSubfilters)
+                        );
                         setSettingsFilterInput('');
                       }
                     }}
@@ -7249,10 +7262,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           return;
                         }
                       }
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        rubroFilters: normalizeFilterList([...(prev.rubroFilters || []), clean]),
-                      }));
+                      persistFilters(
+                        normalizeFilterList([...normalizeFilterList(draftSettings.rubroFilters), clean]),
+                        normalizeFilterList(draftSettings.customSubfilters)
+                      );
                       setSettingsFilterInput('');
                     }}
                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white cursor-pointer whitespace-nowrap"
@@ -7282,12 +7295,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         <button
                           type="button"
                           onClick={() =>
-                            setDraftSettings((prev) => ({
-                              ...prev,
-                              customSubfilters: (prev.customSubfilters || []).filter(
-                                (x) => x !== sf
-                              ),
-                            }))
+                            persistFilters(
+                              normalizeFilterList(draftSettings.rubroFilters),
+                              normalizeFilterList(draftSettings.customSubfilters).filter((x) => x !== sf)
+                            )
                           }
                           className="text-slate-400 hover:text-rose-600 cursor-pointer"
                           title={`Quitar ${sf}`}
@@ -7323,13 +7334,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                             return;
                           }
                         }
-                        setDraftSettings((prev) => ({
-                          ...prev,
-                          customSubfilters: normalizeFilterList([
-                            ...(prev.customSubfilters || []),
-                            clean,
-                          ]),
-                        }));
+                        persistFilters(
+                          normalizeFilterList(draftSettings.rubroFilters),
+                          normalizeFilterList([...normalizeFilterList(draftSettings.customSubfilters), clean])
+                        );
                         setSettingsSubfilterInput('');
                       }
                     }}
@@ -7356,13 +7364,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           return;
                         }
                       }
-                      setDraftSettings((prev) => ({
-                        ...prev,
-                        customSubfilters: normalizeFilterList([
-                          ...(prev.customSubfilters || []),
-                          clean,
-                        ]),
-                      }));
+                      persistFilters(
+                        normalizeFilterList(draftSettings.rubroFilters),
+                        normalizeFilterList([...normalizeFilterList(draftSettings.customSubfilters), clean])
+                      );
                       setSettingsSubfilterInput('');
                     }}
                     className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white cursor-pointer whitespace-nowrap"
