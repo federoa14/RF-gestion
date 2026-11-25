@@ -287,6 +287,28 @@ async function compressBannerImageFile(file: File): Promise<string> {
 }
 
 
+
+// Secciones del catálogo: cada una agrupa varias pestañas
+type CatalogSubTabKey =
+  | 'productos'
+  | 'pedidos'
+  | 'avisos_stock'
+  | 'carritos_abandonados'
+  | 'gift_cards'
+  | 'club_promos'
+  | 'clientes_web'
+  | 'estadisticas'
+  | 'configuracion';
+const CATALOG_TAB_GROUPS: Array<{ id: 'productos' | 'pedidos' | 'clientes' | 'config'; label: string; tabs: CatalogSubTabKey[] }> = [
+  { id: 'productos', label: 'Productos', tabs: ['productos', 'avisos_stock'] },
+  { id: 'pedidos', label: 'Pedidos y ventas', tabs: ['pedidos', 'carritos_abandonados', 'estadisticas'] },
+  { id: 'clientes', label: 'Clientes y promos', tabs: ['clientes_web', 'club_promos', 'gift_cards'] },
+  { id: 'config', label: 'Configuración', tabs: ['configuracion'] },
+];
+function catalogGroupOf(tab: CatalogSubTabKey) {
+  return (CATALOG_TAB_GROUPS.find((g) => g.tabs.includes(tab)) || CATALOG_TAB_GROUPS[0]).id;
+}
+
 // Filtros de la vista de pedidos del catálogo
 const ORDER_STATUS_FILTERS: Array<{ id: string; label: string; match?: (o: CatalogPickupOrder) => boolean }> = [
   { id: 'todos', label: 'Todos' },
@@ -366,6 +388,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     if (focusRequest?.n) setSubTab(focusRequest.subTab);
   }, [focusRequest?.n]); // eslint-disable-line react-hooks/exhaustive-deps
   const [orderSoundOn, setOrderSoundOn] = useState(isNewOrderSoundEnabled);
+  // Muestra solo las pestañas de la sección activa
+  const catalogTabHiddenClass = (tab: CatalogSubTabKey) =>
+    catalogGroupOf(tab) === catalogGroupOf(subTab) ? '' : 'hidden!';
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
   const [selectedSubfilter, setSelectedSubfilter] = useState<string>('Todos');
@@ -3012,12 +3037,54 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         )}
 
         {/* KPI Row + Sub-navigation */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-1">
-          <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-fit max-w-full">
+        <div className="space-y-2 pt-1">
+          {/* Secciones del catálogo */}
+          <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Secciones del catálogo">
+            {CATALOG_TAB_GROUPS.map((g) => {
+              const active = catalogGroupOf(subTab) === g.id;
+              const badge = g.id === 'pedidos' ? pendingPickupOrdersCount : 0;
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => {
+                    if (g.id === 'clientes' && isBasicWebPlan) {
+                      requestPlanUpgrade(
+                        'full_feature',
+                        'Clientes y promociones · Exclusivo Plan 3 · Full',
+                        'Clientes Web por DNI, SuperClub y Gift Cards QR están disponibles en Plan 3 · Full.'
+                      );
+                      return;
+                    }
+                    if (!active) setSubTab(g.tabs[0]);
+                  }}
+                  className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border cursor-pointer ${
+                    active
+                      ? 'bg-[#0B1933] text-white border-[#0B1933]'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {g.label}
+                  {badge > 0 && (
+                    <span className={`px-1.5 rounded text-[10px] font-mono tabular-nums ${active ? 'bg-white text-[#0B1933]' : 'bg-rose-600 text-white'}`}>
+                      {badge}
+                    </span>
+                  )}
+                  {g.id === 'clientes' && isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
+                </button>
+              );
+            })}
+          </div>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className={`flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-fit max-w-full ${
+            (CATALOG_TAB_GROUPS.find((g) => g.id === catalogGroupOf(subTab))?.tabs.length || 0) <= 1 ? 'hidden' : ''
+          }`}>
             <button
               type="button"
               onClick={() => setSubTab('productos')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`${catalogTabHiddenClass('productos')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 subTab === 'productos'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3028,7 +3095,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             <button
               type="button"
               onClick={() => setSubTab('pedidos')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('pedidos')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'pedidos'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3054,7 +3121,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 }
                 setSubTab('avisos_stock');
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('avisos_stock')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'avisos_stock'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3083,7 +3150,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 setSubTab('carritos_abandonados');
                 void onRefreshAbandonedCarts?.();
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('carritos_abandonados')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'carritos_abandonados'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3113,7 +3180,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 setSubTab('gift_cards');
                 void onRefreshGiftCards?.();
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('gift_cards')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'gift_cards'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3136,7 +3203,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 }
                 setSubTab('club_promos');
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('club_promos')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'club_promos'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3161,7 +3228,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 void onRefreshOrders?.();
                 void onRefreshLoyaltyAccounts?.();
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('clientes_web')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'clientes_web'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3179,7 +3246,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   void onRefreshLoyaltyAccounts?.();
                 }
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+              className={`${catalogTabHiddenClass('estadisticas')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
                 subTab === 'estadisticas'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3191,7 +3258,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             <button
               type="button"
               onClick={() => setSubTab('configuracion')}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`${catalogTabHiddenClass('configuracion')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
                 subTab === 'configuracion'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -3236,6 +3303,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               </strong>
             </span>
           </div>
+        </div>
         </div>
 
         {isBasicWebPlan && (
@@ -6575,7 +6643,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     <p className="text-[11px] text-slate-500 mt-0.5">
                       {settings.enableLoyaltyProgram
                         ? `Programa activo: suma ${settings.loyaltyPointsPerUnit ?? 10} pts por prenda/unidad.`
-                        : 'El programa de puntos está desactivado. Podés habilitarlo en "Tienda, Envíos y Cobros".'}
+                        : 'El programa de puntos está desactivado. Podés habilitarlo en Configuración.'}
                     </p>
                   </div>
 
