@@ -74,3 +74,9 @@ export async function openCatalogSection(page, section) {
 
 export const horizontalOverflow = (page) =>
   page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+
+export async function loginAsSuper(page) {
+  await page.fill('input[placeholder="Usuario o correo electrónico"]', fixtures.SUPER.email);
+  await page.fill('input[type="password"]', fixtures.SUPER.password);
+  await page.locator('form button[type="submit"]').first().click();
+}

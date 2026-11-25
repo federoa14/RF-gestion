@@ -68,3 +68,7 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-25 — Regalar un año desde SuperGestión
 - **Decisión:** en la lista de empresas hay un botón visible "Regalar 1 año" (cortesía, sin cobro, queda registrado con monto $ 0 y pide confirmación) y un aviso sobre la tabla. El botón anterior pasó a llamarse "Año pagado (12M)" y registra el pago del año con descuento.
 - **Motivo:** el usuario no encontraba cómo dar un año gratis a un cliente.
+
+## 2026-11-25 — Avisos en SuperGestión
+- **Hallazgo:** el aviso verde de confirmación (toast) no se dibujaba en el panel del superadmin, así que acciones como tildar pagos, prorrogar o regalar un año no mostraban ninguna confirmación. Ahora sí se muestra.
+- **Pruebas:** hay un superadmin simulado en `tests/e2e` (`makeSuperSeed`). Si un servidor de prueba (puerto 5199) queda colgado, correr `pkill -f "vite --port 5199"` antes de volver a probar: sirve código viejo.
