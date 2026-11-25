@@ -2205,11 +2205,23 @@ export default function App() {
     );
   };
 
+  // Los términos se aceptan una sola vez: si quedó registrado en la nube, en la configuración de la empresa
+  // o en este dispositivo, no se vuelve a pedir nunca más.
+  const termsDeviceKey = selectedTenant ? `rf_terms_accepted_${selectedTenant.id}` : '';
+  const acceptedOnThisDevice = (() => {
+    try {
+      return termsDeviceKey ? window.localStorage.getItem(termsDeviceKey) === '1' : false;
+    } catch {
+      return false;
+    }
+  })();
   const needsTermsAcceptance = Boolean(
     currentUser &&
       currentUser.role !== 'superadmin' &&
       selectedTenant &&
-      !selectedTenant.subscription?.termsAccepted // solo la primera vez: no se vuelve a pedir al cambiar la versión
+      !selectedTenant.subscription?.termsAccepted &&
+      !config.termsAcceptedAt &&
+      !acceptedOnThisDevice
   );
 
   const handleAcceptCurrentTerms = () => {
@@ -2225,6 +2237,17 @@ export default function App() {
         termsVersion: TERMS_VERSION,
       },
     };
+    try {
+      window.localStorage.setItem(`rf_terms_accepted_${selectedTenant.id}`, '1');
+    } catch {
+      // sin almacenamiento local: igual queda en la nube
+    }
+    // Segundo registro, en la configuración de la empresa (siempre se puede guardar desde su cuenta)
+    const nextConfig: DistributorConfig = { ...config, termsAcceptedAt: nowIso, termsVersion: TERMS_VERSION };
+    setConfig(nextConfig);
+    const cur = loadTenantData(selectedTenant.id);
+    cur.config = nextConfig;
+    saveTenantData(selectedTenant.id, cur);
     const freshTenants = allTenants.map((t) => (t.id === updatedTenant.id ? updatedTenant : t));
     setAllTenants(freshTenants);
     saveTenants(freshTenants);

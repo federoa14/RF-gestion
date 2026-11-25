@@ -1,4 +1,5 @@
 import { getStoreThemeRootProps, resolveStoreTheme } from '../utils/storeTheme';
+import { StoreVisitorGate, type StoreVisitorData } from './StoreVisitorGate';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search,
@@ -261,6 +262,25 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  // Bienvenida: nombre y teléfono (y dirección) antes de ver la tienda; se recuerdan en este dispositivo
+  const [visitorReady, setVisitorReady] = useState(false);
+  useEffect(() => {
+    const tenantId = catalog?.tenantId;
+    if (!tenantId) return;
+    try {
+      const raw = window.localStorage.getItem(`rf_visitor_${tenantId}`);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { name?: string; phone?: string; address?: string };
+      if (saved?.name && saved?.phone) {
+        setCustomerName((prev) => prev || saved.name!);
+        setCustomerPhone((prev) => prev || saved.phone!);
+        if (saved.address) setDeliveryAddress((prev) => prev || saved.address!);
+        setVisitorReady(true);
+      }
+    } catch {
+      // sin almacenamiento local: se vuelve a pedir
+    }
+  }, [catalog?.tenantId]);
   const [pickupWindow, setPickupWindow] = useState('Hoy en horario comercial');
   const [selectedPayGroup, setSelectedPayGroup] = useState<
     'transferencia' | 'mercadopago' | 'efectivo' | 'acordar'
@@ -2246,11 +2266,47 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
   const currency = catalog.currencySymbol || '$';
 
+  const handleVisitorSubmit = (data: StoreVisitorData) => {
+    setCustomerName(data.name);
+    setCustomerPhone(data.phone);
+    if (data.address) setDeliveryAddress(data.address);
+    try {
+      window.localStorage.setItem(
+        `rf_visitor_${catalog.tenantId}`,
+        JSON.stringify({ name: data.name, phone: data.phone, address: data.address })
+      );
+    } catch {
+      // ignore
+    }
+    if (data.joinClub && isFullWebFeatures && catalog.enablePromoClub !== false) {
+      const nowIso = new Date().toISOString();
+      void submitCatalogPromoSubscriberToSupabase({
+        id: `prm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        tenantId: catalog.tenantId,
+        name: data.name,
+        phone: data.phone,
+        source: 'storefront_form',
+        active: true,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+    }
+    setVisitorReady(true);
+  };
+
   return (
     <div
       {...storeThemeRootProps}
       className={`${storeThemeRootProps.className} min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col`}
     >
+      {!visitorReady && (
+        <StoreVisitorGate
+          storeName={catalog.storeName}
+          askAddress={catalog.allowDelivery !== false}
+          offerClub={isFullWebFeatures && catalog.enablePromoClub !== false}
+          onSubmit={handleVisitorSubmit}
+        />
+      )}
       {/* Top Navigation Header */}
       <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">

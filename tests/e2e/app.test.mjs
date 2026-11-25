@@ -209,6 +209,42 @@ describe('Tienda pública', () => {
   });
 });
 
+describe('Bienvenida de la tienda', () => {
+  test('pide nombre y teléfono, los recuerda y no vuelve a pedirlos', async () => {
+    const { page, context, pageErrors } = await openPage(app.browser, fixtures.makeStoreSeed({ canAccessFullFeatures: true, enablePromoClub: true }), {
+      path: '/?catalog=tienda',
+    });
+    const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
+    await gate.waitFor({ timeout: 20_000 });
+    // sin datos no deja entrar
+    await gate.locator('button[type=submit]').click();
+    await page.waitForSelector('text=Ingresá tu nombre.', { timeout: 5_000 });
+    await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
+    await gate.locator('button[type=submit]').click();
+    await page.waitForSelector('text=teléfono', { timeout: 5_000 });
+    assert.equal(await gate.count(), 1);
+    await gate.locator('input[type=tel]').fill('11 5555 1234');
+    await gate.locator('input[type=checkbox]').check();
+    await gate.locator('button[type=submit]').click();
+    await gate.waitFor({ state: 'detached', timeout: 5_000 });
+    // el carrito ya trae los datos
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    await page.waitForTimeout(300);
+    await page.locator('button', { hasText: 'Mi Carrito' }).first().click();
+    await page.waitForTimeout(600);
+    const values = await page.evaluate(() => [...document.querySelectorAll('input')].map((i) => i.value));
+    assert.ok(values.includes('Lucía'), 'nombre precargado en el carrito');
+    assert.ok(values.includes('11 5555 1234'), 'teléfono precargado en el carrito');
+    // al volver a entrar no lo pide de nuevo
+    await page.reload();
+    await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
+    await page.waitForTimeout(800);
+    assert.equal(await page.locator('[aria-label="Bienvenida a la tienda"]').count(), 0);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  });
+});
+
 describe('SuperGestión', () => {
   test('regalar 1 año: botón visible, pide confirmación y deja 12 meses cubiertos', async () => {
     const { page, fake, context, pageErrors } = await openPage(app.browser, fixtures.makeSuperSeed());

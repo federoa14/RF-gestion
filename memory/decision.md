@@ -72,3 +72,8 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-25 — Avisos en SuperGestión
 - **Hallazgo:** el aviso verde de confirmación (toast) no se dibujaba en el panel del superadmin, así que acciones como tildar pagos, prorrogar o regalar un año no mostraban ninguna confirmación. Ahora sí se muestra.
 - **Pruebas:** hay un superadmin simulado en `tests/e2e` (`makeSuperSeed`). Si un servidor de prueba (puerto 5199) queda colgado, correr `pkill -f "vite --port 5199"` antes de volver a probar: sirve código viejo.
+
+## 2026-11-25 — Términos una sola vez (reforzado) y bienvenida de la tienda
+- **Términos:** quedan registrados en la nube, en la configuración de la empresa (`config.termsAcceptedAt`) y en el dispositivo (`rf_terms_accepted_<empresa>`); si cualquiera existe, no se vuelve a pedir. Comprobado en la base: la aceptación de "Hay Vida en Jesus" quedó guardada después del arreglo de `businesses`.
+- **Tienda online:** antes de ver el catálogo se piden nombre y teléfono (y dirección opcional si hay envío); se recuerdan en el dispositivo (`rf_visitor_<empresa>`), precargan el carrito y alimentan el recordatorio de carrito abandonado por WhatsApp (Plan 3). Casilla opcional, sin marcar, para sumarse al club (solo Plan 3 con club activo).
+- **Fotos publicadas:** más chicas (480 px) para que la tienda cargue rápido y la publicación no falle por tiempo.
