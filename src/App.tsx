@@ -60,7 +60,7 @@ import {
   TenantPlanChangeRecord,
 } from './types';
 import {
-  loadConfig,
+  DEFAULT_CONFIG,
   saveConfig,
   loadClients,
   saveClients,
@@ -277,22 +277,27 @@ export default function App() {
   });
 
   // Global State (Tenant-partitioned data)
-  const [config, setConfig] = useState<DistributorConfig>(() => {
+  // Los datos de cada empresa viven solo en su partición (loadTenantData). Nunca se leen de las claves
+  // globales: ahí quedaban datos de la última empresa o del gestor general y aparecían en cuentas nuevas.
+  const initialTenantData = (() => {
     const user = getCurrentSessionUser();
-    if (user && user.role !== 'superadmin') {
+    if (user && user.role !== 'superadmin' && user.tenantId) {
       const t = loadTenants().find((x) => x.id === user.tenantId);
-      if (t) return loadTenantData(t.id).config;
+      if (t) return loadTenantData(t.id);
     }
-    return loadConfig();
-  });
-  const [clients, setClients] = useState<Client[]>(loadClients);
-  const [salespeople, setSalespeople] = useState<Salesperson[]>(loadSalespeople);
-  const [admins, setAdmins] = useState<Administrator[]>(loadAdministrators);
-  const [boletas, setBoletas] = useState<Boleta[]>(loadBoletas);
-  const [paidBoletas, setPaidBoletas] = useState<Boleta[]>(loadPaidBoletas);
-  const [broadcasts, setBroadcasts] = useState<BroadcastMessage[]>(loadBroadcastMessages);
-  const [autoLogs, setAutoLogs] = useState<AutoDispatchLog[]>(loadAutoDispatchLogs);
-  const [rendiciones, setRendiciones] = useState<SalespersonRendicion[]>(loadRendiciones);
+    return null;
+  })();
+  const [config, setConfig] = useState<DistributorConfig>(
+    () => initialTenantData?.config || { ...DEFAULT_CONFIG, distributorName: '' }
+  );
+  const [clients, setClients] = useState<Client[]>(() => initialTenantData?.clients || []);
+  const [salespeople, setSalespeople] = useState<Salesperson[]>(() => initialTenantData?.salespeople || []);
+  const [admins, setAdmins] = useState<Administrator[]>(() => initialTenantData?.admins || []);
+  const [boletas, setBoletas] = useState<Boleta[]>(() => initialTenantData?.boletas || []);
+  const [paidBoletas, setPaidBoletas] = useState<Boleta[]>(() => initialTenantData?.paidBoletas || []);
+  const [broadcasts, setBroadcasts] = useState<BroadcastMessage[]>(() => initialTenantData?.broadcasts || []);
+  const [autoLogs, setAutoLogs] = useState<AutoDispatchLog[]>(() => initialTenantData?.autoLogs || []);
+  const [rendiciones, setRendiciones] = useState<SalespersonRendicion[]>(() => initialTenantData?.rendiciones || []);
   const [catalogSettings, setCatalogSettings] = useState<OnlineCatalogSettings>(() => {
     const user = getCurrentSessionUser();
     if (user && user.role !== 'superadmin' && user.tenantId) {
@@ -1104,7 +1109,6 @@ export default function App() {
       cur.boletas = updated;
       saveTenantData(selectedTenant.id, cur);
     }
-    saveBoletas(updated);
   };
 
   const handleSavePaidBoletas = (updated: Boleta[]) => {
@@ -1114,7 +1118,6 @@ export default function App() {
       cur.paidBoletas = updated;
       saveTenantData(selectedTenant.id, cur);
     }
-    savePaidBoletas(updated);
   };
 
   const handleSaveClients = (updated: Client[]) => {
@@ -1124,7 +1127,6 @@ export default function App() {
       cur.clients = updated;
       saveTenantData(selectedTenant.id, cur);
     }
-    saveClients(updated);
   };
 
   const handleSaveSalespeople = (updated: Salesperson[]) => {
@@ -1134,7 +1136,6 @@ export default function App() {
       cur.salespeople = updated;
       saveTenantData(selectedTenant.id, cur);
     }
-    saveSalespeople(updated);
   };
 
   const handleSaveAdmins = (updated: Administrator[]) => {
@@ -1144,7 +1145,6 @@ export default function App() {
       cur.admins = updated;
       saveTenantData(selectedTenant.id, cur);
     }
-    saveAdministrators(updated);
   };
 
   const handleSaveRendiciones = (updated: SalespersonRendicion[]) => {
@@ -2252,7 +2252,6 @@ export default function App() {
         normalizedConfig
       );
     }
-    saveConfig(normalizedConfig);
     showToast(customToast || 'Configuración y perfil operativo actualizados correctamente');
   };
 
