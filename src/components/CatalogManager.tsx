@@ -7302,6 +7302,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     value={draftMerchantPayment.merchantPaymentAlias}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7320,6 +7321,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     value={draftMerchantPayment.merchantPaymentCvu}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7338,6 +7340,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     value={draftMerchantPayment.merchantPaymentHolder}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7356,6 +7359,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="text"
                     value={draftMerchantPayment.merchantPaymentBank}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7374,6 +7378,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   <input
                     type="url"
                     value={draftMerchantPayment.merchantMpCheckoutLink}
+                    autoComplete="off"
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
                         ...prev,
@@ -7391,6 +7396,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   </label>
                   <input
                     type="password"
+                    autoComplete="new-password"
                     value={draftMerchantPayment.merchantMpAccessToken}
                     onChange={(e) =>
                       setDraftMerchantPayment((prev) => ({
