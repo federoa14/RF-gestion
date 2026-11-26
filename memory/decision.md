@@ -97,3 +97,8 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Motivo:** el Presidente quiere verla e interactuar desde Claude, como su oficina de la distribuidora; localhost y la pestaña de la app no se abren desde el chat.
 - **Dos copias:** la pestaña Oficina de la app (Supabase) queda como copia sin sincronizar. Pendiente: decidir si se retira o se sincroniza.
 - **Código:** `tareas/artefacto/oficina-rf.html`.
+
+## 2026-11-26 — Instagram de RF Gestiones: identidad y plan de lanzamiento
+- **Hecho:** el Presidente creó el mail y el Instagram con su propio teléfono y contraseñas (nunca se pasan ni se guardan acá). Diseño entregó foto de perfil con el logo, 4 portadas de destacados y 3 primeras piezas (fuente: `tareas/instagram/piezas.html`); Marketing dejó el plan de 3 semanas en borrador.
+- **Regla confirmada:** las piezas no afirman nada que no se pueda respaldar (sin estadísticas inventadas); la prueba gratis de 30 días y los planes se confirman con Legal/Ventas antes de publicarlos.
+- **Pendiente:** conectar la cuenta para que Marketing publique. Conectores ya instalados en la cuenta del usuario y sin conectar: Metricool (plan gratuito: 1 marca, 20 publicaciones por mes, según su ayuda) y Windsor.ai (orientado a análisis; publicar no confirmado). La conexión la hace el Presidente en Configuración › Conectores.
