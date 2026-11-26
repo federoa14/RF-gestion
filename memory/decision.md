@@ -121,3 +121,5 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Planes:** Plan 1 Básico (gestión sin web), Plan 2 Página web básica, Plan 3 Full. Prueba gratis de 30 días como Plan 2.
 - **Plataforma:** multi comercio (dueño, administrador, vendedor), panel superadmin, copias de seguridad automáticas, términos y condiciones, app instalable con logo propio.
 - **Consecuencia:** todo material de marketing (bio, historias, carrusel) usa el nuevo encuadre. Las 3 historias del 26-11 decían «para distribuidoras»: vencen solas a las 24 h. Carrusel v2 en cola para el 27-11 mediodía.
+
+- 2026-11-26 — Los departamentos pueden operar la computadora del Presidente a través de la sesión «Manejo de Instagram abierto» (carpeta cerebro, equipo gordo, Claude en Chrome). Federico Roa lo autorizó para todas las áreas que lo necesiten. Esa sesión ya cargó foto de perfil, bio con link y 6 publicaciones en @rfgestion (verificado vía API: 6 posts, foto puesta). Pendiente: el email público de contacto lo decide Federico.
