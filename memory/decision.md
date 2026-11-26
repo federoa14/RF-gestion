@@ -102,3 +102,10 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Hecho:** el Presidente creó el mail y el Instagram con su propio teléfono y contraseñas (nunca se pasan ni se guardan acá). Diseño entregó foto de perfil con el logo, 4 portadas de destacados y 3 primeras piezas (fuente: `tareas/instagram/piezas.html`); Marketing dejó el plan de 3 semanas en borrador.
 - **Regla confirmada:** las piezas no afirman nada que no se pueda respaldar (sin estadísticas inventadas); la prueba gratis de 30 días y los planes se confirman con Legal/Ventas antes de publicarlos.
 - **Pendiente:** conectar la cuenta para que Marketing publique. Conectores ya instalados en la cuenta del usuario y sin conectar: Metricool (plan gratuito: 1 marca, 20 publicaciones por mes, según su ayuda) y Windsor.ai (orientado a análisis; publicar no confirmado). La conexión la hace el Presidente en Configuración › Conectores.
+
+## 2026-11-26 — Instagram operativo: qué se puede automatizar y qué no
+- **Hecho:** @rfgestion (Business) conectado por Composio; 3 historias publicadas; carpeta «RF Gestiones» en Canva (Diarios y Corporativos); carrusel de virtudes en cola para el 27-11 a mediodía.
+- **Límite de la API:** foto de perfil, biografía, sitio web y destacados NO se pueden cambiar por herramientas; los aplica Federico en la app (textos listos). Sitio web: https://rf-gestion.vercel.app.
+- **Publicación en horarios fuertes:** las tareas programadas no pueden usar conectores en esta organización, así que las 3 rutinas «RF Marketing» quedaron desactivadas. Alternativa: Metricool (publica por su cuenta a la hora programada) a las 12:20 y 20:20 (Argentina), una vez que Federico vincule @rfgestion. Los horarios son una hipótesis hasta tener datos (se necesitan 100+ seguidores).
+- **Reglas:** nada de anuncios pagos ni «impulsar» sin autorización expresa; máximo 2 posteos de feed y 3 historias por día; todo veraz. Detalle en `tareas/instagram/AUTOMATIZACION.md`.
+- **Aviso:** el repositorio es público; no guardar acá nada sensible.
