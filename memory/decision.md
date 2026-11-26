@@ -96,3 +96,9 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-26 — Envío a todo el país (Plan 3)
 - **Decisión:** los comercios de Plan 3 pueden activar "Ofrecer envío a todo el país" en Configuración (con nota opcional). Si el comprador lo elige, la tienda pide nombre y apellido, DNI, teléfono, email (opcional), calle, altura, piso/depto, localidad, provincia, código postal, entre calles y observaciones, y valida lo obligatorio. El pedido guarda `deliveryScope: 'nacional'` y `shippingDetails`; en el panel se ven los datos completos con botón "Copiar datos".
 - **Costo del envío:** no se calcula en la tienda; se coordina por WhatsApp (nota para el comprador). Pendiente posible: tarifas por provincia o integración con el correo.
+
+## 2026-11-26 — Estudio de viabilidad (hallazgos)
+- **Estado real (base de producción):** 3 comercios (1 distribuidora, 2 en Plan 3: kiosco online e indumentaria), 0 pagos de suscripción registrados, pocos datos de uso. El producto todavía no está validado comercialmente.
+- **Precios por defecto:** Plan 1 $18.000, Plan 2 $28.000, Plan 3 $42.000 por mes (`DEFAULT_PLAN_PRICES`).
+- **Riesgo técnico:** `server.ts` (Express, ~40 endpoints) no corre en Vercel (solo `api/`); la tienda llama a `/api/catalog/verify-transfer-receipt`, que en producción no existe. `server_state.json` está versionado y guarda estado en archivo.
+- **Recomendación dada:** enfocarse en un nicho (cuenta corriente/fiado + cobranza por WhatsApp), frenar funciones nuevas, conseguir los primeros 10 comercios que paguen y automatizar el cobro de la suscripción.
