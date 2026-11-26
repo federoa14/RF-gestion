@@ -88,5 +88,23 @@
     "cadenciaDias": 30,
     "prioridad": "alta",
     "entregaA": null
+  },
+  {
+    "id": "datos-tablero-semanal",
+    "departamento": "datos",
+    "titulo": "Tablero semanal de indicadores",
+    "descripcion": "Reunir los números reales de la semana: clientes activos, altas y bajas, ingresos por plan, costos, consultas que llegaron de redes. Marcar lo que no se pueda medir como pendiente. Entregar el resumen a Gestión.",
+    "cadenciaDias": 7,
+    "prioridad": "media",
+    "entregaA": "gestion"
+  },
+  {
+    "id": "datos-rendimiento-redes",
+    "departamento": "datos",
+    "titulo": "Qué publicaciones trajeron consultas",
+    "descripcion": "Cruzar lo publicado en @rfgestion (alcance, guardados, mensajes) con las consultas recibidas y decir qué formato conviene repetir. Solo datos reales; si faltan, decirlo. Entregar a Marketing.",
+    "cadenciaDias": 14,
+    "prioridad": "media",
+    "entregaA": "marketing"
   }
 ]
