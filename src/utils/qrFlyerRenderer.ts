@@ -4,7 +4,7 @@ import {
   SANS,
   SERIF,
   type FlyerStyleKey,
-  drawCover,
+  drawContain,
   ensureFonts,
   fitText,
   loadImage,
@@ -141,18 +141,8 @@ export async function renderQrFlyer(o: QrFlyerOptions): Promise<string> {
   let y = h * (side ? 0.1 : 0.07);
   const logoSize = (side ? 110 : 150) * u;
   if (logo) {
-    ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.25)';
-    ctx.shadowBlur = 20 * u;
-    rr(ctx, cx - logoSize / 2, y, logoSize, logoSize, 26 * u);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fill();
-    ctx.restore();
-    ctx.save();
-    rr(ctx, cx - logoSize / 2, y, logoSize, logoSize, 26 * u);
-    ctx.clip();
-    drawCover(ctx, logo, cx - logoSize / 2, y, logoSize, logoSize);
-    ctx.restore();
+    // El logo se ve con su propia forma, sin cuadro detrás
+    drawContain(ctx, logo, cx - logoSize / 2, y, logoSize, logoSize);
     y += logoSize + 28 * u;
   }
 

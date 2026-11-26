@@ -2427,7 +2427,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       <section className="bg-[#0B1933] text-white">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-7 sm:py-9 flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div className="flex items-start gap-4 sm:gap-5 max-w-2xl">
-            <div className="shrink-0 bg-white/95 rounded-2xl p-1 shadow-md">
+            <div className={`shrink-0 ${catalog.logoUrl ? '' : 'bg-white/95 rounded-2xl p-1 shadow-md'}`}>
               <BrandMark
                 logoUrl={catalog.logoUrl}
                 icon={catalog.icon}

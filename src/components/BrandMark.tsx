@@ -35,6 +35,21 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
       : undefined);
 
   if (effectiveLogoUrl) {
+    // Logo del comercio: se muestra tal cual lo subió (círculo, octágono, etc.), sin cuadro,
+    // borde ni fondo detrás: el fondo es el de la página.
+    if (logoUrl) {
+      const box = size === 'sm' ? 'w-9 h-9' : size === 'lg' ? 'w-14 h-14' : 'w-10 h-10';
+      return (
+        <div className={`${box} shrink-0 flex items-center justify-center`}>
+          <img
+            src={logoUrl}
+            alt={name}
+            referrerPolicy="no-referrer"
+            className="max-w-full max-h-full w-auto h-auto object-contain"
+          />
+        </div>
+      );
+    }
     return (
       <div
         className={`${sizeClasses} bg-[#071021] border border-[#B6C2D2]/60 overflow-hidden shadow-xs shrink-0 flex items-center justify-center`}
@@ -43,7 +58,7 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
           src={effectiveLogoUrl}
           alt={name}
           referrerPolicy="no-referrer"
-          className={`w-full h-full object-cover ${!logoUrl ? 'scale-[1.06]' : ''}`}
+          className="w-full h-full object-cover scale-[1.06]"
         />
       </div>
     );
