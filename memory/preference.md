@@ -23,3 +23,5 @@ Formato: una viñeta por preferencia, con fecha si es nueva. Si una preferencia 
 - 2026-11-26 — Federico: NO crear ningún video nuevo hasta que él lo ordene expresamente (ni rutinas ni encargos propios). Los 2 videos ya hechos (hábitos y visión) se pueden publicar.
 
 - 2026-11-26 — Federico: todo video se le pide a la sesión «Videos para Instagram y TikTok» (session_01WDU4MTA4KXXnMQtpKqM9EA), siempre Diseño y Marketing juntos y directo a esa sesión. Al estar listo, se publica en el feed (Reel) Y como historia. Sigue valiendo: ningún video sin orden expresa.
+
+- 2026-11-26 — Ciclo diario de videos (Federico): hoy se le presenta la propuesta de 2 videos para mañana (solo texto, nada se crea sin su OK). Autoriza 2 → salen mañana en los 2 horarios pico; autoriza 1 → sale en un solo horario, el que Marketing crea mejor; 0 → ninguno. Siempre se piden a la sesión «Videos para Instagram y TikTok» y se publican en feed e historia. Propuesta diaria programada ~15:17 ART. Mañana 27-11 ya están aprobados los 2 reels hechos (hábitos y visión); «Tu comercio en un solo lugar» (ya ordenado) queda para el 28-11.
