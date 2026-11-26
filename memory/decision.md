@@ -82,3 +82,8 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Hallazgos corregidos:** pestañas del superadmin superpuestas en pantallas angostas (ahora se deslizan); en Configuración del catálogo los campos de texto empujaban fuera de la pantalla los botones "+ Agregar filtro / subfiltro / banner" (regla `input.flex-1 { min-width: 0 }` en `index.css`); formulario de subfiltros a 320 px.
 - **Prueba:** `tests/e2e/mobile.test.mjs` revisa a 360 y 320 px que no haya desborde horizontal ni elementos cortados (tienda, bienvenida, carrito, login, panel, mostrador, catálogo, diseño, términos, SuperGestión).
 - **Nota:** la franja de estado del panel ("En la calle…") se desliza de costado a propósito en el celular.
+
+## 2026-11-26 — App instalable, fotos en Storage y avisos de pedido
+- **App instalable (PWA):** la tienda usa un manifiesto propio (`api/manifest.ts`, `api/icon.ts`) con el nombre, color y logo del comercio; el panel arma el suyo en el navegador con el logo de la empresa. Botón "Instalar app" en la tienda y en el menú Mi cuenta; en iPhone muestra cómo agregar a inicio. Service worker mínimo (`public/sw.js`) sin caché.
+- **Fotos en Storage:** bucket público `catalog-images` (script en `supabase/catalog_images_bucket.sql`, ya aplicado en producción); al publicar, las fotos se achican y se suben a la carpeta del comercio, y la tienda guarda solo el link. Si falla la subida, queda la foto achicada incrustada.
+- **Pedidos:** al pasar un pedido a listo / en camino / entregado se ofrece avisar al cliente por WhatsApp (una vez por etapa). Carritos abandonados muestra pendientes, recordados, recuperados y tasa de recupero.

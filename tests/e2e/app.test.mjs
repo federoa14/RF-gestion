@@ -245,6 +245,26 @@ describe('Bienvenida de la tienda', () => {
   });
 });
 
+describe('App instalable', () => {
+  test('la tienda usa su propio manifiesto y el panel el nombre de la empresa', async () => {
+    let { page, context } = await openPage(app.browser, fixtures.makeStoreSeed(), { path: '/?catalog=tienda' });
+    await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
+    assert.match(await page.locator('link[rel=manifest]').getAttribute('href'), /\/api\/manifest\?catalog=tienda/);
+    assert.match(await page.locator('link[rel=apple-touch-icon]').getAttribute('href'), /\/api\/icon\?catalog=tienda/);
+    await context.close();
+    ({ page, context } = await openPage(app.browser, fixtures.makeSeed()));
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await page.waitForTimeout(500);
+    const href = await page.locator('link[rel=manifest]').getAttribute('href');
+    assert.match(href, /^blob:/);
+    const manifest = await page.evaluate(async (u) => (await fetch(u)).json(), href);
+    assert.equal(manifest.name, 'Distribuidora Uno');
+    assert.equal(manifest.display, 'standalone');
+    await context.close();
+  });
+});
+
 describe('SuperGestión', () => {
   test('regalar 1 año: botón visible, pide confirmación y deja 12 meses cubiertos', async () => {
     const { page, fake, context, pageErrors } = await openPage(app.browser, fixtures.makeSuperSeed());

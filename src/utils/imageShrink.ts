@@ -1,4 +1,5 @@
 import type { PublishedPublicCatalog } from '../types';
+import { mapLimit, uploadDataUrlToCatalogStorage } from './catalogImageStorage';
 
 /**
  * La tienda pública se publica como un solo documento. Las fotos subidas por el comercio
@@ -48,28 +49,41 @@ export async function shrinkDataUrl(
   }
 }
 
+/** Achica la foto y, si se puede, la sube al almacenamiento y devuelve su link (si no, la foto achicada). */
+async function prepareImage(
+  tenantId: string,
+  src: string | undefined,
+  maxSide: number,
+  quality = 0.72
+): Promise<string | undefined> {
+  if (!src || !src.startsWith('data:image')) return src;
+  const small = await shrinkDataUrl(src, maxSide, quality);
+  if (!small) return small;
+  const url = await uploadDataUrlToCatalogStorage(tenantId, small);
+  return url || small;
+}
+
 export async function slimCatalogSnapshotImages(
   snapshot: PublishedPublicCatalog
 ): Promise<PublishedPublicCatalog> {
-  const products = await Promise.all(
-    (snapshot.products || []).map(async (p) => ({
-      ...p,
-      imageUrl: await shrinkDataUrl(p.imageUrl, 480, 0.65),
-      additionalImageUrls: p.additionalImageUrls
-        ? (await Promise.all(p.additionalImageUrls.slice(0, 3).map((u) => shrinkDataUrl(u, 400, 0.6)))).filter(
-            (u): u is string => Boolean(u)
-          )
-        : undefined,
-    }))
-  );
+  const tid = snapshot.tenantId;
+  const products = await mapLimit(snapshot.products || [], 4, async (p) => ({
+    ...p,
+    imageUrl: await prepareImage(tid, p.imageUrl, 640, 0.72),
+    additionalImageUrls: p.additionalImageUrls
+      ? (await Promise.all(p.additionalImageUrls.slice(0, 3).map((u) => prepareImage(tid, u, 560, 0.7)))).filter(
+          (u): u is string => Boolean(u)
+        )
+      : undefined,
+  }));
   const banners = snapshot.promoBanners
     ? await Promise.all(
-        snapshot.promoBanners.map(async (b) => ({ ...b, imageUrl: await shrinkDataUrl(b.imageUrl, 900) }))
+        snapshot.promoBanners.map(async (b) => ({ ...b, imageUrl: await prepareImage(tid, b.imageUrl, 900, 0.72) }))
       )
     : snapshot.promoBanners;
   return {
     ...snapshot,
-    logoUrl: await shrinkDataUrl(snapshot.logoUrl, 256),
+    logoUrl: await prepareImage(tid, snapshot.logoUrl, 256),
     products,
     promoBanners: banners,
   };

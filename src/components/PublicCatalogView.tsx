@@ -1,5 +1,6 @@
 import { getStoreThemeRootProps, resolveStoreTheme } from '../utils/storeTheme';
 import { StoreVisitorGate, type StoreVisitorData } from './StoreVisitorGate';
+import { applyStorePwa, useInstallApp } from '../utils/pwa';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search,
@@ -262,6 +263,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  // App instalable: nombre, logo y color propios de la tienda
+  const installApp = useInstallApp();
+  useEffect(() => {
+    if (!catalog?.tenantId) return;
+    applyStorePwa(
+      catalogHandle,
+      catalog.canAccessFullFeatures !== false && catalog.planTier !== 'web' && catalog.storeTheme
+        ? resolveStoreTheme(catalog.storeTheme).primary
+        : '#0B1933'
+    );
+  }, [catalog?.tenantId, catalog?.storeTheme, catalogHandle]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Bienvenida: nombre y teléfono (y dirección) antes de ver la tienda; se recuerdan en este dispositivo
   const [visitorReady, setVisitorReady] = useState(false);
   useEffect(() => {
@@ -2330,6 +2343,23 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
           <div className="flex items-center gap-2 shrink-0">
 
+            {installApp.visible && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const r = await installApp.install();
+                  if (r === 'ios-help') {
+                    window.alert('Para instalar la tienda en tu iPhone: tocá el botón Compartir y elegí "Agregar a inicio".');
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-800 hover:bg-slate-50 transition-colors cursor-pointer whitespace-nowrap"
+                title="Instalar la tienda como app en tu celular"
+              >
+                <span aria-hidden="true">📲</span>
+                <span className="hidden sm:inline">Instalar app</span>
+                <span className="sm:hidden">Instalar</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setIsCartOpen(true)}

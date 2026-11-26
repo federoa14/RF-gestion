@@ -80,8 +80,9 @@ import {
   saveRendiciones,
   resetOperationalData,
 } from './utils/storage';
-import { getPanelThemeRootProps } from './utils/storeTheme';
+import { getPanelThemeRootProps, resolveStoreTheme } from './utils/storeTheme';
 import { slimCatalogSnapshotImages } from './utils/imageShrink';
+import { applyPanelPwa } from './utils/pwa';
 import { TermsAcceptanceGate } from './components/TermsAcceptanceGate';
 import { CounterSaleModal } from './components/CounterSaleModal';
 import type { CatalogStoreTheme } from './types';
@@ -511,6 +512,18 @@ export default function App() {
       ? `(${ordersToPrepareCount}) ${base}`
       : base;
   }, [ordersToPrepareCount, currentUser]);
+
+  // App instalable del panel: nombre y logo de la empresa
+  useEffect(() => {
+    if (!currentUser || currentUser.role === 'superadmin' || !selectedTenant) return;
+    const canDesign = getTenantEffectiveFeatureAccess(selectedTenant).canAccessFullFeatures;
+    const theme = canDesign && config.panelTheme ? resolveStoreTheme(config.panelTheme).primary : '#0B1933';
+    return applyPanelPwa({
+      name: config.distributorName || selectedTenant.name,
+      logoUrl: config.distributorLogoUrl || selectedTenant.logoUrl,
+      themeColor: theme,
+    });
+  }, [currentUser?.role, selectedTenant?.id, config.distributorName, config.distributorLogoUrl, config.panelTheme]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Si cambia a un rubro distinto de Distribuidora/Mayorista mientras estaba en Rendición, volver a Boletas
   useEffect(() => {
