@@ -883,6 +883,8 @@ export interface OnlineCatalogSettings {
   whatsappPhone?: string;
   allowPickup?: boolean;
   allowDelivery?: boolean;
+  allowNationalShipping?: boolean; // Envío a todo el país (solo Plan 3)
+  nationalShippingNote?: string;
   deliveryNote?: string;
   pickupAddress?: string;
   pickupHours?: string;
@@ -938,6 +940,22 @@ export interface CatalogOrderStageNotification {
   summary: string;
 }
 
+// Datos completos para enviar un pedido a cualquier punto del país (Plan 3)
+export interface CatalogShippingDetails {
+  fullName: string;
+  dni: string;
+  phone: string;
+  email?: string;
+  street: string;
+  streetNumber: string;
+  floorApt?: string;
+  city: string;
+  province: string;
+  postalCode: string;
+  betweenStreets?: string;
+  notes?: string;
+}
+
 export interface CatalogPickupOrder {
   id: string;
   orderNumber: string;
@@ -948,6 +966,8 @@ export interface CatalogPickupOrder {
   customerPhone: string;
   customerDni?: string;
   deliveryMethod?: 'retiro' | 'envio';
+  deliveryScope?: 'local' | 'nacional'; // 'nacional' = envío a todo el país (Plan 3)
+  shippingDetails?: CatalogShippingDetails;
   deliveryAddress?: string;
   preferredPickupWindow?: string;
   preferredPaymentMethod?: CatalogPaymentMethod;
@@ -1023,6 +1043,8 @@ export interface PublishedPublicCatalog {
   whatsappPhone: string;
   allowPickup?: boolean;
   allowDelivery?: boolean;
+  allowNationalShipping?: boolean; // Envío a todo el país (solo Plan 3)
+  nationalShippingNote?: string;
   deliveryNote?: string;
   pickupAddress: string;
   pickupHours: string;

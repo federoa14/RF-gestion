@@ -1,5 +1,6 @@
 import { isNewOrderSoundEnabled, playNewOrderChime, setNewOrderSoundEnabled } from '../utils/newOrderAlerts';
 import { DesignPageEditor } from './DesignPageEditor';
+import { ShippingDetailsBlock } from './ShippingDetailsBlock';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import type { CatalogStoreTheme } from '../types';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
@@ -437,6 +438,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     whatsappPhone: settings.whatsappPhone || config.senderPhone || config.distributorPhone || '',
     allowPickup: settings.allowPickup !== false,
     allowDelivery: settings.allowDelivery !== false,
+    allowNationalShipping: Boolean(settings.allowNationalShipping),
+    nationalShippingNote: settings.nationalShippingNote,
     deliveryNote:
       settings.deliveryNote ||
       'Coordinamos costo y horario de envío por WhatsApp antes de despachar.',
@@ -495,6 +498,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       whatsappPhone: resolvedPhone,
       allowPickup: settings.allowPickup !== false,
       allowDelivery: settings.allowDelivery !== false,
+      allowNationalShipping: Boolean(settings.allowNationalShipping),
+      nationalShippingNote: settings.nationalShippingNote,
       deliveryNote:
         settings.deliveryNote ||
         'Coordinamos costo y horario de envío por WhatsApp antes de despachar.',
@@ -1728,6 +1733,9 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       customSubfilters: cleanCustomSubfilters,
       allowPickup: draftSettings.allowPickup !== false,
       allowDelivery: draftSettings.allowDelivery !== false,
+      allowNationalShipping:
+        planFeatureAccess && !planFeatureAccess.canAccessFullFeatures ? false : Boolean(draftSettings.allowNationalShipping),
+      nationalShippingNote: draftSettings.nationalShippingNote?.trim() || undefined,
       storeName: draftSettings.storeName?.trim() || config.distributorName || 'Mi Catálogo',
       slug: (draftSettings.slug || '')
         .trim()
@@ -4539,13 +4547,18 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           <dt className="text-slate-500">Entrega</dt>
                           <dd className="font-semibold inline-flex items-center gap-1">
                             {isDelivery ? <Truck className="w-3.5 h-3.5 text-indigo-600" /> : <Store className="w-3.5 h-3.5 text-slate-500" />}
-                            {isDelivery ? 'Envío a domicilio' : 'Retiro en tienda'}
+                            {isDelivery ? (order.deliveryScope === 'nacional' ? 'Envío a todo el país' : 'Envío a domicilio') : 'Retiro en tienda'}
                           </dd>
                           {isDelivery && order.deliveryAddress && (
                             <>
                               <dt className="text-slate-500">Dirección</dt>
                               <dd className="break-words">{order.deliveryAddress}</dd>
                             </>
+                          )}
+                          {isDelivery && order.deliveryScope === 'nacional' && (
+                            <dd className="col-span-2">
+                              <ShippingDetailsBlock order={order} />
+                            </dd>
                           )}
                           {order.preferredPickupWindow && (
                             <>
@@ -7112,6 +7125,49 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   />
                   <span>Permitir Envío a domicilio</span>
                 </label>
+              </div>
+
+              {/* Envío a todo el país (Plan 3) */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                <label
+                  className={`inline-flex items-center gap-2 text-xs font-semibold text-slate-700 ${
+                    planFeatureAccess && !planFeatureAccess.canAccessFullFeatures ? 'opacity-60' : 'cursor-pointer'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    disabled={Boolean(planFeatureAccess && !planFeatureAccess.canAccessFullFeatures)}
+                    checked={Boolean(draftSettings.allowNationalShipping)}
+                    onChange={(e) =>
+                      setDraftSettings((prev) => ({ ...prev, allowNationalShipping: e.target.checked }))
+                    }
+                    className="rounded border-slate-300"
+                  />
+                  <span>Ofrecer envío a todo el país (por correo o transporte)</span>
+                  <span className="px-1.5 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-800 text-[10px] font-bold">
+                    Plan 3
+                  </span>
+                </label>
+                {planFeatureAccess && !planFeatureAccess.canAccessFullFeatures ? (
+                  <p className="text-[11px] text-amber-800">El envío a todo el país es exclusivo de Plan 3 · Full.</p>
+                ) : (
+                  draftSettings.allowNationalShipping && (
+                    <div className="space-y-1">
+                      <p className="text-[11px] text-slate-500">
+                        Si el comprador elige este envío, la tienda le pide nombre y apellido, DNI, teléfono, domicilio,
+                        localidad, provincia y código postal. Vos ves los datos completos en el pedido y los podés copiar.
+                      </p>
+                      <input
+                        type="text"
+                        value={draftSettings.nationalShippingNote || ''}
+                        onChange={(e) => setDraftSettings((prev) => ({ ...prev, nationalShippingNote: e.target.value }))}
+                        maxLength={160}
+                        placeholder="Nota para el comprador (ej. Despachamos por Correo Argentino; el costo se coordina por WhatsApp)"
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs text-slate-900"
+                      />
+                    </div>
+                  )
+                )}
               </div>
 
               <div className="space-y-1">

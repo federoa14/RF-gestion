@@ -245,6 +245,56 @@ describe('Bienvenida de la tienda', () => {
   });
 });
 
+describe('Envío a todo el país', () => {
+  async function enterStore(page) {
+    const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
+    await gate.waitFor({ timeout: 20_000 });
+    await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
+    await gate.locator('input[type=tel]').fill('11 5555 1234');
+    await gate.locator('button[type=submit]').click();
+    await gate.waitFor({ state: 'detached' });
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    await page.locator('button', { hasText: 'Mi Carrito' }).first().click();
+    await page.locator('button', { hasText: 'Envío a domicilio' }).first().click();
+  }
+
+  test('Plan 3: pide todos los datos y guarda el pedido con el destinatario completo', async () => {
+    const seed = fixtures.makeStoreSeed({ canAccessFullFeatures: true, allowDelivery: true, allowNationalShipping: true, nationalShippingNote: 'Despachamos por Correo Argentino', paymentMethods: { efectivo: true } });
+    const { page, fake, context, pageErrors } = await openPage(app.browser, seed, { path: '/?catalog=tienda' });
+    await enterStore(page);
+    await page.locator('[role=radiogroup][aria-label="Alcance del envío"] button', { hasText: 'A todo el país' }).click();
+    const box = page.locator('fieldset[aria-label="Datos para el envío a todo el país"]');
+    await box.waitFor({ timeout: 5_000 });
+    assert.match(await box.innerText(), /Correo Argentino/);
+    // sin completar no deja confirmar
+    await page.locator('button', { hasText: 'Confirmar pedido' }).click();
+    await page.waitForSelector('text=DNI', { timeout: 5_000 });
+    await box.locator('input[placeholder="Ej. Lucía Pérez"]').fill('Lucía Pérez');
+    await box.locator('input[placeholder="Solo números"]').fill('30123456');
+    await box.locator('label', { hasText: 'Calle *' }).locator('input').fill('Av. Siempre Viva');
+    await box.locator('label', { hasText: 'Altura *' }).locator('input').fill('742');
+    await box.locator('label', { hasText: 'Localidad *' }).locator('input').fill('Rosario');
+    await box.locator('label', { hasText: 'Código postal *' }).locator('input').fill('2000');
+    await box.locator('select').selectOption('Santa Fe');
+    await page.locator('button', { hasText: 'Confirmar pedido' }).click();
+    await page.waitForTimeout(2500);
+    const sent = JSON.stringify(fake.log.filter((l) => l.kind === 'rpc'));
+    assert.match(sent, /"deliveryScope":"nacional"/);
+    assert.match(sent, /"postalCode":"2000"/);
+    assert.match(sent, /"province":"Santa Fe"/);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  });
+
+  test('sin Plan 3 no se ofrece el envío a todo el país', async () => {
+    const seed = fixtures.makeStoreSeed({ canAccessFullFeatures: false, planTier: 'web', allowDelivery: true, allowNationalShipping: true });
+    const { page, context } = await openPage(app.browser, seed, { path: '/?catalog=tienda' });
+    await enterStore(page);
+    assert.equal(await page.locator('text=A todo el país').count(), 0);
+    await context.close();
+  });
+});
+
 describe('App instalable', () => {
   test('la tienda usa su propio manifiesto y el panel el nombre de la empresa', async () => {
     let { page, context } = await openPage(app.browser, fixtures.makeStoreSeed(), { path: '/?catalog=tienda' });

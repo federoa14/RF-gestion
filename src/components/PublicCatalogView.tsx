@@ -1,6 +1,13 @@
 import { getStoreThemeRootProps, resolveStoreTheme } from '../utils/storeTheme';
 import { StoreVisitorGate, type StoreVisitorData } from './StoreVisitorGate';
 import { applyStorePwa, useInstallApp } from '../utils/pwa';
+import {
+  AR_PROVINCES,
+  EMPTY_SHIPPING,
+  formatShippingAddress,
+  formatShippingBlock,
+  validateShippingDetails,
+} from '../utils/nationalShipping';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search,
@@ -47,6 +54,7 @@ import {
 } from 'lucide-react';
 import {
   CatalogAbandonedCart,
+  CatalogShippingDetails,
   CatalogCoupon,
   CatalogGiftCard,
   CatalogLoyaltyAccount,
@@ -261,6 +269,20 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   // Checkout pickup / delivery & payment fields
   const [deliveryMethod, setDeliveryMethod] = useState<'retiro' | 'envio'>('retiro');
   const [deliveryAddress, setDeliveryAddress] = useState('');
+  // Envío a todo el país (Plan 3): datos completos del destinatario
+  const [deliveryScope, setDeliveryScope] = useState<'local' | 'nacional'>('local');
+  const [shipping, setShipping] = useState<CatalogShippingDetails>(EMPTY_SHIPPING);
+  const setShippingField = (field: keyof CatalogShippingDetails, value: string) =>
+    setShipping((prev) => ({ ...prev, [field]: value }));
+  useEffect(() => {
+    if (deliveryScope !== 'nacional') return;
+    setShipping((prev) => ({
+      ...prev,
+      fullName: prev.fullName || customerName,
+      phone: prev.phone || customerPhone,
+      dni: prev.dni || (loyaltyDniInput || '').replace(/\D/g, ''),
+    }));
+  }, [deliveryScope]); // eslint-disable-line react-hooks/exhaustive-deps
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   // App instalable: nombre, logo y color propios de la tienda
@@ -463,7 +485,12 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       .join('\n');
 
     const modalityBlock = isDel
-      ? `🚚 *Modalidad:* ENVÍO A DOMICILIO\n📍 *Dirección de entrega:* ${order.deliveryAddress || ''}\n🕒 *Horario preferido:* ${order.preferredPickupWindow || 'A coordinar'}\n`
+      ? order.deliveryScope === 'nacional' && order.shippingDetails
+        ? `📦 *Modalidad:* ENVÍO A TODO EL PAÍS\n${formatShippingBlock(order.shippingDetails)
+            .split('\n')
+            .map((l) => `• ${l}`)
+            .join('\n')}\n`
+        : `🚚 *Modalidad:* ENVÍO A DOMICILIO\n📍 *Dirección de entrega:* ${order.deliveryAddress || ''}\n🕒 *Horario preferido:* ${order.preferredPickupWindow || 'A coordinar'}\n`
       : `🏪 *Modalidad:* RETIRO EN TIENDA\n${
           cat.pickupAddress ? `📍 *Local:* ${cat.pickupAddress}\n` : ''
         }🕒 *Retiro estimado:* ${order.preferredPickupWindow || 'A coordinar'}\n`;
@@ -719,6 +746,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
 
   const isFullWebFeatures =
     catalog?.canAccessFullFeatures !== false && catalog?.planTier !== 'web';
+
+  const nationalShippingOn = isFullWebFeatures && Boolean(catalog?.allowNationalShipping) && catalog?.allowDelivery !== false;
 
   // Diseño de la tienda (Plan 3): colores, letra, tarjetas y banners
   const storeThemeEnabled = isFullWebFeatures && Boolean(catalog?.storeTheme);
@@ -1691,7 +1720,19 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       setFormError('Ingresá tu WhatsApp para enviarte el seguimiento paso a paso de tu pedido.');
       return;
     }
-    if (deliveryMethod === 'envio' && !deliveryAddress.trim()) {
+    const isNationalOrder = deliveryMethod === 'envio' && deliveryScope === 'nacional' && nationalShippingOn;
+    const shippingForOrder: CatalogShippingDetails = {
+      ...shipping,
+      fullName: shipping.fullName.trim() || customerName.trim(),
+      phone: shipping.phone.trim() || customerPhone.trim(),
+    };
+    if (isNationalOrder) {
+      const problem = validateShippingDetails(shippingForOrder);
+      if (problem) {
+        setFormError(problem);
+        return;
+      }
+    } else if (deliveryMethod === 'envio' && !deliveryAddress.trim()) {
       setFormError('Ingresá la dirección completa donde querés recibir el envío.');
       return;
     }
@@ -1983,7 +2024,14 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         customerPhone: customerPhone.trim(),
         customerDni: finalLoyaltyDni,
         deliveryMethod,
-        deliveryAddress: deliveryMethod === 'envio' ? deliveryAddress.trim() : undefined,
+        deliveryScope: deliveryMethod === 'envio' ? (isNationalOrder ? 'nacional' : 'local') : undefined,
+        shippingDetails: isNationalOrder ? shippingForOrder : undefined,
+        deliveryAddress:
+          deliveryMethod === 'envio'
+            ? isNationalOrder
+              ? formatShippingAddress(shippingForOrder)
+              : deliveryAddress.trim()
+            : undefined,
         preferredPickupWindow: pickupWindow.trim() || 'A coordinar',
         preferredPaymentMethod: resolvedPaymentMethod,
         mpSubOption: selectedPayGroup === 'mercadopago' ? mpSubOption : undefined,
@@ -3928,7 +3976,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                     <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
                       <div className="font-bold text-slate-800 flex items-center gap-1.5">
                         <Truck className="w-3.5 h-3.5 text-slate-600" />
-                        <span>Envío a domicilio</span>
+                        <span>{submittedOrder.order.deliveryScope === 'nacional' ? 'Envío a todo el país' : 'Envío a domicilio'}</span>
                       </div>
                       <div className="text-slate-700">{submittedOrder.order.deliveryAddress}</div>
                       <div className="text-slate-500">
@@ -4588,7 +4636,156 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
                       />
                     </div>
 
-                    {deliveryMethod === 'envio' && (
+                    {deliveryMethod === 'envio' && nationalShippingOn && (
+                      <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Alcance del envío">
+                        {(
+                          [
+                            ['local', 'En mi zona', 'Entrega cerca del local'],
+                            ['nacional', 'A todo el país', 'Por correo o transporte'],
+                          ] as const
+                        ).map(([key, title, sub]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            role="radio"
+                            aria-checked={deliveryScope === key}
+                            onClick={() => setDeliveryScope(key)}
+                            className={`p-2.5 rounded-xl border text-left text-xs cursor-pointer ${
+                              deliveryScope === key
+                                ? 'border-[#0B1933] bg-[#0B1933]/5 ring-1 ring-[#0B1933]'
+                                : 'border-slate-200 bg-white hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="font-bold text-slate-900">{title}</div>
+                            <div className="text-[11px] text-slate-500">{sub}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {deliveryMethod === 'envio' && nationalShippingOn && deliveryScope === 'nacional' && (
+                      <fieldset className="space-y-2 p-3 rounded-xl bg-slate-50 border border-slate-200" aria-label="Datos para el envío a todo el país">
+                        <legend className="px-1 text-xs font-bold text-slate-800">Datos para el envío a todo el país</legend>
+                        {catalog.nationalShippingNote && (
+                          <p className="text-[11px] text-slate-600">{catalog.nationalShippingNote}</p>
+                        )}
+                        {(
+                          [
+                            ['fullName', 'Nombre y apellido de quien recibe *', 'text', 'name', 'Ej. Lucía Pérez'],
+                            ['dni', 'DNI de quien recibe *', 'text', 'off', 'Solo números'],
+                            ['phone', 'Teléfono / WhatsApp de contacto *', 'tel', 'tel', 'Con código de área'],
+                            ['email', 'Email (opcional, para el seguimiento)', 'email', 'email', 'nombre@correo.com'],
+                          ] as const
+                        ).map(([field, label, type, ac, ph]) => (
+                          <label key={field} className="block space-y-1">
+                            <span className="text-[11px] font-semibold text-slate-700">{label}</span>
+                            <input
+                              type={type}
+                              inputMode={field === 'dni' ? 'numeric' : undefined}
+                              autoComplete={ac}
+                              value={shipping[field] || ''}
+                              onChange={(e) => setShippingField(field, e.target.value)}
+                              placeholder={ph}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                            />
+                          </label>
+                        ))}
+                        <div className="grid grid-cols-3 gap-2">
+                          <label className="col-span-2 block space-y-1">
+                            <span className="text-[11px] font-semibold text-slate-700">Calle *</span>
+                            <input
+                              type="text"
+                              autoComplete="address-line1"
+                              value={shipping.street}
+                              onChange={(e) => setShippingField('street', e.target.value)}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-semibold text-slate-700">Altura *</span>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={shipping.streetNumber}
+                              onChange={(e) => setShippingField('streetNumber', e.target.value)}
+                              placeholder="S/N"
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                            />
+                          </label>
+                        </div>
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-semibold text-slate-700">Piso / depto (opcional)</span>
+                          <input
+                            type="text"
+                            autoComplete="address-line2"
+                            value={shipping.floorApt || ''}
+                            onChange={(e) => setShippingField('floorApt', e.target.value)}
+                            placeholder="Ej. Piso 2 B"
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                          />
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-semibold text-slate-700">Localidad *</span>
+                            <input
+                              type="text"
+                              autoComplete="address-level2"
+                              value={shipping.city}
+                              onChange={(e) => setShippingField('city', e.target.value)}
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="text-[11px] font-semibold text-slate-700">Código postal *</span>
+                            <input
+                              type="text"
+                              autoComplete="postal-code"
+                              value={shipping.postalCode}
+                              onChange={(e) => setShippingField('postalCode', e.target.value)}
+                              placeholder="Ej. 2000"
+                              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                            />
+                          </label>
+                        </div>
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-semibold text-slate-700">Provincia *</span>
+                          <select
+                            autoComplete="address-level1"
+                            value={shipping.province}
+                            onChange={(e) => setShippingField('province', e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                          >
+                            <option value="">Elegí la provincia</option>
+                            {AR_PROVINCES.map((p) => (
+                              <option key={p} value={p}>
+                                {p}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-semibold text-slate-700">Entre calles / referencias (opcional)</span>
+                          <input
+                            type="text"
+                            value={shipping.betweenStreets || ''}
+                            onChange={(e) => setShippingField('betweenStreets', e.target.value)}
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                          />
+                        </label>
+                        <label className="block space-y-1">
+                          <span className="text-[11px] font-semibold text-slate-700">Observaciones (opcional)</span>
+                          <input
+                            type="text"
+                            value={shipping.notes || ''}
+                            onChange={(e) => setShippingField('notes', e.target.value)}
+                            placeholder="Ej. Dejar en portería / sucursal del correo"
+                            className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900"
+                          />
+                        </label>
+                      </fieldset>
+                    )}
+
+                    {deliveryMethod === 'envio' && !(nationalShippingOn && deliveryScope === 'nacional') && (
                       <div className="space-y-1">
                         <label className="text-xs font-semibold text-slate-700">
                           Dirección de entrega *

@@ -100,3 +100,23 @@ for (const w of [360, 320]) {
     await context.close();
   });
 }
+
+for (const w of [360, 320]) {
+  test('movil envio a todo el pais ' + w, async () => {
+    const seed = fixtures.makeStoreSeed({ canAccessFullFeatures: true, allowDelivery: true, allowNationalShipping: true, nationalShippingNote: 'Despachamos por Correo Argentino' });
+    const { page, context } = await openPage(app.browser, seed, { width: w, height: 740, path: '/?catalog=tienda' });
+    const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
+    await gate.waitFor({ timeout: 20000 });
+    await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
+    await gate.locator('input[type=tel]').fill('11 5555 1234');
+    await gate.locator('button[type=submit]').click();
+    await gate.waitFor({ state: 'detached' });
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    await page.locator('button', { hasText: 'Mi Carrito' }).first().click();
+    await page.locator('button', { hasText: 'Envío a domicilio' }).first().click();
+    await page.locator('[role=radiogroup][aria-label="Alcance del envío"] button', { hasText: 'A todo el país' }).click();
+    await page.locator('fieldset[aria-label="Datos para el envío a todo el país"]').scrollIntoViewIfNeeded();
+    await audit(page, w + '-envio-pais');
+    await context.close();
+  });
+}

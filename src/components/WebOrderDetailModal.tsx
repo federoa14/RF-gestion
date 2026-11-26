@@ -1,3 +1,4 @@
+import { ShippingDetailsBlock } from './ShippingDetailsBlock';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   X,
@@ -285,7 +286,7 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                 )}
                 <div>
                   <span className="font-semibold">
-                    {isDelivery ? 'Envío a domicilio' : 'Retiro en el comercio'}
+                    {isDelivery ? (order.deliveryScope === 'nacional' ? 'Envío a todo el país' : 'Envío a domicilio') : 'Retiro en el comercio'}
                   </span>
                   {isDelivery && order.deliveryAddress && (
                     <div className="text-slate-600 dark:text-[#94A3B8] flex items-start gap-1 mt-0.5">
@@ -293,6 +294,7 @@ export const WebOrderDetailModal: React.FC<WebOrderDetailModalProps> = ({
                       <span>{order.deliveryAddress}</span>
                     </div>
                   )}
+                  {isDelivery && order.deliveryScope === 'nacional' && <ShippingDetailsBlock order={order} />}
                   {!isDelivery && pickupAddressFallback && (
                     <div className="text-slate-500 dark:text-[#8D9CB0] mt-0.5">
                       {pickupAddressFallback}
