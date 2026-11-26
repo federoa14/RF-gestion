@@ -106,5 +106,32 @@
     "cadenciaDias": 14,
     "prioridad": "media",
     "entregaA": "marketing"
+  },
+  {
+    "id": "calidad-salud-diaria",
+    "departamento": "calidad",
+    "titulo": "Prueba diaria: ¿está todo funcionando?",
+    "descripcion": "Abrir la app (rf-gestion.vercel.app), el panel de ingreso y la tienda pública; registrar si responden, tiempos y errores. Correr las pruebas automáticas si hay cambios nuevos. Si algo está caído, avisar al Presidente hoy; si hay un fallo, entregar a Actualización con pasos para repetirlo.",
+    "cadenciaDias": 1,
+    "prioridad": "alta",
+    "entregaA": "actualizacion"
+  },
+  {
+    "id": "calidad-recorrido-comercio",
+    "departamento": "calidad",
+    "titulo": "Recorrido como comercio y como comprador",
+    "descripcion": "Con cuenta de prueba: probar en celular y compu el alta con prueba gratis, cargar un producto, venta de mostrador, un pedido en la tienda y la vista de cobranzas. Anotar lo que confunde o se rompe. Informar a Gestión.",
+    "cadenciaDias": 3,
+    "prioridad": "media",
+    "entregaA": "gestion"
+  },
+  {
+    "id": "calidad-promesas-vs-app",
+    "departamento": "calidad",
+    "titulo": "Lo prometido en redes y planes, ¿funciona?",
+    "descripcion": "Cotejar lo que dicen los posteos de @rfgestion y los planes con lo que la app realmente hace. Si hay una diferencia, avisar a Marketing para corregir el mensaje o a Actualización para corregir la app.",
+    "cadenciaDias": 7,
+    "prioridad": "media",
+    "entregaA": "marketing"
   }
 ]

@@ -11,8 +11,8 @@ const O = leer('departamentos.json') as Oficina;
 const RUT = leer('rutinas.json') as Rutina[];
 const orden = (d: object) => armarTarea(validarOrden(O, d), 'oficina');
 
-test('el reglamento real tiene 9 departamentos con nombres de discípulos y sin Judas Iscariote', () => {
-  assert.equal(O.departamentos.length, 9);
+test('el reglamento real tiene 10 departamentos con nombres de discípulos y sin Judas Iscariote', () => {
+  assert.equal(O.departamentos.length, 10);
   assert.ok(O.departamentos.every((d) => d.persona.nombre && d.mision));
   assert.ok(![...O.departamentos.map((d) => d.persona.nombre), ...(O.nombresReservados ?? [])].some((n) => /iscariote/i.test(n)));
 });
