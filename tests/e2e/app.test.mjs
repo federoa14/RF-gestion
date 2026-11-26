@@ -249,7 +249,7 @@ describe('App instalable', () => {
   test('la tienda usa su propio manifiesto y el panel el nombre de la empresa', async () => {
     let { page, context } = await openPage(app.browser, fixtures.makeStoreSeed(), { path: '/?catalog=tienda' });
     await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
-    assert.match(await page.locator('link[rel=manifest]').getAttribute('href'), /\/api\/manifest\?catalog=tienda/);
+    assert.match(await page.locator('link[rel=manifest]').getAttribute('href'), /\/api\/store-manifest\?catalog=tienda/);
     assert.match(await page.locator('link[rel=apple-touch-icon]').getAttribute('href'), /\/api\/icon\?catalog=tienda/);
     await context.close();
     ({ page, context } = await openPage(app.browser, fixtures.makeSeed()));

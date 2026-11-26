@@ -1,5 +1,5 @@
-import { buildStoreManifest, type StoreManifestData } from './_manifest';
-import { fetchPublicCatalog } from './_catalogFetch';
+import { buildStoreManifest, type StoreManifestData } from './_manifest.js';
+import { fetchPublicCatalog } from './_catalogFetch.js';
 
 /** Manifiesto de la app instalable de una tienda (?catalog=...), con el nombre, colores y logo del comercio. */
 export async function GET(request: Request): Promise<Response> {

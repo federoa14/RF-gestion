@@ -1,4 +1,4 @@
-import { buildStorePreviewHtml, type StorePreviewData } from './_storePreview';
+import { buildStorePreviewHtml, type StorePreviewData } from './_storePreview.js';
 
 declare const process: { env: Record<string, string | undefined> };
 
