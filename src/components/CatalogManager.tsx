@@ -1933,6 +1933,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     );
   };
 
+  // Al avanzar el pedido, se ofrece avisarle al cliente por WhatsApp (una sola vez por etapa)
+  const offerStageWhatsApp = (order: CatalogPickupOrder, status: CatalogPickupOrder['status']) => {
+    const stage: CatalogOrderProcessStage | null =
+      status === 'listo_para_retirar' ? 'listo_para_retirar' : status === 'en_camino' ? 'en_camino' : status === 'retirado' ? 'retirado' : null;
+    if (!stage || !order.customerPhone) return;
+    if ((order.stageNotifications || []).some((n) => n.stage === stage)) return;
+    const what =
+      stage === 'listo_para_retirar' ? 'que su pedido está listo' : stage === 'en_camino' ? 'que su pedido va en camino' : 'que su pedido fue entregado';
+    if (window.confirm(`¿Avisarle por WhatsApp a ${order.customerName || 'el cliente'} ${what}?`)) {
+      void handleSendOrderProcessWhatsApp(order, stage);
+    }
+  };
+
   const handleUpdateOrderStatus = (
     orderId: string,
     status: CatalogPickupOrder['status']
@@ -4765,6 +4778,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                               return;
                             }
                             handleUpdateOrderStatus(order.id, nextSt);
+                            offerStageWhatsApp(order, nextSt);
                           }}
                           className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer"
                         >
@@ -5583,6 +5597,31 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       {/* SUB-TAB: CARRITOS ABANDONADOS Y RECUPERO POR WHATSAPP (#1) */}
       {subTab === 'carritos_abandonados' && (
         <div className="space-y-4">
+          {(() => {
+            const pending = abandonedCarts.filter((c) => c.status === 'abandoned' || c.status === 'reminded');
+            const reminded = abandonedCarts.filter((c) => c.status === 'reminded' || (c.reminderCount || 0) > 0);
+            const recovered = abandonedCarts.filter((c) => c.status === 'recovered');
+            const money = (n: number) => `${currency} ${Math.round(n).toLocaleString('es-AR')}`;
+            const total = abandonedCarts.filter((c) => c.status !== 'discarded').length;
+            const rate = total > 0 ? Math.round((recovered.length / total) * 100) : 0;
+            const cards: Array<[string, string, string]> = [
+              ['Pendientes', String(pending.length), money(pending.reduce((a, c) => a + (c.totalAmount || 0), 0))],
+              ['Recordados por WhatsApp', String(reminded.length), 'avisos enviados'],
+              ['Recuperados', String(recovered.length), money(recovered.reduce((a, c) => a + (c.totalAmount || 0), 0))],
+              ['Tasa de recupero', `${rate}%`, `de ${total} carritos`],
+            ];
+            return (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5" aria-label="Resumen de carritos abandonados">
+                {cards.map(([label, value, sub]) => (
+                  <div key={label} className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="text-[11px] font-semibold text-slate-500">{label}</div>
+                    <div className="text-xl font-extrabold text-slate-900 tabular-nums">{value}</div>
+                    <div className="text-[11px] text-slate-500 font-mono">{sub}</div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           {planFeatureAccess && !planFeatureAccess.canAccessFullFeatures && (
             <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="text-xs text-amber-950 space-y-0.5">
