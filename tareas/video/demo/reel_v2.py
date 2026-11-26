@@ -595,21 +595,21 @@ def _logo():
 STEP = 0.27
 SCENES = [
     dict(head=[("¿Todavía anotás ", 0), ("lo que te deben?", 1)], sub="¿Todavía anotás lo que te deben en un cuaderno? Las hojas se pierden.",
-         pause={"deben": 0.2, "cuaderno": 0.3}, hold=1.1, lead=0.25),
+         pause={"deben": 0.2, "cuaderno": 0.3}, hold=1.1, lead=0.25, vpause={"cuaderno": 0.25}),
     dict(head=[("Cada hoja, ", 0), ("una boleta", 1)], sub="Con RF, cada anotación es una boleta con vencimiento.",
-         pause={"boleta": 0.4}, hold=1.0),
+         pause={"boleta": 0.4}, hold=1.0, vpause={"boleta": 0.2}),
     dict(head=[("Cuánto tenés ", 0), ("afuera", 1)], sub="Ves cuánto tenés en la calle y cuánto venció.",
-         pause={"calle": 0.5}, hold=1.1, lead=0.85),
+         pause={"calle": 0.5}, hold=1.1, lead=0.85, vpause={"calle": 0.45}),
     dict(head=[("Avisa por ", 0), ("WhatsApp", 1)], sub="RF avisa a tu cliente por WhatsApp y vos cobrás.",
-         pause={"avisa": 0.3, "whatsapp": 0.2}, hold=1.3, lead=0.6),
+         pause={"avisa": 0.3, "whatsapp": 0.2}, hold=1.7, lead=0.6, vpause={"whatsapp": 0.4}),
     dict(head=[("Escaneá y ", 0), ("cobrá", 1)], sub="Escaneás el código y el total se suma solo.",
-         pause={"suma": 0.9}, hold=1.0, lead=0.8),
+         pause={"suma": 0.9}, hold=1.6, lead=0.8, vpause={}),
     dict(head=[("Tu tienda, ", 0), ("un link", 1)], sub="Compartís un link y los pedidos llegan solos.",
-         pause={"link": 0.8, "pedidos": 0.4}, hold=1.0, lead=0.5),
+         pause={"link": 0.8, "pedidos": 0.4}, hold=1.0, lead=0.5, vpause={"link": 0.7}),
     dict(head=[("Todo en ", 0), ("un lugar", 1)], sub="Cobranzas, mostrador y tienda en un solo lugar.",
-         pause={"cobranzas": 0.15, "mostrador": 0.15, "tienda": 0.2}, hold=1.3, lead=0.8),
+         pause={"cobranzas": 0.15, "mostrador": 0.15, "tienda": 0.2}, hold=1.3, lead=0.8, vpause={"tienda": 0.15}),
     dict(head=[("Probalo ", 0), ("30 días gratis", 1)], sub="Probalo treinta días gratis. Link en la bio.",
-         pause={"treinta": 0.6, "gratis": 0.3}, hold=1.8, lead=0.6),
+         pause={"treinta": 0.6, "gratis": 0.3}, hold=1.8, lead=0.6, vpause={"gratis": 0.3}),
 ]
 KEYS = [["anotás", "deben", "cuaderno", "pierden"], ["boleta", "vencimiento"], ["calle", "venció"], ["avisa", "whatsapp", "cobrás"],
         ["código", "suma", "solo"], ["link", "pedidos"], ["cobranzas", "mostrador", "tienda", "solo"], ["treinta", "gratis"]]
@@ -619,12 +619,87 @@ def norm(w):
     return w.strip("¿?.,:¡!").lower()
 
 
+# ---------------- voz en off (Piper, voz es_AR) ----------------
+VOZ = {}
+PRON = {"RF": "Erre Efe", "WhatsApp": "guasap"}  # cómo se lee en voz alta; el subtítulo no cambia
+
+
+def pron(w):
+    core = w.strip("¿?.,:¡!")
+    return w.replace(core, PRON[core]) if core in PRON else w
+
+
+def synth(text):
+    import numpy as np
+    return np.concatenate([ch.audio_int16_array for ch in VOZ["voice"].synthesize(text, syn_config=VOZ["cfg"])])
+
+
+def speech_bounds(a, sr):
+    import numpy as np
+    win = int(sr * 0.01)
+    n = len(a) // win
+    e = np.abs(a[:n * win].reshape(n, win).astype(np.int32)).max(axis=1)
+    idx = np.where(e > 700)[0]
+    if len(idx) == 0:
+        return 0.0, len(a) / sr
+    return idx[0] * win / sr, (idx[-1] + 1) * win / sr
+
+
+def voice_scene(s):
+    """Sintetiza la escena por tramos (cortando en comas, puntos y pausas) y estima cuándo
+    empieza cada palabra: la duración hablada del comienzo de la frase hasta la palabra anterior."""
+    import numpy as np
+    sr = VOZ["sr"]
+    words = s["words"]
+    pauses = s.get("vpause", {})
+    chunks, cur = [], []
+    for i, w in enumerate(words):
+        cur.append(i)
+        gap = pauses.get(norm(w))
+        if gap is None and w[-1] in ".?!":
+            gap = 0.3
+        if gap is None and w[-1] in ",:":
+            gap = 0.12
+        if gap is not None:
+            chunks.append((cur, gap))
+            cur = []
+    if cur:
+        chunks.append((cur, 0.0))
+    parts, wt, t = [], [0.0] * len(words), 0.0
+    for idx, gap in chunks:
+        a = synth(" ".join(pron(words[i]) for i in idx))
+        st, en = speech_bounds(a, sr)
+        a = a[int(st * sr):int(en * sr)]
+        dur = len(a) / sr
+        for j, i in enumerate(idx):
+            if j == 0:
+                wt[i] = t
+            else:
+                pa = synth(" ".join(pron(words[k]) for k in idx[:j]))
+                ps, pe = speech_bounds(pa, sr)
+                wt[i] = t + min(pe - ps + 0.03, dur - 0.1)
+        parts.append(a)
+        t += dur
+        if idx[-1] != len(words) - 1:
+            sil = np.zeros(int(gap * sr), dtype=np.int16)
+            parts.append(sil)
+            t += gap
+    return np.concatenate(parts), wt, t
+
+
 def build():
     t0 = 0.0
     for s, keys in zip(SCENES, KEYS):
         words = s["sub"].split()
         t = s.get("lead", 0.35)
         s["wt"] = []
+        if VOZ:
+            s["words"] = words
+            audio, wt, dur = voice_scene(s)
+            s["audio"] = audio
+            s["wt"] = [t + x for x in wt]
+            t += dur
+            words = []
         for w in words:
             s["wt"].append(t)
             t += STEP
@@ -633,11 +708,12 @@ def build():
             if w[-1] in ".?":
                 t += 0.35
             t += s.get("pause", {}).get(norm(w), 0)
-        s["words"] = words
+        if not VOZ:
+            s["words"] = words
         s["dur"] = t + s.get("hold", 1.2)
         s["K"] = {}
         for k in keys:
-            s["K"][k] = next(s["wt"][i] for i, w in enumerate(words) if norm(w) == k)
+            s["K"][k] = next(s["wt"][i] for i, w in enumerate(s["words"]) if norm(w) == k)
         s["t0"] = t0
         t0 += s["dur"]
     return t0
@@ -663,7 +739,7 @@ def headline(c, parts, a, dy=0):
 
 
 def subtitles(c, s, lt):
-    size, lh, maxw = 50, 66, 940
+    size, lh, maxw = (40, 54, 900) if VOZ else (50, 66, 940)
     font(c, F_SB, size)
     keys = KEYS[SCENES.index(s)]
     lines, cur, cw = [], [], 0
@@ -676,7 +752,7 @@ def subtitles(c, s, lt):
         cur.append(i)
         cw += (space if len(cur) > 1 else 0) + ww
     lines.append((cur, cw))
-    y0 = 1450
+    y0 = 1480 if VOZ else 1450
     for li, (idx, lw_) in enumerate(lines):
         x = (W - lw_) / 2
         y = y0 + li * lh
@@ -793,8 +869,8 @@ def s3(c, lt, K_, d):
     intro = ease_io(lt / 0.8)
     top = lerp(PH_TOP, H + 50, intro)
     phone(c, 540, top, a=1 - intro)
-    axis(c, ease((lt - 0.3) / 0.5))
     if lt < 0.8:
+        axis(c, ease((lt - 0.3) / 0.5))
         rects = stack_rects()
         for i in range(3):
             col = ENTRIES[i][1]
@@ -814,6 +890,7 @@ def s3(c, lt, K_, d):
     c.translate(fx, fy)
     c.scale(z, z)
     c.translate(-fx, -fy)
+    axis(c, ease((lt - 0.3) / 0.5))
     red_top, red_h, focus = draw_bars3(c, lt, K_)
     if focus > 0:
         bx = BAR_X + BAR_W + 26
@@ -1173,8 +1250,16 @@ def render(t, total, surf):
 
 
 def main():
-    total = build()
     args = sys.argv[1:]
+    if "--voz" in args:
+        from piper import PiperVoice, SynthesisConfig
+        modelo = args[args.index("--voz") + 1]
+        VOZ["voice"] = PiperVoice.load(modelo)
+        # sin ruido en la duración: tiempos estables entre la frase y sus comienzos
+        VOZ["cfg"] = SynthesisConfig(length_scale=0.95, noise_scale=0.5, noise_w_scale=0.0)
+        VOZ["sr"] = VOZ["voice"].config.sample_rate
+        del args[args.index("--voz"):args.index("--voz") + 2]
+    total = build()
     salida = args[0] if args else "reel_v2.mp4"
     surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, W, H)
     if "--frames" in args:
@@ -1188,10 +1273,29 @@ def main():
             render(float(tt), total, surf)
             surf.write_to_png(os.path.join(carpeta, f"{float(tt):06.2f}.png"))
         for k, s in enumerate(SCENES):
-            print(k + 1, f"{s['t0']:.2f}-{s['t0'] + s['dur']:.2f}", {kk: round(s['t0'] + v, 2) for kk, v in s["K"].items()})
+            print(k + 1, f"{s['t0']:.2f}-{s['t0'] + s['dur']:.2f}", {kk: round(float(s['t0'] + v), 2) for kk, v in s["K"].items()})
         return
+    audio_in = ["-f", "lavfi", "-t", f"{total:.2f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+    afilt = []
+    if VOZ:
+        import numpy as np
+        import tempfile
+        import wave
+        sr = VOZ["sr"]
+        pista = np.zeros(int((total + 1) * sr), dtype=np.int16)
+        for s in SCENES:
+            ini = int((s["t0"] + s.get("lead", 0.35)) * sr)
+            pista[ini:ini + len(s["audio"])] = s["audio"]
+        wav = os.path.join(tempfile.mkdtemp(), "voz.wav")
+        with wave.open(wav, "wb") as w_:
+            w_.setnchannels(1)
+            w_.setsampwidth(2)
+            w_.setframerate(sr)
+            w_.writeframes(pista.tobytes())
+        audio_in = ["-i", wav]
+        afilt = ["-af", "loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100", "-ac", "2"]
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgra", "-s", f"{W}x{H}", "-r", str(FPS),
-           "-i", "-", "-f", "lavfi", "-t", f"{total:.2f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+           "-i", "-", *audio_in, *afilt,
            "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-profile:v", "high", "-preset", "slow", "-crf", "18",
            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", salida]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)

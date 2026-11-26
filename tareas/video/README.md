@@ -25,6 +25,8 @@ Al terminar, el video se entrega a Marketing (tarea «Recibido de Video: …») 
 
 ## Herramientas
 - `demo/reel_v2.py <salida.mp4>`: animación vectorial del guion `guiones/como-funciona-v2.md` (pycairo + letra Caveat de `marca/`, copiarla a `~/.fonts`). Con `--frames <carpeta> fin` saca la imagen final de cada escena y muestra en qué segundo cae cada palabra clave.
+- Voz en off: `python3 demo/reel_v2.py <salida.mp4> --voz <es_AR-daniela-high.onnx>`. Usa Piper (`pip install piper-tts`) con la voz argentina «daniela» (high), que se baja de Hugging Face (`rhasspy/piper-voices`, ruta `es/es_AR/daniela/high/`): el entorno «RF-gestion» tiene habilitados esos hosts. La voz lee el guion; el tiempo de cada palabra sale de sintetizar el comienzo de la frase, y las acciones se disparan con eso. `PRON` define cómo se lee en voz alta («RF» → «Erre Efe», «WhatsApp» → «guasap»). Con voz, los subtítulos salen más chicos.
+  - **Crédito obligatorio** (conjunto de datos CC BY-SA 4.0): «Voz: Piper es_AR daniela, entrenada con el corpus de español argentino de Google (OpenSLR 61), CC BY-SA 4.0». Ponerlo en la descripción del posteo.
 - `demo/capturar.mjs <carpeta>`: graba pantallas de la app real a tamaño celular con el Supabase simulado de `tests/e2e` y un comercio ficticio.
 - `demo/reel_funcionamiento.py <capturas> <salida.mp4>`: reel «Cómo funciona» (celular animado, titulares, cierre).
 - `armar_reel.py <pedido.json>`: reel simple a partir de imágenes de Diseño (ver el encabezado del archivo).
