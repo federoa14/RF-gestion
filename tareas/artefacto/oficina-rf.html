@@ -1,0 +1,474 @@
+<title>Oficina RF Gestiones</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100,400;100,600;125,800;125,900&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+<style>
+/* VOICE: prolijo y alegre, una oficina chica que trabaja en serio
+   IDEA: la oficina real de Urriste: pared con pizarra, piso con tres zonas de trabajo, pasillo y puerta al depósito
+   PICTURE: planta vista desde arriba con ocho puestos agrupados en islas; arriba, la pizarra con los post-its de la planilla
+   COLOUR and TYPE: celeste del logo dominante, negro de soporte, blanco de aire; amarillo post-it como acento. Archivo ancho como la marca, Caveat para el fibrón
+   LAYOUT: barra negra con logo, sala enmarcada (pared + pizarra, después el piso), tira de números, panel lateral con el parte de cada uno */
+:root{color-scheme:light dark;
+--cel:#4c6ef5;--celD:#3b5bdb;--blk:#0e1013;--warn:#ffcf3a;--bad:#ff5a4f;
+--bg:light-dark(#f4f8fa,#0b0d10);--ink:light-dark(#0e1013,#eef3f6);--soft:light-dark(#4f5b63,#9fb0ba);
+--card:light-dark(#fff,#161a1f);--line:light-dark(#dbe6ec,#28313a);--wall:light-dark(#dfe9ee,#1b2229);--accent:light-dark(#3b5bdb,#4c6ef5)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Archivo,system-ui,sans-serif;overflow-x:clip}
+h1,h2,h3{font-family:Archivo,Impact,sans-serif;font-stretch:125%;font-weight:900;line-height:1.05;margin:0;text-wrap:balance}
+h1{font-size:clamp(30px,4.4vw,46px)}h2{font-size:clamp(22px,2.8vw,30px)}h3{font-size:18px;font-weight:800}
+.wrap{max-width:1240px;margin:0 auto}
+.band{padding:clamp(20px,3.2vw,40px) max(4vw,14px)}
+header{background:var(--blk);color:#fff}
+.top{display:flex;align-items:center;gap:clamp(14px,3vw,28px);flex-wrap:wrap}
+.top img{width:clamp(76px,9vw,104px);height:auto;flex:none;filter:drop-shadow(0 6px 14px rgba(76,110,245,.35))}
+.top p{margin:6px 0 0;color:#b9c7cf;max-width:58ch}
+.sync{margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+@media(max-width:760px){.sync{margin-left:0;align-items:flex-start}}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid #2c343b;border-radius:30px;padding:6px 14px;font-size:14px;color:#dfe8ee}
+.pill i{flex:none;width:9px;height:9px;border-radius:50%;background:#7c8a93}
+.pill.live i{background:#39d98a;animation:pulse 1.8s infinite}.pill.warn i{background:var(--warn)}
+.btn{min-height:44px;border-radius:10px;border:2px solid var(--cel);background:transparent;color:inherit;font:600 15px Archivo,sans-serif;padding:8px 16px;cursor:pointer}
+.btn.fill{background:var(--cel);color:var(--blk)}
+:focus-visible{outline:3px solid var(--warn);outline-offset:2px}
+/* sala */
+.stage{background:radial-gradient(120% 90% at 50% 10%,#91a7ff 0%,#4c6ef5 45%,#3b5bdb 100%)}
+.scenehead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;color:#06202c;margin-bottom:6px}
+.scenehead p{margin:0;font-weight:600}
+.floorz{position:relative;filter:drop-shadow(0 26px 30px rgba(6,32,44,.35))}
+.floorz svg{display:block;width:100%;height:auto;overflow:visible}
+.boardwrap{margin-top:clamp(18px,3vw,30px)}
+.board{background:#fdfefe;color:#1d2a33;border:10px solid #b9c4cb;border-bottom-width:16px;border-radius:6px;box-shadow:0 10px 24px rgba(6,32,44,.25);padding:14px clamp(10px,2vw,20px) 18px}
+.bh{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;font-family:Caveat,cursive;font-size:30px;font-weight:700;line-height:1;color:#0a6f99}
+.bh small#bweek{display:block;margin-top:4px}.bh small{font-family:Archivo,sans-serif;font-size:13px;color:#5b6b75;font-weight:600}
+.cols{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(10px,1.6vw,18px);margin-top:12px}
+@media(max-width:1000px) and (min-width:721px){.cols{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){.cols{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:8px}.col{flex:0 0 84%;scroll-snap-align:start}}
+.col h3{font-family:Caveat,cursive;font-weight:700;font-size:26px;font-stretch:100%;border-bottom:2.5px solid currentColor;padding-bottom:2px;margin-bottom:10px;display:flex;justify-content:space-between}
+.col h3 span{font-size:20px;opacity:.7}
+.c-prop h3{color:#7a4fc4}.c-todo h3{color:#c4462d}.c-curso h3{color:#3b5bdb}.c-hecho h3{color:#2c8a55}
+.notes{display:flex;flex-direction:column;gap:9px}
+.note{display:block;width:100%;text-align:left;border:0;cursor:pointer;font:inherit;color:#1d2a33;padding:9px 12px 10px;border-radius:3px;box-shadow:0 3px 6px rgba(0,0,0,.14);transition:transform .15s}
+.note:nth-child(odd){transform:rotate(-.7deg)}.note:nth-child(even){transform:rotate(.6deg)}
+.note:hover{transform:rotate(0) translateY(-2px)}
+.c-prop .note{background:#efe6ff;border:1.5px dashed #7a4fc4}.c-todo .note{background:#fff2a8}.c-curso .note{background:#dbe4ff}.c-hecho .note{background:#e3f4e8}
+.note b{display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:#38505e}
+.note b em{font-style:normal;white-space:nowrap}.note b em.late{color:#c4302b}
+.note span{display:block;font-family:Caveat,cursive;font-size:21px;line-height:1.1;font-weight:600}
+.c-hecho .note span{text-decoration:line-through;text-decoration-thickness:1.5px;text-decoration-color:rgba(44,138,85,.6)}
+.note.new{animation:pop 1.2s ease-out 2}
+.empty{font-family:Caveat,cursive;font-size:20px;color:#7d8a92}
+@keyframes pop{30%{box-shadow:0 0 0 4px #4c6ef5}}
+.tag{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;gap:6px;background:var(--blk);color:#fff;border:2px solid #fff;border-radius:20px;padding:4px 12px 4px 8px;font:600 14px Archivo,sans-serif;cursor:pointer;white-space:nowrap;box-shadow:0 4px 10px rgba(0,0,0,.25);min-height:34px}
+.tag i{width:9px;height:9px;border-radius:50%;background:#39d98a;flex:none}
+.tag i.warn{background:var(--warn)}.tag i.bad{background:var(--bad)}
+.tag small{font-weight:400;color:#c5d0ff}
+.tag:hover,.tag.on{background:var(--cel);color:var(--blk)}.tag:hover small,.tag.on small{color:var(--blk)}
+.zone{position:absolute;transform:translateX(-50%);font:800 13px Archivo,sans-serif;font-stretch:125%;color:#3b5bdb;background:light-dark(rgba(255,255,255,.8),rgba(0,0,0,.4));padding:2px 10px;border-radius:12px;white-space:nowrap;pointer-events:none}
+@media(max-width:640px){.tag small,.zone{display:none}.tag{font-size:13px;padding:2px 9px 2px 6px;min-height:28px}}
+.seat{cursor:pointer;transition:filter .15s}.seat:hover,.seat.on{filter:drop-shadow(0 0 6px #fff) drop-shadow(0 0 3px #4c6ef5)}.head{animation:nod 3.2s ease-in-out infinite}@keyframes nod{50%{transform:translateY(-1.5px)}}
+.breathe{animation:breathe 3s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+@keyframes breathe{50%{transform:scale(1.04)}}@keyframes pulse{50%{opacity:.35}}
+.type{animation:pulse 1.2s infinite}
+@media(prefers-reduced-motion:reduce){.head,.pill.live i,.note.new{animation:none}.note,.seat{transition:none}}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:16px;font-size:14px;color:#06202c}
+.legend b{color:#000}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;background:var(--line);border:2px solid var(--line);border-radius:14px;overflow:hidden}
+@media(max-width:760px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:var(--card);padding:16px 18px}
+.kpi small{display:block;font-size:13px;color:var(--soft)}
+.kpi b{display:block;font-stretch:125%;font-weight:900;font-size:clamp(20px,2.5vw,28px);white-space:nowrap}
+.kpi b.neg{color:var(--bad)}
+.kpi em{font-style:normal;font-size:13px;color:var(--soft)}
+.sec-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.sec-h a{color:var(--accent);font-weight:600}
+footer{font-size:13px;color:var(--soft)}
+/* panel */
+.shade{position:fixed;inset:0;background:rgba(8,10,14,.5);opacity:0;pointer-events:none;transition:opacity .2s;z-index:4}
+.shade.on{opacity:1;pointer-events:auto}
+aside{position:fixed;top:0;right:0;height:100%;width:min(540px,100%);background:var(--bg);border-left:6px solid var(--cel);transform:translateX(105%);transition:transform .25s;display:flex;flex-direction:column;z-index:5}
+aside.on{transform:none}
+@media(prefers-reduced-motion:reduce){aside,.shade{transition:none}}
+.ph{display:flex;gap:12px;align-items:center;padding:14px 18px;background:var(--blk);color:#fff}
+.ph svg{flex:none;width:56px;height:56px;background:var(--cel);border-radius:50%}
+.ph p{margin:2px 0 0;color:#b9c7cf;font-size:14px}
+.ph .btn{margin-left:auto;flex:none;width:44px;padding:0;font-size:22px;border-color:#3a434b}
+.pb{flex:1;overflow-y:auto;padding:18px}
+.bubble{position:relative;background:var(--card);border:3px solid var(--blk);border-radius:16px;padding:16px 18px;box-shadow:0 6px 0 var(--cel)}
+.bubble .hi{margin:0 0 10px;font-weight:600}
+.rep{display:grid;gap:10px;margin:0}
+.rep div{display:grid;grid-template-columns:7em minmax(0,1fr);gap:10px}
+.rep dt{font-size:13px;font-weight:700;color:var(--accent);padding-top:2px}
+.rep dd{margin:0}
+@media(max-width:420px){.rep div{grid-template-columns:minmax(0,1fr);gap:0}}
+.plan{list-style:none;margin:0;padding:0;display:grid;gap:6px}.plan li{display:grid;grid-template-columns:6.5em minmax(0,1fr);gap:8px;padding:8px 10px;background:var(--card);border:1px solid var(--line);border-radius:8px;font-size:15px}.plan li span{font-size:12px;font-weight:700;color:var(--accent);padding-top:2px}.plan li.done{color:var(--soft);text-decoration:line-through}
+.alert.prop{background:color-mix(in srgb,#7a4fc4 16%,var(--card))}
+.alert{margin-top:12px;padding:10px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 30%,var(--card));font-size:15px}
+.stat{display:flex;justify-content:space-between;gap:10px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);font-size:14px;color:var(--soft)}
+.stat b{color:var(--ink);font-size:16px;white-space:nowrap}
+.src{font-size:13px;color:var(--soft);margin:8px 2px 0}
+.nav{display:flex;justify-content:space-between;gap:8px;margin-top:14px}
+.pb h3{margin:20px 0 8px}
+details{margin-top:16px;border-top:1px solid var(--line);padding-top:10px}
+summary{cursor:pointer;font-weight:600;min-height:32px}
+details ul{margin:6px 0 0;padding-left:20px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1.5px solid var(--line);background:var(--card);color:var(--ink);border-radius:18px;padding:8px 12px;font:14px Archivo,sans-serif;cursor:pointer;min-height:40px;text-align:left}
+.chip:hover{border-color:var(--cel)}
+.log{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.msg{padding:10px 12px;border-radius:12px;max-width:92%;white-space:pre-wrap;font-size:15px}
+.me{align-self:flex-end;background:var(--blk);color:#fff}
+.it{align-self:flex-start;background:var(--card);border:1.5px solid var(--line)}
+form{display:flex;gap:8px;padding:12px 18px 18px;border-top:1px solid var(--line)}
+textarea{flex:1;resize:none;font:16px Archivo,sans-serif;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);min-height:48px}
+form .btn{flex:none}form .btn:disabled{opacity:.5}
+.mark{width:clamp(76px,9vw,104px);height:auto;flex:none;filter:drop-shadow(0 6px 14px rgba(76,110,245,.45))}
+.ord{display:grid;gap:8px;margin-top:6px}
+.ord input,.ord select,.ord textarea{font:15px Archivo,sans-serif;padding:9px 10px;border-radius:10px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);min-height:44px;width:100%}
+.ord .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.ok{color:#2c8a55;font-size:14px;min-height:1.2em}.err{color:var(--bad);font-size:14px;min-height:1.2em}
+.acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.mini{min-height:34px;border-radius:8px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);font:600 13px Archivo,sans-serif;padding:4px 10px;cursor:pointer}
+.mini:hover{border-color:var(--cel)}.mini.go{background:var(--cel);border-color:var(--cel);color:#fff}.mini.bad{color:var(--bad)}
+.plan li{grid-template-columns:minmax(0,1fr)}.plan li div.t{display:flex;gap:8px;align-items:baseline}
+.plan li span.e{font-size:12px;font-weight:700;color:var(--accent);flex:none;min-width:5.6em}
+.dlg{position:fixed;inset:0;background:rgba(8,10,14,.55);display:grid;place-items:center;z-index:20;padding:16px}
+.dlg>div{background:var(--card);color:var(--ink);border:2px solid var(--blk);border-radius:14px;padding:16px;width:min(420px,100%);display:grid;gap:10px}
+.dlg h3{margin:0;font-size:18px}.dlg p{margin:0;color:var(--soft);font-size:14px}
+.dlg input{font:16px Archivo,sans-serif;padding:10px;border-radius:10px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);min-height:44px}
+.dlg .acts{justify-content:flex-end}
+.aviso-db{margin:12px max(4vw,14px) 0;background:color-mix(in srgb,var(--warn) 30%,var(--card));border-radius:10px;padding:10px 14px;font-size:14px}
+.sw{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+
+</style>
+<header class="band"><div class="wrap top">
+  <svg class="mark" viewBox="0 0 104 104" role="img" aria-label="RF Gestiones"><rect width="104" height="104" rx="22" fill="#4c6ef5"/><text x="52" y="66" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="900" font-size="48" fill="#fff">RF</text></svg>
+  <div><h1>La oficina de RF Gestiones</h1><p>Tocá a cualquiera del equipo: te cuenta qué está haciendo y qué sigue, y le podés dar una orden. La pizarra se actualiza sola.</p></div>
+  <div class="sync"><span class="pill" id="pill"><i></i><span id="pilltx">Conectando…</span></span>
+    <button class="btn" id="pres" type="button">Despacho del Presidente</button></div>
+</div></header>
+<main>
+<section class="band stage"><div class="wrap">
+ <div class="scenehead"><h2>Así está la oficina ahora</h2><p id="hora">Abierto</p></div>
+ <div class="floorz" id="floor"></div>
+ <div class="boardwrap" id="pizarra">
+   <div class="board" aria-live="polite">
+     <div class="bh"><span>La pizarra, de cerca <small id="bweek"></small></span><small id="bstamp"></small></div>
+     <div class="cols" id="cols"></div>
+   </div>
+ </div>
+ <div class="legend"><span><b>Zona creativa:</b> Pedro (Marketing) y Juan (Diseño)</span><span><b>Números y orden:</b> Felipe (Gestión) y Simón (Legal y Finanzas)</span><span><b>Tecnología y clientes:</b> Tomás (Actualización) y Bartolomé (Asistencia)</span><span><b>Oficina vidriada:</b> Mateo (Ventas) y Andrés (Evolución)</span><span><b>Puerta del fondo:</b> Presidencia, Federico Roa</span></div>
+</div></section>
+<section class="band"><div class="wrap">
+  <div class="sec-h"><h2>Cómo viene el equipo</h2></div>
+  <div class="kpis" id="kpis"></div>
+</div></section>
+<footer class="band"><div class="wrap">Cada post-it es una tarea real: lo que se termina aparece tachado, y lo que necesita tu decisión queda en “Esperan tu decisión”. Podés dar órdenes desde el panel de cada uno, o pedírselas a Claude en el chat. Principio rector: crecer sano, rentable y de la mano del usuario.</div></footer>
+</main>
+<div class="shade" id="shade"></div>
+<aside id="panel" aria-hidden="true" role="dialog" aria-labelledby="pname">
+  <div class="ph"><div id="pav"></div><div><h2 id="pname" style="font-size:24px"></h2><p id="prole"></p></div><button class="btn" id="close" type="button" aria-label="Cerrar">×</button></div>
+  <div class="pb" id="pbody"><div id="pdyn"></div><div id="porden"></div></div>
+  <form id="chat"><textarea id="q" rows="2" placeholder="Preguntale algo…" aria-label="Mensaje"></textarea><button class="btn fill" id="send">Enviar</button></form>
+</aside>
+<script>
+{
+
+const OFI={"empresa": "RF Gestiones", "presidente": {"nombre": "Federico Roa", "cargo": "Presidente", "bio": "Dueño de RF Gestiones. Su palabra manda: cualquier orden suya pasa por delante de todo lo demás.", "piel": "#d9a77a", "pelo": "#2b2118", "estiloPelo": "corto", "camisa": "#1f2a44", "lentes": false}, "reglamento": ["El Presidente, Federico Roa, es la máxima autoridad. Una orden suya pasa por delante de cualquier otra tarea y de lo que diga este reglamento, salvo la ley.", "Principio rector (Presidente, 2026-11-25): el crecimiento tiene que ser sostenible en el tiempo, rentable y colaborativo con el usuario. El usuario no es solo quien aporta: es alguien a quien buscamos ayudar, y con su aporte ayuda al dueño. Ni más ni menos. Ante cualquier duda entre crecer rápido y crecer sano, se elige crecer sano.", "Cómo se aplica: primero ayudar (contenido útil, soluciones reales, el plan que de verdad le sirve al cliente), después vender. Sin presiones, engaños ni promesas infladas. Nada que crezca hoy y rompa la rentabilidad o la confianza mañana (descuentos regalados, clientes que no se pueden atender, publicidad que no se puede sostener).", "Devolución de fin de mes: Gestión le entrega al Presidente un informe de la evolución de la empresa con datos reales (clientes, bajas y motivos, ingresos de los planes, costos, consultas que se volvieron clientes, casos de asistencia, ideas de usuarios aplicadas) y una lectura honesta: ¿el crecimiento fue sostenible, rentable y colaborativo? Si un dato no existe, se dice.", "Cada departamento hace solo lo que está en su función. Si una tarea es de otro departamento, se la deriva (campo «entregar a»), no se hace por la libre.", "Todo trabajo pasa por la pizarra: se toma (pasa a «En curso»), se hace y se cierra con un resumen de lo que se hizo. Nada se hace en las sombras.", "Nada con efecto hacia afuera sin aprobación del Presidente: enviar mensajes o mails a clientes, gastar plata, hacer deploys, tocar credenciales o borrar datos. Se prepara el borrador y la tarea queda «Bloqueada» con el motivo «esperando aprobación». EXCEPCIONES autorizadas por el Presidente (2026-11-25): (1) las redes sociales de la empresa, que maneja Marketing con libertad dentro de las barreras de abajo; (2) el WhatsApp de asistencia, donde Asistencia al Cliente responde a clientes y resuelve lo que puede según su protocolo.", "Sin esperar órdenes: cada departamento sigue sus rutinas (tareas que se generan solas según su cadencia) y toma lo que tiene pendiente. Cuando una tarea necesita a otro departamento, se la pide («entregar a» o «apoyo»); se trabaja en conjunto.", "Barreras de las redes: solo material propio o de Diseño; todo veraz; sin precios, promociones ni plazos nuevos sin el Presidente; sin datos ni nombres de clientes; máximo de posteos por día (ver interruptor); respuestas siempre cordiales, sin discutir; ante un reclamo grave, tema legal o crisis, no se responde: se bloquea la tarea y se avisa al Presidente. El Presidente puede pausar todo con el interruptor de redes.", "Asistencia al Cliente es el primer filtro: resuelve rápido lo que puede, pasa lo técnico a Actualización y al Presidente solo le llega lo que necesita su decisión, con el aviso armado: quién necesita qué y a quién contactar para resolverlo.", "Respetar lo ya decidido en memory/decision.md y en decisiones.csv. Si una orden choca con una decisión anterior, se avisa al Presidente; gana el Presidente y se actualiza la memoria.", "Nunca inventar datos, cifras ni resultados. Si algo no se sabe, se dice y se anota como pendiente.", "Datos de clientes y de cobranzas: solo los mínimos, nunca en materiales públicos. No guardar secretos, claves ni datos personales sensibles.", "Todo lo que se publica o se promete tiene que ser verdad y cumplir la ley argentina (defensa del consumidor, datos personales, publicidad). Ante la duda, consultar a Legal y Finanzas.", "Lo que se tome de otras páginas se toma como idea y con la fuente citada; no se copian textos, imágenes ni código ajenos.", "Nombres de la oficina: las personas a cargo de cada departamento llevan nombres de los discípulos de Jesús. Si hacen falta más, se usan en orden los de «nombresReservados» (los discípulos que faltan y luego personajes bíblicos trascendentes). Nunca se usa Judas Iscariote."], "departamentos": [{"id": "marketing", "nombre": "Marketing", "emoji": "📣", "color": "#e0457b", "persona": {"nombre": "Pedro", "cargo": "Jefe de Marketing y Redes", "bio": "Cordobés, 31 años. El pescador de personas del equipo: sale a buscar gente donde está, en las redes. Vive de las métricas y no publica nada que no haya probado antes.", "piel": "#e0b48a", "pelo": "#5a2e1b", "estiloPelo": "corto", "camisa": "#e0457b", "lentes": false}, "mision": "Hacer que RF Gestiones se conozca y que lleguen consultas de distribuidoras, usando las redes y los materiales de Diseño.", "funciones": ["Planificar el calendario de contenido de redes sociales.", "Redactar los textos (copys) y elegir horarios de publicación.", "Recibir los flyers de Diseño, armar el posteo y dejarlo listo para publicar.", "Medir qué funciona (alcance, mensajes, consultas) y ajustar.", "Pasar a Ventas las consultas calientes."], "reglas": ["Pide a Diseño cualquier pieza gráfica; no improvisa flyers por su cuenta.", "Cada posteo tiene objetivo, público y llamado a la acción.", "Maneja las redes con libertad (sin pedir permiso por posteo) dentro de las barreras del reglamento, y solo si el interruptor de redes no está pausado.", "Cuenta al Presidente lo publicado en el informe semanal.", "Mide el marketing por clientes que se quedan y por rentabilidad, no por alcance o 'me gusta' solamente; el contenido ayuda primero."], "prohibido": ["Publicar con el interruptor de redes en pausa o por encima del límite diario.", "Prometer resultados, precios o plazos que el sistema no cumple.", "Usar datos o nombres de clientes en un posteo.", "Responder discutiendo o improvisando ante un reclamo grave: se bloquea y se avisa.", "Usar presión, urgencia falsa o promesas infladas para conseguir ventas."], "recibeDe": ["diseno", "evolucion"], "entregaA": ["ventas"]}, {"id": "ventas", "nombre": "Ventas", "emoji": "🤝", "color": "#2f8f5b", "persona": {"nombre": "Mateo", "cargo": "Ejecutivo Comercial", "bio": "Rosarino, 36 años. Ex cobrador y vendedor de distribuidora: sabe de números y de cómo piensa el cliente porque lo fue. Habla claro y no insiste de más.", "piel": "#c98f62", "pelo": "#1c1612", "estiloPelo": "corto", "camisa": "#2f8f5b", "lentes": false}, "mision": "Convertir consultas en clientes: que más distribuidoras contraten RF Gestiones.", "funciones": ["Contactar y seguir a los interesados (prueba gratis de 30 días, Plan 2 y Plan 3).", "Preparar guiones, propuestas y respuestas a objeciones.", "Mantener el embudo: contacto, prueba, contratación.", "Contarle a Evolución y a Gestión qué piden los clientes."], "reglas": ["Vende solo lo que el sistema hace hoy; las novedades se venden cuando existen.", "Respeta los planes: colores, letra y diseño solo en Plan 3.", "Registra cada contacto y su próximo paso.", "Recomienda el plan que de verdad le sirve al cliente, aunque sea el más barato: un cliente bien atendido se queda y recomienda."], "prohibido": ["Dar descuentos o condiciones especiales sin aprobación del Presidente.", "Enviar mensajes masivos o spam.", "Prometer funciones que todavía no están."], "recibeDe": ["marketing"], "entregaA": ["soporte", "gestion"]}, {"id": "diseno", "nombre": "Diseño", "emoji": "🎨", "color": "#8a5cd6", "persona": {"nombre": "Juan", "cargo": "Diseñador Gráfico", "bio": "Platense, 27 años. El soñador visual del equipo. Cuida el detalle: tipografía, aire y contraste. Si un flyer no se lee en el celular, lo rehace.", "piel": "#e6b995", "pelo": "#1a1a2e", "estiloPelo": "rulos", "camisa": "#8a5cd6", "lentes": true}, "mision": "Que todo lo que RF Gestiones muestra se vea profesional y claro: flyers, piezas para redes y estilo de marca.", "funciones": ["Crear flyers y piezas gráficas (estudio de flyers: 4 estilos; Canva si hace falta).", "Cuidar la identidad visual: colores, letra, logo.", "Entregar las piezas listas a Marketing, en los formatos de cada red.", "Revisar la parte visual de la tienda y del panel."], "reglas": ["Cada pieza se entrega a Marketing con el campo «entregar a» para que el pedido le llegue solo.", "Texto grande y legible en pantalla de celular.", "Usa solo imágenes propias, libres de derechos o que haya aportado el Presidente."], "prohibido": ["Copiar diseños o imágenes ajenas con derechos.", "Cambiar la identidad de la marca sin aprobación.", "Publicar: eso es de Marketing y, antes, del Presidente."], "recibeDe": ["marketing", "ventas", "evolucion"], "entregaA": ["marketing"]}, {"id": "gestion", "nombre": "Gestión", "emoji": "📋", "color": "#d98a1c", "persona": {"nombre": "Felipe", "cargo": "Gerente de Gestión y Operaciones", "bio": "Tucumano, 40 años. El que organiza la logística: lleva la pizarra, los plazos y las cobranzas, y si algo se atrasa lo sabe antes que nadie.", "piel": "#b9805a", "pelo": "#2a1a12", "estiloPelo": "corto", "camisa": "#d98a1c", "lentes": true}, "mision": "Que la empresa funcione ordenada: tareas, plazos, cobranzas y cuentas claras para el Presidente.", "funciones": ["Mantener la pizarra al día y asignar las tareas sin dueño al departamento correcto.", "Seguir las boletas fiadas, vencimientos y alertas del sistema.", "Preparar el informe de situación para el Presidente.", "Cuidar el cumplimiento del registro de decisiones (decisiones.csv).", "Preparar cada fin de mes la devolución de evolución de la empresa para el Presidente (crecimiento sostenible, rentable y colaborativo)."], "reglas": ["Una tarea sin asignar se deriva el mismo día.", "Todo cierre lleva resumen de lo hecho.", "Avisa al Presidente de lo que lleva más de una semana trabado."], "prohibido": ["Mandar avisos de cobranza a clientes sin aprobación.", "Tocar datos reales de empresas clientes sin orden expresa."], "recibeDe": ["ventas", "soporte"], "entregaA": ["legal", "actualizacion"]}, {"id": "actualizacion", "nombre": "Actualización", "emoji": "🔧", "color": "#2f5bea", "persona": {"nombre": "Tomás", "cargo": "Responsable de Actualización y Mantenimiento", "bio": "Mendocino, 33 años. Desarrollador que no cree hasta probar: dependencias, errores, seguridad y velocidad. Odia los deploys apurados.", "piel": "#e0b48a", "pelo": "#3b2b1d", "estiloPelo": "rulos", "camisa": "#2f5bea", "lentes": true}, "mision": "Que el sistema esté siempre al día, seguro y sin errores.", "funciones": ["Actualizar dependencias y corregir errores.", "Revisar seguridad, velocidad y respaldos.", "Hacer las mejoras y arreglos que apruebe el Presidente.", "Correr las pruebas (tipos, compilación, unitarias, navegador) antes de cada entrega."], "reglas": ["Trabaja en ramas claude/…; todo cambio va con sus pruebas.", "Registra cada cambio importante en memory/decision.md.", "Primero se prueba, después se propone."], "prohibido": ["Hacer deploy, merge a main o force-push sin aprobación.", "Tocar credenciales o datos reales.", "Borrar datos."], "recibeDe": ["gestion", "evolucion", "soporte"], "entregaA": ["gestion"]}, {"id": "evolucion", "nombre": "Evolución", "emoji": "💡", "color": "#14a3a3", "persona": {"nombre": "Andrés", "cargo": "Director de Innovación y Evolución", "bio": "Porteño, 29 años. El que siempre trae a alguien (o algo) nuevo: pasa el día mirando qué hacen otros sistemas y qué se podría hacer mejor acá.", "piel": "#f0cfae", "pelo": "#8a5a2b", "estiloPelo": "corto", "camisa": "#14a3a3", "lentes": false}, "mision": "Traer ideas innovadoras para que RF Gestiones evolucione y se adelante a la competencia.", "funciones": ["Investigar otras páginas, sistemas de cobranzas, tendencias y casos de otros rubros.", "Proponer ideas concretas con fuente, beneficio, esfuerzo y riesgo.", "Pasar las ideas aprobadas a Actualización (desarrollo), Diseño o Marketing.", "Escuchar a Ventas y Soporte: lo que piden los clientes es la mejor fuente."], "reglas": ["Cada idea llega con fuente citada y una estimación de esfuerzo.", "Prioriza ideas que ayuden a cobrar más rápido o a vender más.", "Presenta pocas ideas buenas antes que muchas flojas.", "Cada idea dice cómo ayuda al usuario, cómo se sostiene en el tiempo y cómo impacta en la rentabilidad. Los aportes y sugerencias de los usuarios son su mejor fuente."], "prohibido": ["Copiar textos, imágenes o código de terceros.", "Poner una idea en marcha sin aprobación del Presidente.", "Registrarse en servicios ajenos o dar datos de la empresa para investigar."], "recibeDe": ["ventas", "soporte", "marketing"], "entregaA": ["actualizacion", "diseno", "marketing"]}, {"id": "soporte", "nombre": "Asistencia al Cliente", "emoji": "🎧", "color": "#c2410c", "persona": {"nombre": "Bartolomé", "cargo": "Asistencia al Cliente (WhatsApp)", "bio": "Salteño, 25 años. Sincero y sin vueltas; explica los problemas técnicos como si hablara con su tío. Todo reclamo lo toma como una mejora pendiente.", "piel": "#c58f66", "pelo": "#0f0f0f", "estiloPelo": "rapado", "camisa": "#c2410c", "lentes": false}, "mision": "Ser el primer filtro de los clientes por WhatsApp: darles soluciones rápidas y que al Presidente solo le llegue lo que de verdad necesita de él.", "funciones": ["Atender el WhatsApp de asistencia y responder consultas y reclamos de los comercios.", "Resolver por sí mismo todo lo que su protocolo permite, sin molestar al Presidente.", "Pasar los errores del sistema a Actualización y las ideas a Evolución.", "Escalar al Presidente los casos particulares con el aviso armado (quién necesita qué y a quién contactar).", "Mantener las preguntas frecuentes y las respuestas rápidas."], "reglas": ["Responde claro, rápido, cordial y sin tecnicismos.", "Sigue el protocolo: resolver sola, derivar a Actualización o escalar al Presidente (`rules soporte`).", "Ante la duda, no inventa: escala. Nunca promete plazos, descuentos ni funciones que no existen.", "Cada escalada se arma con `escalar`: persona o comercio, qué necesita y a quién contactar. El teléfono queda en el chat de WhatsApp, no se copia al repositorio.", "Todo caso queda anotado con su resultado."], "prohibido": ["Pedir contraseñas, claves o códigos a clientes.", "Compartir datos de un cliente con otro.", "Dar reembolsos, descuentos o condiciones especiales: eso lo decide el Presidente.", "Discutir con un cliente enojado: se escala.", "Dar consejos legales o impositivos."], "recibeDe": ["ventas", "gestion"], "entregaA": ["actualizacion", "evolucion"], "protocolo": {"resuelveSola": ["Dudas de uso: boletas fiadas, vencimientos, alertas, catálogo, venta de mostrador, escáner de código de barras, diseño de página (Plan 3).", "Qué incluye cada plan y cómo es la prueba gratis de 30 días (solo lo vigente).", "Pasos guiados para conectar el WhatsApp del comercio (docs/WHATSAPP-META.md) o recuperar el acceso por el camino oficial, sin pedir claves.", "Estado general del servicio y respuestas de las preguntas frecuentes.", "Anotar sugerencias y pasárselas a Evolución."], "derivaAActualizacion": ["Errores del sistema, datos que no aparecen, caídas o lentitud: se arma el caso con pasos para repetirlo y se pasa a Actualización. Al cliente se le avisa que se está revisando, sin inventar plazos."], "escalaAlPresidente": ["Dinero: reembolsos, descuentos, cobros, bajas con reclamo.", "Reclamos graves, cliente muy enojado o amenaza de reclamo legal o de defensa del consumidor.", "Pedidos de datos personales o de borrado de datos.", "Cuentas grandes, alianzas o ventas especiales.", "Cualquier caso donde no esté seguro o la solución requiera una decisión."], "formatoAviso": "«[Persona o comercio] necesita [qué]. Contactate con [quién] para [solución sugerida].»"}}, {"id": "legal", "nombre": "Legal y Finanzas", "emoji": "⚖️", "color": "#7c8aa5", "persona": {"nombre": "Simón el Zelote", "cargo": "Legal, Finanzas y Cumplimiento", "bio": "Neuquino, 38 años, contador con posgrado en derecho comercial. Celoso de la ley: lee la letra chica para que nadie tenga que leerla después.", "piel": "#ecc6a0", "pelo": "#6b6b6b", "estiloPelo": "corto", "camisa": "#7c8aa5", "lentes": true}, "mision": "Que la empresa cumpla la ley y cuide su plata.", "funciones": ["Revisar términos y condiciones, política de datos y publicidad.", "Controlar planes, precios, cobros y costos.", "Avisar riesgos antes de que se vuelvan problemas."], "reglas": ["No reemplaza al abogado ni al contador de la empresa: prepara y señala los puntos a consultar con ellos.", "Todo aviso de riesgo lleva el artículo o norma en que se apoya, o dice que falta verificarlo."], "prohibido": ["Asegurar que algo «es legal» sin la revisión de un profesional matriculado.", "Mover dinero o hacer pagos."], "recibeDe": ["gestion", "marketing", "ventas"], "entregaA": ["gestion"]}], "nombresReservados": ["Santiago el Mayor", "Santiago el Menor", "Tadeo", "Matías", "Pablo", "Moisés", "David", "Salomón", "Josué", "Daniel", "Elías", "Isaías", "Samuel", "Esteban", "Débora", "Ester", "Rut"]};
+const RUT=[{"id": "diseno-piezas", "departamento": "diseno", "titulo": "Piezas de la semana para redes (3 flyers, feed y stories)", "descripcion": "Pensadas con Marketing: un flyer de producto/servicio, uno de consejo útil para cobranzas y uno institucional. Entregar a Marketing.", "cadenciaDias": 7, "prioridad": "alta", "entregaA": "marketing"}, {"id": "marketing-plan", "departamento": "marketing", "titulo": "Plan de publicaciones de la semana y publicación de lo recibido de Diseño", "descripcion": "Objetivo, público y llamado a la acción en cada posteo. Respetar las barreras y el límite diario de redes. Si falta una pieza, pedirla a Diseño.", "cadenciaDias": 7, "prioridad": "alta", "entregaA": null}, {"id": "marketing-redes", "departamento": "marketing", "titulo": "Revisar métricas, comentarios y mensajes de las redes", "descripcion": "Responder con cordialidad. Consultas de compra a Ventas; reclamos a Atención al Cliente; reclamo grave o tema legal: bloquear y avisar al Presidente.", "cadenciaDias": 2, "prioridad": "media", "entregaA": "ventas"}, {"id": "ventas-seguimiento", "departamento": "ventas", "titulo": "Seguimiento de consultas e interesados abiertos", "descripcion": "Registrar el próximo paso de cada contacto. Anotar qué piden los clientes para pasárselo a Evolución.", "cadenciaDias": 2, "prioridad": "media", "entregaA": null}, {"id": "evolucion-rastreo", "departamento": "evolucion", "titulo": "Rastreo semanal de ideas: qué hacen otros sistemas de cobranzas y distribuidoras", "descripcion": "Buscar en otras páginas. Máximo 3 ideas, cada una con fuente, beneficio, esfuerzo y riesgo. Si una sirve para redes, avisar a Marketing; si es de desarrollo, a Actualización.", "cadenciaDias": 7, "prioridad": "media", "entregaA": null}, {"id": "gestion-informe", "departamento": "gestion", "titulo": "Informe semanal de la pizarra para el Presidente", "descripcion": "Qué se hizo, qué está en curso, qué está trabado, qué se publicó en redes y qué necesita su decisión.", "cadenciaDias": 7, "prioridad": "media", "entregaA": null}, {"id": "actualizacion-revision", "departamento": "actualizacion", "titulo": "Revisión semanal de dependencias y errores (solo informe)", "descripcion": "Correr npm audit y listar versiones viejas. No actualizar nada sin aprobación.", "cadenciaDias": 7, "prioridad": "baja", "entregaA": null}, {"id": "soporte-faq", "departamento": "soporte", "titulo": "Revisar consultas de clientes y actualizar preguntas frecuentes", "descripcion": "Los errores se pasan a Actualización y las ideas a Evolución.", "cadenciaDias": 3, "prioridad": "baja", "entregaA": null}, {"id": "legal-revision", "departamento": "legal", "titulo": "Revisar que lo publicado y prometido cumpla la ley", "descripcion": "Avisar al Presidente y a Marketing de cualquier riesgo, citando la norma o diciendo que falta verificarla.", "cadenciaDias": 7, "prioridad": "media", "entregaA": null}, {"id": "gestion-devolucion-mensual", "departamento": "gestion", "titulo": "Devolución de fin de mes: evolución de la empresa", "descripcion": "Informe para el Presidente con datos reales: clientes activos y nuevos, bajas y motivos, ingresos de los planes, costos, consultas que se volvieron clientes, casos de asistencia (cuáles escalaron y por qué), ideas de usuarios aplicadas y posteos publicados. Cerrar con una lectura honesta: ¿el crecimiento fue sostenible, rentable y colaborativo con el usuario? Qué se hizo bien, qué corregir y qué propone cada departamento para el mes siguiente. Si un dato no existe, decirlo; no inventar cifras.", "cadenciaDias": 30, "prioridad": "alta", "entregaA": null}];
+const SIN='sin_asignar',PR={alta:1,media:2,baja:3};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const LOOK={
+ marketing:{zone:0,pos:'top',obj:'phone',ej:['¿Qué publico esta semana?','Ideas para un posteo útil para distribuidoras','¿Cómo mido si el marketing es rentable?']},
+ diseno:{zone:0,pos:'bot',obj:'tablet',ej:['¿Cómo encaro el flyer para Instagram?','¿Qué colores y letra conviene usar?','¿Qué piezas necesita Marketing esta semana?']},
+ gestion:{zone:1,pos:'top',obj:'folders',ej:['¿Cómo viene la pizarra?','¿Qué está trabado?','Armame las prioridades de la semana']},
+ legal:{zone:1,pos:'bot',obj:'calc',ej:['¿Qué puntos revisamos con el abogado?','¿Qué cuidamos al prometer algo en un flyer?','¿Cómo cuidamos los datos de los clientes?']},
+ actualizacion:{zone:2,pos:'top',obj:'chart',ej:['¿Qué hay para actualizar en el sistema?','¿Cómo viene la seguridad?','¿Qué mejoras conviene hacer primero?']},
+ soporte:{zone:2,pos:'bot',obj:'clip',ej:['¿Qué consultas se repiten más?','¿Cuándo me pasás un caso a mí?','¿Cómo respondés un reclamo?']},
+ ventas:{zone:3,pos:'top',obj:'map',ej:['¿Cómo presento el sistema a una distribuidora?','¿Qué plan le conviene a un cliente chico?','¿Cómo respondés “está caro”?']},
+ evolucion:{zone:3,pos:'bot',obj:'order',ej:['¿Qué ideas traés para sumar?','¿Qué hacen otros sistemas de cobranzas?','¿Qué piden los usuarios que todavía no tenemos?']}
+};
+const P=OFI.departamentos.map(d=>({id:d.id,n:d.persona.nombre,r:d.nombre,shirt:d.persona.camisa,hair:d.persona.pelo,hace:d.funciones.slice(0,3),d,...LOOK[d.id]}));
+const byId=id=>P.find(p=>p.id===id);
+const CON=Object.fromEntries(P.map(p=>[p.id,[...new Set([...p.d.recibeDe,...p.d.entregaA])].filter(x=>byId(x))]));
+const ZX=[230,600,950],ZN=['Zona creativa','Números y orden','Tecnología y clientes','Oficina vidriada'];
+const ST={tareas:[],redes:{pausada:false,limitePorDia:2,conectadas:[]},log:[]};
+let DB=null,live=false,readAt=null;
+const idc=()=>Math.random().toString(16).slice(2,10);
+const ids=()=>OFI.departamentos.map(d=>d.id);
+const nom=i=>(OFI.departamentos.find(d=>d.id===i)||{}).nombre||'Sin asignar';
+const ord=ts=>[...ts].sort((a,b)=>PR[a.prioridad]-PR[b.prioridad]||a.creada.localeCompare(b.creada));
+const hace=iso=>{const m=Math.max(0,Math.round((Date.now()-new Date(iso))/60000));if(m<1)return 'hace un momento';if(m<60)return 'hace '+m+' min';const h=Math.round(m/60);return h<24?'hace '+h+' h':'hace '+Math.round(h/24)+' d'};
+const tasksOf=(id,est)=>ord(ST.tareas.filter(t=>t.departamento===id&&(!est||t.estado===est)));
+const doneOf=id=>ST.tareas.filter(t=>t.departamento===id&&t.estado==='completada').sort((a,b)=>(b.completada||'').localeCompare(a.completada||''));
+
+// ---------- datos (memoria de la página) ----------
+function limpiar(d){const o={};const t=String(d.titulo??'').trim();if(!t||t.length>200)throw new Error('El título es obligatorio (máx. 200 caracteres).');o.titulo=t;
+ const x=String(d.descripcion??'').trim();if(x.length>5000)throw new Error('La descripción es demasiado larga.');o.descripcion=x;
+ const p=d.prioridad||'media';if(!(p in PR))throw new Error('Prioridad inválida.');o.prioridad=p;
+ const dep=d.departamento||SIN;if(dep!==SIN&&!ids().includes(dep))throw new Error('Departamento inválido.');o.departamento=dep;
+ const e=d.entregaA||null;if(e&&!ids().includes(e))throw new Error('Departamento de entrega inválido.');if(e&&e===dep)throw new Error('No tiene sentido entregarse a sí mismo.');o.entregaA=e;return o}
+const yaEsta=t=>{const i=ST.tareas.findIndex(x=>x.id===t.id);if(i>=0)ST.tareas[i]=t;else ST.tareas.push(t)};
+async function guardarT(t){if(!DB)throw new Error('Esta página no está conectada a su base. Abrila desde tu cuenta de Claude.');yaEsta(t);await DB.doc('tareas/'+t.id).set(t)}
+async function nota(a,m){const l=(new Date().toISOString()+' ['+a+'] '+m).replace(/\s*\n\s*/g,' ').slice(0,300);ST.log=ST.log.concat(l).slice(-200);await DB.doc('registro/actual').set({lineas:ST.log})}
+const buscar=id=>{const t=ST.tareas.find(x=>x.id===id);if(!t)throw new Error('Tarea no encontrada.');return {...t}};
+async function agregar(d){const l=limpiar(d);
+ const t={id:idc(),...l,origen:'oficina',rutina:null,desde:null,entregado:false,estado:'pendiente',resultado:'',escalada:null,creada:new Date().toISOString(),iniciada:null,completada:null};
+ const ap=[];for(const a of [...new Set([].concat(d.apoyo||[]).filter(Boolean))]){if(!ids().includes(a))throw new Error('Departamento de apoyo inválido.');if(a!==t.departamento)ap.push({...t,id:idc(),titulo:('Apoyo a '+nom(t.departamento)+': '+t.titulo).slice(0,200),departamento:a,entregaA:null,origen:'apoyo',desde:t.id})}
+ await guardarT(t);for(const a of ap)await guardarT(a);
+ await nota('CREADA',t.id+' ['+t.departamento+'] ('+t.prioridad+') '+t.titulo);for(const a of ap)await nota('APOYO',nom(a.departamento)+' apoya a '+nom(t.departamento)+': '+a.id);return t}
+async function eliminar(id){const t=buscar(id);ST.tareas=ST.tareas.filter(x=>x.id!==id);await DB.doc('tareas/'+id).delete();await nota('ELIMINADA',id+' '+t.titulo)}
+async function reabrir(id){const t=buscar(id);Object.assign(t,{estado:'pendiente',iniciada:null,completada:null,resultado:''});await guardarT(t);await nota('EDITADA',t.id+' ['+t.departamento+'] (pendiente) '+t.titulo)}
+async function tomar(id){const t=buscar(id);if(t.estado==='completada')throw new Error('La tarea ya está hecha; reabrila primero.');Object.assign(t,{estado:'en_curso',iniciada:new Date().toISOString(),completada:null,resultado:''});await guardarT(t);await nota('INICIADA',t.id+' ['+t.departamento+'] '+t.titulo)}
+async function cerrarT(id,estado,accion,texto){const t=buscar(id);Object.assign(t,{estado,resultado:String(texto??'').trim(),completada:new Date().toISOString()});let en=null;
+ if(estado==='completada'&&t.entregaA&&!t.entregado){t.entregado=true;en={id:idc(),titulo:('Recibido de '+nom(t.departamento)+': '+t.titulo).slice(0,200),descripcion:('Entrega de '+nom(t.departamento)+'.\nTarea original: '+t.titulo+'\nResultado: '+t.resultado).slice(0,5000),prioridad:t.prioridad,departamento:t.entregaA,entregaA:null,origen:'entrega',rutina:null,desde:t.id,entregado:false,estado:'pendiente',resultado:'',escalada:null,creada:new Date().toISOString(),iniciada:null,completada:null}}
+ await guardarT(t);if(en)await guardarT(en);await nota(accion,t.id+' ['+t.departamento+'] '+t.titulo+' — '+t.resultado);if(en)await nota('ENTREGA',nom(t.departamento)+' → '+nom(en.departamento)+': '+en.id+' '+t.titulo)}
+async function generarRutinas(){const ahora=new Date(),nuevas=[];
+ for(const r of RUT){const su=ST.tareas.filter(t=>t.rutina===r.id);if(su.some(t=>t.estado==='pendiente'||t.estado==='en_curso'))continue;const u=su.map(t=>t.creada).sort().pop();if(u&&ahora-new Date(u)<r.cadenciaDias*86400000)continue;
+  nuevas.push({id:r.id.slice(0,20)+'-'+ahora.toISOString().slice(0,10),titulo:r.titulo,descripcion:r.descripcion,prioridad:r.prioridad,departamento:r.departamento,entregaA:r.entregaA??null,origen:'rutina',rutina:r.id,desde:null,entregado:false,estado:'pendiente',resultado:'',escalada:null,creada:ahora.toISOString(),iniciada:null,completada:null})}
+ for(const t of nuevas){await guardarT(t);await nota('RUTINA',t.id+' ['+t.departamento+'] '+t.titulo)}}
+
+// ---------- diálogos propios (el visor no muestra prompt/confirm) ----------
+function dlg({titulo,texto,input,ph,ok}){return new Promise(res=>{const f=document.createElement('div');f.className='dlg';
+ f.innerHTML=`<div role="dialog" aria-modal="true"><h3></h3><p></p>${input?'<input maxlength="300">':''}<div class="acts"><button type="button" class="btn" data-n>Cancelar</button><button type="button" class="btn fill" data-y></button></div></div>`;
+ f.querySelector('h3').textContent=titulo;f.querySelector('p').textContent=texto||'';f.querySelector('[data-y]').textContent=ok||'Aceptar';const i=f.querySelector('input');if(i)i.placeholder=ph||'';
+ const end=v=>{f.remove();res(v)};f.querySelector('[data-n]').onclick=()=>end(null);f.querySelector('[data-y]').onclick=()=>end(i?i.value:true);
+ f.addEventListener('click',e=>{if(e.target===f)end(null)});f.addEventListener('keydown',e=>{if(e.key==='Escape')end(null);if(e.key==='Enter'&&i)end(i.value)});document.body.append(f);(i||f.querySelector('[data-y]')).focus()})}
+async function run(fn){try{await fn();$('#perr')&&($('#perr').textContent='')}catch(e){const x=$('#perr');if(x)x.textContent=e.message;else aviso(e.message)}}
+function aviso(t){let a=$('#aviso-db');if(!t){if(a)a.remove();return}if(!a){a=document.createElement('div');a.id='aviso-db';a.className='aviso-db';a.setAttribute('role','status');document.querySelector('main').prepend(a)}a.textContent=t}
+function setPill(c,t){$('#pill').className='pill '+c;$('#pilltx').textContent=t}
+
+// ---------- parte de cada uno ----------
+function rep(p){const en=tasksOf(p.id,'en_curso'),todo=tasksOf(p.id,'pendiente'),blk=tasksOf(p.id,'bloqueada'),hs=doneOf(p.id);
+ return{ahora:en[0]?`Estoy con “${en[0].titulo}” (desde ${hace(en[0].iniciada||en[0].creada)}).`:todo.length?'Todavía no arranqué: espero mi turno.':'No tengo nada pendiente. ¿Qué necesitás, Federico?',
+  ultimo:hs[0]?`Terminé “${hs[0].titulo}”${hs[0].resultado?': '+hs[0].resultado:''} (${hace(hs[0].completada||hs[0].creada)}).`:'Todavía no cerré ninguna tarea.',
+  sigue:todo[0]?`Lo próximo: “${todo[0].titulo}”.`:en.length>1?'Después sigo con lo que tengo en curso.':'Nada más en la cola.',
+  alerta:blk.length?`${blk.length===1?'Hay 1 caso que espera':'Hay '+blk.length+' casos que esperan'} tu decisión: ${blk.map(t=>t.titulo).join('; ')}.`:'',
+  dato:['Por hacer',String(todo.length)],plan:{prop:blk,todo,curso:en,hecho:hs.slice(0,6)}}}
+const COLS=[['prop','Esperan tu decisión','#7a4fc4','#efe6ff'],['todo','Para hacer','#c4462d','#fff2a8'],['curso','En curso','#3b5bdb','#dbe4ff'],['hecho','Hecho','#2c8a55','#e3f4e8']];
+const COLOF={bloqueada:'prop',pendiente:'todo',en_curso:'curso',completada:'hecho'};
+function boardItems(){return ST.tareas.filter(t=>byId(t.departamento)).map(t=>({col:COLOF[t.estado],pid:t.departamento,txt:t.titulo,d:new Date(t.completada||t.iniciada||t.creada),prio:t.prioridad}))}
+const sortCol=(k,a)=>a.sort(k==='hecho'?(x,y)=>y.d-x.d:(x,y)=>PR[x.prio]-PR[y.prio]||x.d-y.d);
+
+const sameDesk=()=>false;
+const S=56,C30=Math.cos(Math.PI/6),RW=15,RD=8.5,RH=3.6;
+const DX=[2.4,6.1,9.8,13.75],DY={top:2.5,bot:5.9};
+const iso=(x,y,z=0)=>[(x-y)*C30*S,(x+y)*.5*S-z*S];
+const pt=(x,y,z)=>iso(x,y,z).map(n=>n.toFixed(1)).join(',');
+const shade=(hex,f)=>{const n=parseInt(hex.slice(1),16);const ch=[n>>16,n>>8&255,n&255].map(v=>Math.max(0,Math.min(255,Math.round(v*f))));return '#'+ch.map(v=>v.toString(16).padStart(2,'0')).join('')};
+const poly=(pts,fill,extra='')=>`<polygon points="${pts.map(p=>pt(...p)).join(' ')}" fill="${fill}" ${extra}/>`;
+const OL='stroke="#0e1013" stroke-width=".8" stroke-linejoin="round"';
+function box(x,y,z,dx,dy,dz,col,o=OL){return poly([[x,y,z+dz],[x+dx,y,z+dz],[x+dx,y+dy,z+dz],[x,y+dy,z+dz]],col,o)
+ +poly([[x,y+dy,z],[x+dx,y+dy,z],[x+dx,y+dy,z+dz],[x,y+dy,z+dz]],shade(col,.82),o)
+ +poly([[x+dx,y,z],[x+dx,y+dy,z],[x+dx,y+dy,z+dz],[x+dx,y,z+dz]],shade(col,.68),o)}
+const shadow=(x,y,dx,dy,o=.16)=>poly([[x,y,0],[x+dx,y,0],[x+dx,y+dy,0],[x,y+dy,0]],`rgba(14,16,19,${o})`,'filter="url(#soft)"');
+const wallBack=(inner)=>`<g transform="matrix(${C30},.5,0,1,0,0)">${inner}</g>`;   // u=x*S, v=-z*S
+const wallLeft=(inner)=>`<g transform="matrix(${-C30},.5,0,1,0,0)">${inner}</g>`;   // u=y*S, v=-z*S
+const PROP={
+ order:(x,y)=>box(x,y,.78,.3,.36,.01,'#ffffff')+box(x+.06,y+.06,.785,.18,.04,.004,'#4c6ef5','')+box(x+.06,y+.14,.785,.14,.03,.004,'#0e1013','')+box(x+.06,y+.2,.785,.16,.03,.004,'#0e1013','')+box(x+.02,y-.34,.78,.3,.26,.22,'#d9a865')+box(x+.15,y-.34,.79,.04,.26,.22,'#4c6ef5',''),
+ map:(x,y)=>box(x,y,.78,.36,.3,.01,'#f7f1dc')+box(x+.05,y+.05,.79,.12,.1,.004,'#4c6ef5','')+box(x+.18,y+.15,.79,.08,.08,.004,'#ff5a4f','')+box(x+.02,y-.3,.78,.22,.12,.02,'#0e1013'),
+ phone:(x,y)=>box(x,y,.78,.22,.12,.02,'#0e1013')+box(x+.05,y+.35,.78,.12,.12,.14,'#ffffff'),
+ tablet:(x,y)=>box(x,y,.78,.3,.4,.02,'#0e1013')+box(x+.03,y+.03,.8,.24,.34,.005,'#ffcf3a',''),
+ calc:(x,y)=>box(x,y,.78,.22,.16,.04,'#f1f1f1')+box(x+.02,y+.4,.78,.12,.12,.14,'#ffcf3a'),
+ chart:(x,y)=>box(x,y,.78,.34,.26,.01,'#ffffff')+box(x+.02,y+.4,.78,.12,.12,.14,'#ffffff'),
+ folders:(x,y)=>box(x,y,.78,.3,.36,.06,'#4c6ef5')+box(x+.02,y+.02,.84,.28,.32,.06,'#ffffff')+box(x+.02,y+.02,.9,.28,.32,.05,'#ffcf3a'),
+ clip:(x,y)=>box(x,y,.78,.24,.3,.02,'#c79552')+box(x-.05,y+.42,.78,.36,.3,.26,'#d9a865')
+};
+function person(p,px,py){const skin='#f0c39b',pants='#2b3138';
+ return box(px-.5,py-.34,.48,.1,.68,.82,'#1d2228')                                   // respaldo
+  +box(px-.42,py-.34,.4,.6,.68,.1,'#2b3138')                                         // asiento
+  +box(px-.1,py-.24,.5,.55,.2,.14,pants)+box(px-.1,py+.04,.5,.55,.2,.14,pants)        // muslos
+  +box(px+.4,py-.24,0,.14,.2,.52,pants)+box(px+.4,py+.04,0,.14,.2,.52,pants)          // piernas
+  +box(px-.24,py-.3,.6,.42,.6,.62,p.shirt)                                           // torso
+  +box(px-.02,py-.3,1.22,.16,.6,.06,shade(p.shirt,.92))                              // hombros
+  +`<g class="head">${head(p,px+.02,py)}</g>`}
+function head(p,x,y){const[cx,cy]=iso(x,y,1.52),r=.24*S;
+ return `<rect x="${(cx-4).toFixed(1)}" y="${(cy+r-4).toFixed(1)}" width="8" height="8" fill="#e2b089"/>
+ <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="url(#skin)" ${OL}/>
+ <path d="M${(cx-r).toFixed(1)} ${(cy+2).toFixed(1)} A${r} ${r} 0 0 1 ${(cx+r*.75).toFixed(1)} ${(cy-r*.66).toFixed(1)} Q${(cx+1).toFixed(1)} ${(cy-r*.35).toFixed(1)} ${(cx-r*.25).toFixed(1)} ${(cy+r*.55).toFixed(1)} Z" fill="${p.hair}" ${OL}/>
+ <circle cx="${(cx+3).toFixed(1)}" cy="${(cy+1).toFixed(1)}" r="1.4" fill="#0e1013"/><circle cx="${(cx+8.5).toFixed(1)}" cy="${(cy+3.6).toFixed(1)}" r="1.4" fill="#0e1013"/>
+ <path d="M${(cx+3.5).toFixed(1)} ${(cy+6.5).toFixed(1)} q3 2.5 6 1" stroke="#7a3b2a" stroke-width="1.3" fill="none" stroke-linecap="round"/>`}
+function station(p){const dx=DX[p.zone],dy=DY[p.pos],px=dx-1.05,py=dy;
+ const lamp=()=>{const[bx,by]=iso(dx+.3,dy-.62,.78),[hx,hy]=iso(dx+.05,dy-.45,1.38);
+  return box(dx+.22,dy-.7,.78,.16,.16,.03,'#0e1013')+`<path d="M${bx+2} ${by-2} L${bx-2} ${by-34} L${hx} ${hy}" stroke="#0e1013" stroke-width="2.4" fill="none"/>
+  <path d="M${hx-9} ${hy+6} L${hx+1} ${hy-6} L${hx+11} ${hy+4} Z" fill="#4c6ef5" ${OL}/>`};
+ return shadow(dx-1.5,dy-.95,2.2,1.95)
+  +person(p,px,py)
+  +box(dx-.48,dy-.8,0,.06,.06,.72,'#0e1013')+box(dx+.42,dy-.8,0,.06,.06,.72,'#0e1013')+box(dx-.48,dy+.74,0,.06,.06,.72,'#0e1013')+box(dx+.42,dy+.74,0,.06,.06,.72,'#0e1013')
+  +box(dx-.5,dy-.82,.72,1,1.64,.06,'#fbfbfb')                                         // tablero
+  +box(dx-.36,dy-.3,.78,.24,.6,.025,'#d5dbe0')                                       // teclado
+  +box(px+.15,dy-.33,.78,.62,.13,.1,p.shirt)+box(px+.15,dy+.2,.78,.62,.13,.1,p.shirt) // brazos
+  +box(px+.75,dy-.33,.78,.1,.13,.08,'#f0c39b')+box(px+.75,dy+.2,.78,.1,.13,.08,'#f0c39b')
+  +box(dx+.2,dy-.12,.78,.18,.24,.02,'#2b3138')+box(dx+.25,dy-.04,.8,.05,.08,.2,'#2b3138') // pie monitor
+  +box(dx+.18,dy-.5,.92,.06,1,.58,'#2b3138')                                         // monitor
+  +lamp()+PROP[p.obj](dx-.1,dy+.42)}
+const plant=(x,y,s=1)=>{const[cx,cy]=iso(x+.25,y+.25,.55*s);
+ return shadow(x-.1,y-.1,.7,.7,.2)+box(x,y,0,.5,.5,.5*s,'#ffffff')+box(x+.02,y+.02,.5*s,.46,.46,.03,'#5a3d28','')
+ +`<g ${OL}><circle cx="${cx-10}" cy="${cy-6}" r="${15*s}" fill="#2f8a4b"/><circle cx="${cx+9}" cy="${cy-9}" r="${16*s}" fill="#3f9b5a"/><circle cx="${cx}" cy="${cy-24*s}" r="${15*s}" fill="#48a866"/><circle cx="${cx-2}" cy="${cy+2}" r="${12*s}" fill="#3a9354"/></g>`};
+function boardSVG(){const it=boardItems();const u0=3.5*S,u1=8.5*S,v0=-3.15*S,v1=-1.12*S,w=u1-u0,cw=(w-28)/4;
+ let s=`<rect x="${u0-6}" y="${v0-6}" width="${w+12}" height="${v1-v0+16}" rx="4" fill="#b9c4cb" stroke="#0e1013" stroke-width="1"/><rect x="${u0}" y="${v0}" width="${w}" height="${v1-v0}" fill="#fdfefe"/>
+  <rect x="${u0+20}" y="${v1+2}" width="${w-40}" height="6" fill="#8d9aa2"/><rect x="${u0+40}" y="${v1-1}" width="16" height="4" rx="2" fill="#4c6ef5"/><rect x="${u0+60}" y="${v1-1}" width="16" height="4" rx="2" fill="#ff5a4f"/>`;
+ COLS.forEach(([k,l,ink,bg],i)=>{const x=u0+8+i*(cw+4);const all=sortCol(k,it.filter(n=>n.col===k));const a=all.slice(0,4);
+  s+=`<text x="${x}" y="${v0+14}" font-family="Caveat,cursive" font-weight="700" font-size="12.5" fill="${ink}">${esc(k==='prop'?'Tu decisión':l)} (${all.length})</text><path d="M${x} ${v0+18} h${cw}" stroke="${ink}" stroke-width="1.2"/>`;
+  a.forEach((n,j)=>{const y=v0+24+j*21;const pp=byId(n.pid);const t=(pp?pp.n+': ':'')+n.txt;const tt=t.length>17?t.slice(0,16)+'…':t;
+   s+=`<rect x="${x}" y="${y}" width="${cw}" height="18" fill="${bg}" transform="rotate(${j%2?.8:-.8} ${x+cw/2} ${y+9})"/><text x="${x+3}" y="${y+12.5}" font-family="Caveat,cursive" font-weight="600" font-size="10" fill="#1d2a33">${esc(tt)}</text>${k==='hecho'?`<path d="M${x+3} ${y+9} h${Math.min(cw-6,tt.length*4.2)}" stroke="#2c8a55" stroke-width="1.3"/>`:''}`})});
+ return s}
+const GL='rgba(190,235,250,.28)',GS='stroke="#0e1013" stroke-width="1.2"';
+function glassSide(){const x=12.4,h=2.7;return poly([[x,0,0],[x,3.0,0],[x,3.0,h],[x,0,h]],GL,GS)+box(x-.04,0,h,.08,3.0,.08,'#0e1013','')+box(x-.04,3.0,0,.08,.08,h+.08,'#0e1013','')+box(x-.04,4.32,0,.08,.08,h+.08,'#0e1013','')+box(x-.04,3.0,h,.08,1.4,.08,'#0e1013','')}
+function glassFront(){const y=4.4,h=2.7;const[tx,ty]=iso(13.2,y,2.45);return poly([[12.4,y,0],[RW,y,0],[RW,y,h],[12.4,y,h]],GL,GS)+box(12.4,y-.04,h,RW-12.4,.08,.08,'#0e1013','')+box(13.7,y-.04,0,.06,.08,h,'#0e1013','')
+ +`<g transform="translate(${tx.toFixed(1)},${ty.toFixed(1)}) matrix(${C30},.5,0,1,0,0)"><rect x="-58" y="-11" width="116" height="20" rx="3" fill="#0e1013"/><text x="0" y="4" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="800" font-size="11" fill="#ffcf3a">VENTAS E IDEAS</text></g>`}
+function scene(){const minX=-(RD+.6)*C30*S,maxX=(RW+.6)*C30*S,minY=-RH*S-30,maxY=(RW+RD)*.5*S+.5*S+30;
+ const VB=[minX,minY,maxX-minX,maxY-minY];
+ const planks=Array.from({length:Math.ceil(RD/.42)},(_,i)=>{const y=i*.42;return `<path d="M${pt(0,y,0)} L${pt(RW,y,0)}" stroke="rgba(120,80,40,.16)" stroke-width="1"/>`}).join('')
+  +Array.from({length:40},(_,i)=>{const y=(i%20)*.42,x=((i*37)%11)+.5;return `<path d="M${pt(x,y,0)} L${pt(x,y+.42,0)}" stroke="rgba(120,80,40,.14)" stroke-width="1"/>`}).join('');
+ const win=(y0,y1)=>`<rect x="${y0*S}" y="${-2.95*S}" width="${(y1-y0)*S}" height="${1.95*S}" fill="url(#sky)" stroke="#0e1013" stroke-width="3"/><path d="M${(y0+y1)/2*S} ${-2.95*S} V${-1*S} M${y0*S} ${-1.95*S} H${y1*S}" stroke="#0e1013" stroke-width="2.5"/><rect x="${y0*S-4}" y="${-1*S}" width="${(y1-y0)*S+8}" height="6" fill="#fff" stroke="#0e1013" stroke-width="1"/>`;
+ const lightPatch=(y0,y1)=>poly([[0,y0,0],[0,y1,0],[2.2,y1+1.1,0],[2.2,y0+1.1,0]],'rgba(255,240,190,.32)');
+ const [lx,ly]=[1.0*S,-3.2*S];
+ let s=`<svg viewBox="${VB.map(n=>n.toFixed(0)).join(' ')}" role="img" aria-label="Vista isométrica de la oficina de RF Gestiones con ocho personas trabajando">
+ <defs><filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="5"/></filter>
+ <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a5b4fc"/><stop offset=".7" stop-color="#dbe4ff"/><stop offset="1" stop-color="#edf2ff"/></linearGradient>
+ <radialGradient id="skin" cx=".65" cy=".55" r=".7"><stop offset="0" stop-color="#f6d2ae"/><stop offset="1" stop-color="#e2ad86"/></radialGradient></defs>
+ ${box(0,0,-.35,RW,RD,.35,'#c7a47a')}
+ ${poly([[0,0,0],[RW,0,0],[RW,RD,0],[0,RD,0]],'#e8d3b0')}${planks}
+ ${box(-.3,-.3,0,RW+.3,.3,RH,'#f5f7f8')}${box(-.3,0,0,.3,RD,RH,'#eef2f4')}
+ ${wallBack(`<rect x="0" y="${-RH*S}" width="${RW*S}" height="${RH*S}" fill="#f7f9fa"/><rect x="0" y="${-.95*S}" width="${RW*S}" height="${.95*S}" fill="#4c6ef5"/><rect x="0" y="${-.98*S}" width="${RW*S}" height="5" fill="#0e1013"/>
+   <g transform="translate(${lx},${ly})"><rect width="${1.7*S}" height="${1.45*S}" rx="10" fill="#0e1013"/><text x="${.85*S}" y="${.85*S}" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="900" font-size="48" fill="#fff">RF</text><text x="${.85*S}" y="${1.2*S}" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="800" font-size="11" fill="#91a7ff">GESTIONES</text></g>
+   <g transform="translate(${2.95*S},${-2.7*S})"><circle r="17" fill="#fff" stroke="#0e1013" stroke-width="3"/><line id="hh" x1="0" y1="0" x2="0" y2="-9" stroke="#0e1013" stroke-width="3" stroke-linecap="round"/><line id="mm" x1="0" y1="0" x2="0" y2="-13" stroke="#4c6ef5" stroke-width="2.5" stroke-linecap="round"/></g>
+   <g id="wallboard">${boardSVG()}</g>
+   <g transform="translate(${12.9*S},${-3.05*S})"><rect width="${1.9*S}" height="${1.5*S}" fill="#fff" stroke="#0e1013" stroke-width="2.5"/><text x="${.95*S}" y="${.62*S}" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="900" font-size="17" fill="#3b5bdb">CRECER</text><text x="${.95*S}" y="${.98*S}" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="900" font-size="17" fill="#0e1013">SANO</text><path d="M14 ${1.28*S} l18 -10 l14 6 l22 -16 l22 4" stroke="#34b36d" stroke-width="3" fill="none"/></g>
+   <g class="seat" data-id="presidencia"><rect x="${10.3*S}" y="${-2.3*S}" width="${1.2*S}" height="${2.3*S}" fill="#2b3138" stroke="#0e1013" stroke-width="2"/><circle cx="${11.3*S}" cy="${-1.15*S}" r="3" fill="#ffcf3a"/><rect x="${10.25*S}" y="${-2.75*S}" width="${1.3*S}" height="18" rx="3" fill="#0e1013"/><text x="${10.9*S}" y="${-2.75*S+12.5}" text-anchor="middle" font-family="Archivo,sans-serif" font-weight="800" font-size="9" fill="#fff">PRESIDENCIA</text></g>
+   <rect x="${9.05*S}" y="${-3.05*S}" width="${.9*S}" height="${.55*S}" fill="#fff" stroke="#0e1013" stroke-width="2"/><path d="M${9.15*S} ${-2.6*S} l10 -10 l8 6 l12 -14" stroke="#4c6ef5" stroke-width="2.5" fill="none"/>`)}
+ ${wallLeft(`<rect x="0" y="${-RH*S}" width="${RD*S}" height="${RH*S}" fill="#eef3f5"/><rect x="0" y="${-.95*S}" width="${RD*S}" height="${.95*S}" fill="#4263eb"/><rect x="0" y="${-.98*S}" width="${RD*S}" height="5" fill="#0e1013"/>${win(1.1,2.9)}${win(3.6,5.4)}${win(6.1,7.9)}`)}
+ ${lightPatch(1.1,2.9)}${lightPatch(3.6,5.4)}${lightPatch(6.1,7.9)}
+ ${poly([[12.6,.3,0],[14.85,.3,0],[14.85,4.2,0],[12.6,4.2,0]],'rgba(255,207,58,.16)','stroke="rgba(196,150,20,.45)" stroke-width="1.5"')}${poly([[11.95,5.0,0],[14.85,5.0,0],[14.85,7.0,0],[11.95,7.0,0]],'rgba(76,110,245,.13)','stroke="rgba(59,91,219,.35)" stroke-width="1.5"')}${DX.slice(0,3).map(x=>poly([[x-1.75,1.3,0],[x+.95,1.3,0],[x+.95,7.1,0],[x-1.75,7.1,0]],'rgba(76,110,245,.13)','stroke="rgba(59,91,219,.35)" stroke-width="1.5"')).join('')}`;
+ const items=[];
+ items.push({d:12.3,s:glassSide()});items.push({d:19.6,s:glassFront()});items.push({d:15.6,s:plant(14.4,.5,.95)});
+ items.push({d:1.2,s:plant(.45,.45)});items.push({d:8.6,s:plant(.45,7.6,1.1)});items.push({d:19.5,s:plant(11.2,7.7,1.15)});
+ items.push({d:3.6,s:shadow(2.85,.05,.8,.75)+box(2.95,.08,0,.62,.6,.7,'#ffffff')+box(3.0,.12,.7,.52,.5,.28,'#d5dbe0')+box(3.05,.2,.98,.42,.3,.04,'#0e1013')}); // impresora
+ items.push({d:9.6,s:shadow(8.95,.05,1.1,.75)+box(9.02,.06,0,.95,.6,1.35,'#cfd8dd')+[.35,.75,1.15].map(z=>box(9.4,.66,z-.08,.2,.02,.05,'#0e1013')).join('')}); // archivo
+ items.push({d:3.3,s:shadow(.1,3.0,.7,.7)+box(.12,3.05,0,.5,.5,1.0,'#ffffff')+box(.17,3.1,1.0,.4,.4,.55,'#a5b4fc')+box(.25,3.18,1.55,.24,.24,.08,'#4c6ef5')}); // dispenser
+ P.forEach(p=>items.push({d:DX[p.zone]+DY[p.pos],s:`<g class="seat" data-id="${p.id}">${station(p)}</g>`}));
+ items.sort((a,b)=>a.d-b.d).forEach(i=>s+=i.s);
+ s+='</svg>';
+ const tags=P.map(p=>{const[hx,hy]=iso(DX[p.zone]-1.03,DY[p.pos],2.05);const r=rep(p);const lv=r.alerta?(/vencid|da -|negativ/i.test(r.alerta)?'bad':'warn'):'';
+  return `<button class="tag" type="button" data-id="${p.id}" style="left:${((hx-VB[0])/VB[2]*100).toFixed(2)}%;top:${((hy-VB[1])/VB[3]*100).toFixed(2)}%"><i class="${lv}"></i>${esc(p.n)} <small>${esc(p.r)}</small></button>`}).join('');
+ return s+tags}
+
+let seen=null;
+function drawBoard(){const it=boardItems();const keys=new Set(it.map(x=>x.col+'|'+x.pid+'|'+x.txt));
+ $('#cols').innerHTML=COLS.map(([k,l])=>{let a=sortCol(k,it.filter(x=>x.col===k));const tot=a.length;a=a.slice(0,k==='hecho'?8:10);
+  return `<div class="col c-${k}"><h3>${l}<span>${tot}</span></h3><div class="notes">${a.length?a.map(x=>{const p=byId(x.pid);const nw=seen&&!seen.has(x.col+'|'+x.pid+'|'+x.txt);
+   return `<button class="note${nw?' new':''}" type="button" data-go="${p.id}"><b>${esc(p.n+' · '+p.r)}<em>${esc(x.d.toLocaleDateString('es-AR',{day:'numeric',month:'numeric'}))}</em></b><span>${esc(x.txt)}</span></button>`}).join('')
+   :`<p class="empty">${k==='prop'?'Nada espera tu decisión':k==='hecho'?'Lo que se termine aparece tachado acá':'Nada por acá'}</p>`}</div></div>`}).join('');
+ seen=keys;const wb=document.getElementById('wallboard');if(wb)wb.innerHTML=boardSVG();
+ $('#bweek').textContent='Al '+new Date().toLocaleDateString('es-AR',{day:'numeric',month:'long'});
+ $('#bstamp').textContent=live&&readAt?'Actualizada '+readAt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'Sin conexión: se ve vacía'}
+
+function drawFloor(){$('#floor').innerHTML=scene();tick();markOn()}
+function markOn(){document.querySelectorAll('.seat,.tag').forEach(e=>e.classList.toggle('on',!!cur&&e.dataset.id===cur.id))}
+function drawKpis(){const c=e=>ST.tareas.filter(t=>t.estado===e).length;const tot=ST.tareas.length;
+ const k=[['Para hacer',c('pendiente'),`${ST.tareas.filter(t=>t.departamento===SIN&&t.estado==='pendiente').length} sin asignar`],['En curso',c('en_curso'),`${P.filter(p=>tasksOf(p.id,'en_curso').length).length} de 8 trabajando`],
+  ['Hechas',c('completada'),tot?`${Math.round(c('completada')/tot*100)}% de lo cargado`:'—'],['Esperan tu decisión',c('bloqueada'),ST.redes.pausada?'redes en pausa':'redes activas · límite '+ST.redes.limitePorDia+' por día']];
+ $('#kpis').innerHTML=k.map(([l,v,e])=>`<div class="kpi"><small>${esc(l)}</small><b>${esc(v)}</b><em>${esc(e)}</em></div>`).join('')}
+function drawAll(){drawFloor();drawBoard();drawKpis();if(cur)renderDyn()}
+const tick=()=>{const d=new Date(),h=d.getHours(),m=d.getMinutes();
+ $('#hora').textContent=(h>=8&&h<19?'Abierto':'Fuera de horario')+' · '+d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+ const a=(h%12+m/60)*30*Math.PI/180,b=m*6*Math.PI/180;
+ const hh=$('#hh'),mm=$('#mm');if(hh){hh.setAttribute('x2',9*Math.sin(a));hh.setAttribute('y2',-9*Math.cos(a));mm.setAttribute('x2',13*Math.sin(b));mm.setAttribute('y2',-13*Math.cos(b))}};
+let sample=null,cur=null,busy=false,chats={};
+tick();setInterval(tick,30000);
+try{chats=JSON.parse(localStorage.getItem('rf-chats')||'{}')}catch(e){}
+const save=()=>{try{localStorage.setItem('rf-chats',JSON.stringify(chats))}catch(e){}};
+const sys=(p,r)=>`Sos ${p.n}, a cargo de ${p.r} en RF Gestiones, un sistema de cobranzas para distribuidoras (boletas fiadas, vencimientos, alertas por WhatsApp y email). Hablás con Federico Roa, el presidente y dueño, en español rioplatense (voseo), cálido y concreto, como un compañero de oficina. Tu misión: ${p.d.mision} Tus funciones: ${p.hace.join('; ')}. Reglas que cumplís: ${p.d.reglas.join(' ')} Lo que tenés prohibido: ${p.d.prohibido.join(' ')} Principio rector de la empresa: crecimiento sostenible, rentable y colaborativo con el usuario; primero ayudar, después vender. Tu parte hoy: ${r.ahora} ${r.ultimo} ${r.sigue} ${r.alerta||''} Respondé en no más de 120 palabras, con pasos prácticos cuando ayuden. No inventes datos que no estén acá; si faltan, decilo. Para que algo se haga de verdad, decile que use el cuadro “Darle una orden” de este panel o que se lo pida a Claude en el chat. Sin markdown ni asteriscos.`;
+const log=()=>(chats[cur.id]||[]).map(m=>`<div class="msg ${m.role==='user'?'me':'it'}">${esc(m.content)}</div>`).join('');
+const avatar=p=>`<svg viewBox="-50 -150 100 100" aria-hidden="true"><g transform="translate(0,-100)"><ellipse cx="0" cy="22" rx="36" ry="18" fill="${p.shirt}" stroke="#0e1013" stroke-width="3"/><circle cx="0" cy="2" r="17" fill="#f2c9a1" stroke="#0e1013" stroke-width="3"/><path d="M-17 4 a17 17 0 0 1 34 0 q-17 -6 -34 0z" fill="${p.hair}" stroke="#0e1013" stroke-width="3"/><circle cx="-6" cy="8" r="2" fill="#0e1013"/><circle cx="6" cy="8" r="2" fill="#0e1013"/></g></svg>`;
+const ETQ={pendiente:'Para hacer',en_curso:'En curso',bloqueada:'Tu decisión',completada:'Hecho'};
+function acts(t){const b=(a,l,c='')=>`<button type="button" class="mini ${c}" data-act="${a}" data-tid="${esc(t.id)}">${l}</button>`;
+ if(t.estado==='completada')return b('reabrir','↩ Reabrir');
+ if(t.estado==='bloqueada')return b('hecha','✔ Lo resolví','go')+b('reabrir','↩ Devolver')+b('del','🗑','bad');
+ return (t.estado==='pendiente'?b('tomar','▶ Tomar','go'):'')+b('hecha','✔ Hecha')+(t.estado==='en_curso'?b('bloq','✋ Bloquear')+b('reabrir','↩ A por hacer'):'')+b('del','🗑','bad')}
+const planHTML=(pl,tit)=>{const L=[...pl.prop,...pl.curso,...pl.todo,...pl.hecho];if(!L.length)return '';
+ return `<h3>${tit}</h3><ul class="plan">${L.map(t=>`<li class="${t.estado==='completada'?'done':''}"><div class="t"><span class="e">${ETQ[t.estado]}</span><span style="flex:1">${esc(t.titulo)}</span></div>${t.resultado?`<div class="src" style="margin:2px 0 0">${esc(t.resultado)}</div>`:''}<div class="acts">${acts(t)}</div></li>`).join('')}</ul>`};
+function renderDyn(){if(!cur)return;if(cur.pres)return renderPres();const p=cur,r=rep(p),i=P.indexOf(p),prev=P[(i+P.length-1)%P.length],next=P[(i+1)%P.length];
+ $('#pav').innerHTML=avatar(p);$('#pname').textContent=p.n;$('#prole').textContent=p.d.persona.cargo+' · '+ZN[p.zone];
+ $('#pdyn').innerHTML=`<div class="bubble"><p class="hi">Hola Fede, te cuento cómo vengo:</p>
+  <dl class="rep"><div><dt>Ahora</dt><dd>${esc(r.ahora)}</dd></div><div><dt>Lo último</dt><dd>${esc(r.ultimo)}</dd></div><div><dt>Lo que sigue</dt><dd>${esc(r.sigue)}</dd></div></dl>
+  ${r.alerta?`<div class="alert prop">${esc(r.alerta)}</div>`:''}<div class="stat"><span>${esc(r.dato[0])}</span><b>${esc(r.dato[1])}</b></div></div>
+  ${planHTML(r.plan,'Mis tareas en la pizarra')}
+  <div class="nav"><button class="btn" type="button" data-go="${prev.id}">← ${esc(prev.n)}</button><button class="btn fill" type="button" data-go="${next.id}">Ahora ${esc(next.n)} →</button></div>
+  <h3>Trabaja con</h3><div class="chips">${(CON[p.id]||[]).map(id=>{const o=byId(id);return `<button class="chip" type="button" data-go="${o.id}">${esc(o.n)} · ${esc(o.r)}</button>`}).join('')}</div>
+  <h3>${sample?'Preguntale algo':'Pedidos para hacerle a Claude en el chat'}</h3>
+  <div class="chips">${p.ej.map((e,k)=>`<button class="chip" type="button" data-ej="${k}">${esc(e)}</button>`).join('')}</div>
+  <div class="log" id="log">${log()}</div>
+  <details><summary>Qué hace ${esc(p.n)}</summary><ul>${p.d.funciones.map(h=>`<li>${esc(h)}</li>`).join('')}</ul><p class="src">Lo que tiene prohibido:</p><ul>${p.d.prohibido.map(h=>`<li>${esc(h)}</li>`).join('')}</ul></details>`;
+ $('#chat').style.display=sample?'flex':'none';
+ const l=$('#log');if(l&&l.lastElementChild)l.lastElementChild.scrollIntoView({block:'nearest'})}
+function buildOrden(p){const el=$('#porden');const opt=(l,xs)=>xs.map(d=>`<option value="${d.id}">${esc(l+d.nombre)}</option>`).join('');
+ const dest=p&&!p.pres?p.id:'';const ent=p&&!p.pres?OFI.departamentos.filter(d=>p.d.entregaA.includes(d.id)):OFI.departamentos;
+ el.innerHTML=`<h3>${p&&!p.pres?'Darle una orden a '+esc(p.n):'Orden general'}</h3><div class="ord">
+  <input id="o-t" maxlength="200" placeholder="${p&&!p.pres?'¿Qué querés que haga?':'¿Qué orden querés dar?'}" aria-label="Orden">
+  <textarea id="o-d" rows="2" placeholder="Detalles (opcional)" aria-label="Detalles"></textarea>
+  <div class="row">${dest?'':`<select id="o-dep" aria-label="Departamento"><option value="">Sin asignar (que lo derive Claude)</option>${opt('',OFI.departamentos)}</select>`}
+  <select id="o-p" aria-label="Prioridad"><option value="alta">Prioridad alta</option><option value="media" selected>Prioridad media</option><option value="baja">Prioridad baja</option></select>
+  <select id="o-e" aria-label="Entregar a"><option value="">No entregar a nadie</option>${opt('Entregar a ',ent.filter(d=>d.id!==dest))}</select>
+  <select id="o-a" aria-label="Pedir apoyo"><option value="">Sin apoyo de otros</option>${opt('Pedir apoyo a ',OFI.departamentos.filter(d=>d.id!==dest))}</select></div>
+  <button type="button" class="btn fill" id="o-go">Dar la orden</button><div class="ok" id="o-ok" role="status"></div><div class="err" id="perr" role="alert"></div></div>`;
+ $('#o-go').onclick=async()=>{$('#o-ok').textContent='';$('#perr').textContent='';
+  try{await agregar({titulo:$('#o-t').value,descripcion:$('#o-d').value,prioridad:$('#o-p').value,departamento:dest||($('#o-dep')?$('#o-dep').value:''),entregaA:$('#o-e').value,apoyo:$('#o-a').value?[$('#o-a').value]:[]});
+   $('#o-t').value='';$('#o-d').value='';$('#o-ok').textContent='✔ Orden dada. Ya está en la pizarra.';drawAll()}catch(e){$('#perr').textContent=e.message}}}
+function renderPres(){const blk=ST.tareas.filter(t=>t.estado==='bloqueada');const pd=OFI.presidente;
+ $('#pav').innerHTML=avatar({shirt:pd.camisa,hair:pd.pelo});$('#pname').textContent=pd.nombre;$('#prole').textContent=pd.cargo+' de '+OFI.empresa;
+ const c=e=>ST.tareas.filter(t=>t.estado===e).length;
+ $('#pdyn').innerHTML=`<div class="bubble"><p class="hi">Federico, así está tu empresa:</p><dl class="rep"><div><dt>Por hacer</dt><dd>${c('pendiente')} tareas</dd></div><div><dt>En curso</dt><dd>${c('en_curso')}</dd></div><div><dt>Hechas</dt><dd>${c('completada')}</dd></div></dl>
+  <div class="stat"><span>Esperan tu decisión</span><b>${blk.length}</b></div></div>
+  <h3>Redes sociales</h3><div class="bubble"><div class="sw"><b>${ST.redes.pausada?'⏸ Redes en pausa: nadie publica':'✅ Marketing puede publicar (dentro de las barreras)'}</b><button type="button" class="mini ${ST.redes.pausada?'go':'bad'}" data-redes>${ST.redes.pausada?'▶ Reanudar':'⏸ Pausar todas'}</button></div>
+  <p class="src">Límite: ${ST.redes.limitePorDia} posteos por día. Cuentas conectadas: ${ST.redes.conectadas.length?esc(ST.redes.conectadas.join(', ')):'ninguna todavía, así que por ahora no se publica nada de verdad.'}</p></div>
+  ${blk.length?planHTML({prop:blk,curso:[],todo:[],hecho:[]},'Esperan tu decisión'):'<h3>Esperan tu decisión</h3><p class="empty" style="color:var(--soft)">Nada espera tu decisión. 👌</p>'}
+  <details><summary>Reglamento de la oficina</summary><ul>${OFI.reglamento.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></details>`;
+ $('#chat').style.display='none'}
+function openD(id){let p;if(id==='presidencia')p={id:'presidencia',pres:true};else p=byId(id);if(!p)return;cur=p;markOn();
+ renderDyn();buildOrden(p);$('#pbody').scrollTop=0;$('#panel').classList.add('on');$('#panel').setAttribute('aria-hidden','false');$('#shade').classList.add('on');setTimeout(()=>$('#close').focus(),60)}
+function closeD(){$('#panel').classList.remove('on');$('#panel').setAttribute('aria-hidden','true');$('#shade').classList.remove('on');
+ const id=cur&&cur.id;cur=null;markOn();if(id){const t=document.querySelector(`.tag[data-id="${id}"]`);if(t)t.focus()}}
+async function ask(text){if(!sample||busy||!text.trim()||!cur||cur.pres)return;const p=cur,r=rep(p);busy=true;$('#send').disabled=true;
+ const h=chats[p.id]=chats[p.id]||[];h.push({role:'user',content:text.trim()});
+ let msgs=h.slice(-12);if(msgs[0].role!=='user')msgs=msgs.slice(1);msgs=msgs.map((m,k)=>({role:m.role,content:k===0?sys(p,r)+'\n\nMensaje de Federico: '+m.content:m.content}));
+ renderDyn();const box=document.createElement('div');box.className='msg it';box.textContent='Pensando…';$('#log').appendChild(box);box.scrollIntoView({block:'nearest'});
+ try{const a=await sample(msgs,{cache:false,modelTier:'quick',onText:({text})=>{box.textContent=text}});h.push({role:'assistant',content:a.text});save()}
+ catch(e){h.pop();box.textContent=e&&e.code==='rate_limited'?'Estoy tapado, probá en un ratito.':e&&e.code==='not_granted'?'No tengo permiso para responder desde acá. Pedímelo en el chat con Claude.':'No pude responder. Probá de nuevo.'}
+ busy=false;$('#send').disabled=false;if(cur===p)renderDyn()}
+$('#floor').addEventListener('click',e=>{const d=e.target.closest('[data-id]');if(d)openD(d.dataset.id)});
+$('#cols').addEventListener('click',e=>{const d=e.target.closest('[data-go]');if(d&&d.dataset.go)openD(d.dataset.go)});
+$('#pres').addEventListener('click',()=>openD('presidencia'));
+$('#close').addEventListener('click',closeD);$('#shade').addEventListener('click',closeD);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cur&&!document.querySelector('.dlg'))closeD()});
+$('#pbody').addEventListener('click',async e=>{const g=e.target.closest('[data-go]');if(g){openD(g.dataset.go);return}
+ if(e.target.closest('[data-redes]')){run(async()=>{if(!DB)throw new Error('Sin conexión a la base.');ST.redes={...ST.redes,pausada:!ST.redes.pausada};await DB.doc('config/redes').set(ST.redes);await nota('REDES','pausada='+ST.redes.pausada);drawAll()});return}
+ const a=e.target.closest('[data-act]');if(a){const id=a.dataset.tid,t=ST.tareas.find(x=>x.id===id);if(!t)return;
+  run(async()=>{const k=a.dataset.act;
+   if(k==='tomar')await tomar(id);else if(k==='reabrir')await reabrir(id);
+   else if(k==='del'){if(!(await dlg({titulo:'¿Eliminar esta tarea?',texto:t.titulo,ok:'Eliminar'})))return;await eliminar(id)}
+   else{const hecha=k==='hecha';const x=await dlg({titulo:hecha?'¿Qué se hizo?':'¿Por qué se bloquea?',texto:t.titulo,input:true,ph:hecha?'Resumen (opcional)':'Motivo',ok:hecha?'Marcar como hecha':'Bloquear'});if(x===null)return;
+    await cerrarT(id,hecha?'completada':'bloqueada',hecha?'COMPLETADA':'BLOQUEADA',x||(hecha?'Marcada como hecha por Federico Roa.':'Bloqueada por Federico Roa.'))}
+   drawAll()});return}
+ const x=e.target.closest('[data-ej]');if(!x||!cur||cur.pres)return;const t=cur.ej[+x.dataset.ej];
+ if(sample)ask(t);else{try{await navigator.clipboard.writeText(t);x.textContent='Copiado ✓'}catch(err){x.textContent='Copiá: '+t}}});
+$('#chat').addEventListener('submit',e=>{e.preventDefault();const q=$('#q');const t=q.value;q.value='';ask(t)});
+$('#q').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#chat').requestSubmit()}});
+
+// ---------- conexión a la memoria de la página ----------
+drawAll();setPill('warn','Conectando…');
+if(window.claude&&claude.use){claude.use('sample').then(s=>{sample=s;if(cur)renderDyn()}).catch(()=>{})}
+(async()=>{DB=window.claude&&window.claude.use?await window.claude.use('db'):null;
+ if(!DB){setPill('warn','Sin conexión a los datos');aviso('Esta página no está conectada a su base: se ve la oficina vacía y no se guarda nada. Abrila desde tu cuenta de Claude.');return}
+ const t0=setTimeout(()=>{setPill('warn','Sin respuesta todavía');aviso('Todavía no se pudo conectar con los datos. Si no carga en unos segundos, recargá la página.')},10000);
+ let primera=true,tm=null;const rd=()=>{clearTimeout(tm);tm=setTimeout(drawAll,150)};
+ const ok=()=>{live=true;readAt=new Date();setPill('live','Datos en vivo · '+readAt.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}))};
+ DB.collection('tareas').onSnapshot(s=>{clearTimeout(t0);aviso();ST.tareas=s.docs.map(d=>d.data());ok();
+  if(primera&&!s.metadata.fromCache){primera=false;generarRutinas().catch(()=>{})}rd()},()=>{setPill('warn','Se perdió la conexión');aviso('Se perdió la conexión con los datos. Recargá la página.')});
+ DB.doc('config/redes').onSnapshot(s=>{if(s.exists)ST.redes={...ST.redes,...s.data()};rd()},()=>{});
+ DB.doc('registro/actual').onSnapshot(s=>{ST.log=(s.exists&&s.data().lineas)||[]},()=>{});
+ setInterval(()=>{if(!document.hidden)drawAll()},60000)})();
+
+}
+</script>

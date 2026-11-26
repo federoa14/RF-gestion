@@ -91,3 +91,9 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Decisión:** el crecimiento de la empresa debe ser sostenible, rentable y colaborativo con el usuario. El usuario es alguien a quien se busca ayudar; con su aporte ayuda al dueño. Aplica a planes, marketing y ventas. Quedó en el reglamento (`tareas/departamentos.json`).
 - **Devolución mensual:** a fin de mes Claude entrega al presidente la evolución de la empresa con datos reales y lectura honesta (rutina `gestion-devolucion-mensual`, cada 30 días).
 - **Pendiente:** definir con el usuario qué indicadores reales hay disponibles (clientes, bajas, ingresos de planes, costos) para que el informe no se base en estimaciones.
+
+## 2026-11-26 — La oficina que usa el Presidente vive como artefacto de Claude
+- **Decisión:** la oficina principal es el artefacto «Oficina RF Gestiones» (misma forma que «Oficina Urriste» del proyecto Distribuidora: escena isométrica, pizarra de post-its con lo hecho tachado, panel por persona con chat y cuadro «Darle una orden»). Datos en la base del propio artefacto (`tareas`, `config/redes`, `registro/actual`); Claude la opera desde el chat con `ArtifactData`.
+- **Motivo:** el Presidente quiere verla e interactuar desde Claude, como su oficina de la distribuidora; localhost y la pestaña de la app no se abren desde el chat.
+- **Dos copias:** la pestaña Oficina de la app (Supabase) queda como copia sin sincronizar. Pendiente: decidir si se retira o se sincroniza.
+- **Código:** `tareas/artefacto/oficina-rf.html`.
