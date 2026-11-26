@@ -96,3 +96,9 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-26 — Envío a todo el país (Plan 3)
 - **Decisión:** los comercios de Plan 3 pueden activar "Ofrecer envío a todo el país" en Configuración (con nota opcional). Si el comprador lo elige, la tienda pide nombre y apellido, DNI, teléfono, email (opcional), calle, altura, piso/depto, localidad, provincia, código postal, entre calles y observaciones, y valida lo obligatorio. El pedido guarda `deliveryScope: 'nacional'` y `shippingDetails`; en el panel se ven los datos completos con botón "Copiar datos".
 - **Costo del envío:** no se calcula en la tienda; se coordina por WhatsApp (nota para el comprador). Pendiente posible: tarifas por provincia o integración con el correo.
+
+## 2026-11-26 — Videos para Instagram y TikTok (al servicio de Marketing)
+- **Decisión:** la sesión «Videos para Instagram y TikTok» produce videos para Marketing (Pedro) y Diseño (Juan) de la Oficina RF Gestiones, **solo cuando Marketing los pide** (tarea «Video: …» en la pizarra o pedido de Federico). Sin rutinas ni videos por iniciativa propia. Entrega a Marketing; no publica.
+- **Criterio de Federico:** videos que atraigan, no que expulsen: gancho, ritmo, pantallas reales, cierre con llamado a la acción. Sin música con derechos (se agrega en la app).
+- **Primer video:** «Cómo funciona RF Gestiones» (22 s), `tareas/video/salida/2026-11-26-como-funciona.mp4`. Herramientas y reglas en `tareas/video/README.md`.
+- **Nota:** la oficina vive en la rama `claude/pensive-bardeen-5jdxj7` y en el artefacto «Oficina RF Gestiones»; la sesión «Oficina virtual RF Gestiones» no se puede leer desde otra sesión en la nube (solo desde un dispositivo de confianza).

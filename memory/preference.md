@@ -11,5 +11,9 @@ Formato: una viñeta por preferencia, con fecha si es nueva. Si una preferencia 
 - Mensajes de commit en español, cortos y descriptivos (según el historial).
 - Trabajo en ramas `claude/...`, integradas a `main` por pull request.
 
+## Contenido para redes
+- Videos que atraigan: gancho, ritmo y pantallas reales; nada de placas estáticas aburridas (2026-11-26).
+- La producción de video se activa solo por pedido de Marketing (2026-11-26).
+
 ## Código
 - (pendiente de registrar)
