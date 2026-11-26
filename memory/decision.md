@@ -92,3 +92,7 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Hallazgo (logs de Vercel):** las funciones de `api/` fallaban en producción con `ERR_MODULE_NOT_FOUND`: los imports relativos entre archivos deben llevar `.js` (módulos ESM). Esto también rompía la vista previa del link de la tienda (`api/tienda-preview.ts`), que nunca había funcionado en producción.
 - **Regla:** en `api/` importar siempre con extensión `.js` (ej. `./_manifest.js`). `tests/unit/apiFunctions.test.ts` compila y llama las funciones como lo hace Vercel.
 - El manifiesto de la tienda se sirve en `/api/store-manifest` (`/api/manifest` daba 404).
+
+## 2026-11-26 — Envío a todo el país (Plan 3)
+- **Decisión:** los comercios de Plan 3 pueden activar "Ofrecer envío a todo el país" en Configuración (con nota opcional). Si el comprador lo elige, la tienda pide nombre y apellido, DNI, teléfono, email (opcional), calle, altura, piso/depto, localidad, provincia, código postal, entre calles y observaciones, y valida lo obligatorio. El pedido guarda `deliveryScope: 'nacional'` y `shippingDetails`; en el panel se ven los datos completos con botón "Copiar datos".
+- **Costo del envío:** no se calcula en la tienda; se coordina por WhatsApp (nota para el comprador). Pendiente posible: tarifas por provincia o integración con el correo.

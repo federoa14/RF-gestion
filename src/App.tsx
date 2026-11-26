@@ -1239,6 +1239,8 @@ export default function App() {
         '',
       allowPickup: nextSettings.allowPickup !== false,
       allowDelivery: nextSettings.allowDelivery !== false,
+      allowNationalShipping: isFullFeatures ? Boolean(nextSettings.allowNationalShipping) : false,
+      nationalShippingNote: isFullFeatures ? nextSettings.nationalShippingNote : undefined,
       deliveryNote: nextSettings.deliveryNote,
       pickupAddress: nextSettings.pickupAddress || targetTenant.address || '',
       pickupHours: nextSettings.pickupHours || 'Lunes a Sábado · 9:00 a 19:00 hs',
