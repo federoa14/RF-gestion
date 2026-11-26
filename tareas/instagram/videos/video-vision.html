@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0}
+body{background:#222;font-family:Inter,"Inter Display",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.s{position:relative;width:1080px;height:1920px;overflow:hidden;color:#fff;display:flex;flex-direction:column;padding:270px 80px 390px}
+.navy{background:radial-gradient(120% 70% at 85% 0%,#1d5fd6 0%,#0a3f9e 38%,#061a40 78%)}
+.streak{position:absolute;inset:0;background:linear-gradient(115deg,transparent 40%,rgba(255,255,255,.07) 40.2%,rgba(255,255,255,.07) 52%,transparent 52.2%),linear-gradient(115deg,transparent 62%,rgba(120,170,255,.10) 62.2%,rgba(120,170,255,.10) 66%,transparent 66.2%);pointer-events:none}
+.s>*{position:relative}.s>.streak{position:absolute}
+h1{font-weight:900;letter-spacing:-.025em;line-height:1.04}
+.pills{display:flex;flex-wrap:wrap;gap:14px}
+.pill{font-weight:700;font-size:34px;padding:14px 28px;border-radius:999px;background:rgba(255,255,255,.12);border:2px solid rgba(255,255,255,.28)}
+.btn{display:inline-block;background:#fff;color:#061a40;font-weight:900;font-size:46px;padding:28px 52px;border-radius:999px;align-self:flex-start}
+.light{background:#eef4ff;color:#061a40}
+.num{width:96px;height:96px;border-radius:26px;background:#1d5fd6;color:#fff;font-weight:900;font-size:58px;display:grid;place-items:center;flex:none}
+.item{display:flex;gap:34px;align-items:center;background:#fff;border-radius:38px;padding:36px 44px;box-shadow:0 14px 40px rgba(6,26,64,.10)}
+.item p{font-size:44px;font-weight:700;line-height:1.18}
+.item span{display:block;font-size:30px;font-weight:500;color:#4a5a78;margin-top:8px}
+.sub{font-size:42px;font-weight:500;line-height:1.3;color:#cfe0ff}
+
+body{margin:0;background:#061a40}
+.s{padding:0;display:block}
+.sc{position:absolute;inset:0;opacity:0;animation:sc var(--d) linear var(--t) both}
+.sc.last{animation:sc2 var(--d) linear var(--t) both}
+@keyframes sc{0%{opacity:0;transform:translateY(60px)}9%{opacity:1;transform:none}91%{opacity:1;transform:none}100%{opacity:0;transform:translateY(-40px)}}
+@keyframes sc2{0%{opacity:0;transform:translateY(60px)}9%{opacity:1;transform:none}100%{opacity:1;transform:none}}
+.top{position:absolute;left:80px;right:80px;top:250px;display:flex;flex-direction:column;gap:30px}
+.kick{font-weight:800;font-size:36px;color:#9db9f5;letter-spacing:.08em;text-transform:uppercase}
+.ph{position:absolute;left:130px;bottom:0;width:820px;height:1080px;overflow:hidden;border-radius:60px 60px 0 0;animation:up 1.2s ease-out var(--t) both}
+.ph img{width:1080px;margin-left:-130px;margin-top:-640px;display:block}
+@keyframes up{from{transform:translateY(300px)}to{transform:none}}
+.mid{position:absolute;left:80px;right:80px;top:0;bottom:0;display:flex;flex-direction:column;justify-content:center;gap:40px}
+.hl{color:#6f9bf0}
+.bar{position:absolute;left:0;top:0;height:10px;background:#6f9bf0;width:0;animation:bar var(--tot) linear both}
+@keyframes bar{to{width:100%}}
+</style></head><body><div class="s navy" id="root" style="--tot:21.8s"><div class="streak"></div><div class="bar"></div><div class="sc" style="--t:0s;--d:4.3s"><div class="mid"><p class="kick">Para quien tiene un comercio</p><h1 style="font-size:116px">Tu comercio, <span class="hl">ordenado</span>.</h1></div></div><div class="sc" style="--t:4.0s;--d:4.6s"><div class="mid"><p class="kick">Nuestra visión</p><h1 style="font-size:116px">Que cualquier comercio pueda <span class="hl">ordenarse y crecer</span>.</h1><p class="sub" style="font-size:46px">Sin complicarse y sin un equipo técnico.</p></div></div><div class="sc" style="--t:8.3s;--d:4.6s"><div class="mid"><p class="kick">Cómo queremos crecer</p><h1 style="font-size:116px">Crecer sano, de la mano de <span class="hl">cada cliente</span>.</h1><p class="sub" style="font-size:46px">Sostenible, rentable y colaborativo.</p></div></div><div class="sc" style="--t:12.600000000000001s;--d:4.3s"><div class="mid"><p class="kick">Nuestra forma de trabajar</p><h1 style="font-size:116px">Primero <span class="hl">ayudar</span>.<br>Después vender.</h1></div></div><div class="sc last" style="--t:16.6s;--d:5.2s"><div class="mid" style="align-items:flex-start"><img src="logo_full.png" style="width:300px"><h1 style="font-size:112px">Probalo<br><span class="hl">30 días gratis</span></h1><p class="sub" style="font-size:46px">Link en la bio · @rfgestion</p><p style="font-size:40px;font-weight:800;margin-top:20px">RF Gestiones</p></div></div></div></body></html>
