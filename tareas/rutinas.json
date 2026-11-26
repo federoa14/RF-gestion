@@ -133,5 +133,14 @@
     "cadenciaDias": 7,
     "prioridad": "media",
     "entregaA": "marketing"
+  },
+  {
+    "id": "datos-uso-primeros-90",
+    "departamento": "datos",
+    "titulo": "Uso de los comercios en sus primeros 90 días",
+    "descripcion": "Por cada comercio (sin nombre, numerado) que esté dentro de sus primeros 90 días: días desde el alta, qué módulos usa y cuánto (boletas, clientes, catálogo, pedidos, avisos), qué es lo que más usa, fecha de última actividad y errores registrados. Marcar a los que dejaron de usar la app y a los 'días hasta dejar de usar'. Decir qué datos no existen (por ejemplo ingresos a pantallas) y qué tan chica es la muestra. Entregar a Calidad la lista de los que frenaron para buscar si hubo un problema.",
+    "cadenciaDias": 7,
+    "prioridad": "alta",
+    "entregaA": "calidad"
   }
 ]
