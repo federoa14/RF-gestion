@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-RF-gestion: sistema de cobranzas para distribuidoras (boletas fiadas, vencimientos, alertas por WhatsApp y email). Express + React/Vite + Supabase, desplegado en Vercel.
+RF-gestion (marca RF Gestiones): plataforma de gestión para comercios. Empezó como sistema de cobranzas para distribuidoras (boletas fiadas, vencimientos, alertas por WhatsApp y email) y hoy suma tienda online, venta de mostrador, fidelización y automatizaciones, para varios rubros (ver memory/decision.md, «Qué es RF Gestiones hoy»). Express + React/Vite + Supabase, desplegado en Vercel.
 
 ## Memoria persistente
 

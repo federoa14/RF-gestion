@@ -109,3 +109,15 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **Publicación en horarios fuertes:** las tareas programadas no pueden usar conectores en esta organización, así que las 3 rutinas «RF Marketing» quedaron desactivadas. Alternativa: Metricool (publica por su cuenta a la hora programada) a las 12:20 y 20:20 (Argentina), una vez que Federico vincule @rfgestion. Los horarios son una hipótesis hasta tener datos (se necesitan 100+ seguidores).
 - **Reglas:** nada de anuncios pagos ni «impulsar» sin autorización expresa; máximo 2 posteos de feed y 3 historias por día; todo veraz. Detalle en `tareas/instagram/AUTOMATIZACION.md`.
 - **Aviso:** el repositorio es público; no guardar acá nada sensible.
+
+## 2026-11-26 — Qué es RF Gestiones hoy (el producto ya no es solo cobranzas para distribuidoras)
+- **Decisión del Presidente:** la propuesta se comunica como plataforma de gestión para comercios, no solo cobranzas para distribuidoras. Revisado contra el código el 2026-11-26.
+- **Rubros que soporta** (`src/utils/businessMode.ts`): Mayorista/Distribuidora; Local de ropa, indumentaria y calzado; E-commerce/Despensa/Kiosco; Comercio/Almacén/Barrio con fiado; Cuenta corriente/Corralón/Taller. Cada rubro cambia reglas y vocabulario (tope por cliente, cuotas con interés, señas, canasto por producto, remitos con imputación FIFO).
+- **Cobranzas y fiado:** boletas con vencimiento, pagos parciales, prórrogas, estado de cuenta, historial de pagadas, agenda rápida, boletas impagas, rendición de reparto, auditoría de mora y score crediticio por cliente y por vendedor, clientes y vendedores/preventistas.
+- **Avisos:** WhatsApp (manual en todos los planes, automático en el Plan 3) y mail; avisos a vendedores; resumen de deuda y link de pago para el cliente.
+- **Tienda online (Planes 2 y 3):** catálogo con link y QR propio, pagos en efectivo, transferencia y Mercado Pago, stock por producto y variante (Plan 2 hasta 5 rubros y 50 artículos), pedidos con estados (por armar, listo, en camino, entregado), despacho con comprobante, cambios y devoluciones, estadísticas.
+- **Mostrador:** venta de mostrador y lector de código de barras con la cámara.
+- **Fidelización y venta (Plan 3):** puntos por DNI, gift cards con QR, saldo a favor, cupones, ofertas relámpago y outlet, recupero de carritos abandonados, avisos de stock, club de promos, flyers (estudio propio), radar de clientes fríos (ropa y calzado), diseño de la página (colores y letra).
+- **Planes:** Plan 1 Básico (gestión sin web), Plan 2 Página web básica, Plan 3 Full. Prueba gratis de 30 días como Plan 2.
+- **Plataforma:** multi comercio (dueño, administrador, vendedor), panel superadmin, copias de seguridad automáticas, términos y condiciones, app instalable con logo propio.
+- **Consecuencia:** todo material de marketing (bio, historias, carrusel) usa el nuevo encuadre. Las 3 historias del 26-11 decían «para distribuidoras»: vencen solas a las 24 h. Carrusel v2 en cola para el 27-11 mediodía.
