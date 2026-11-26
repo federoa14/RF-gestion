@@ -120,3 +120,27 @@ for (const w of [360, 320]) {
     await context.close();
   });
 }
+
+for (const w of [360, 320]) {
+  test('movil flyer QR y carritos ' + w, async () => {
+    const seed = fixtures.makeSeed();
+    const old = new Date(Date.now() - 8 * 3_600_000).toISOString();
+    seed.tables.catalog_abandoned_carts = [{ business_id: 'biz1', id: 'c1', data: { id: 'c1', tenantId: 'biz1', customerName: 'Lucía Gómez', customerPhone: '1155550001', items: [{ productId: 'p1', productName: 'Yerba 1kg', unitPrice: 2500, quantity: 1, subtotal: 2500 }], totalAmount: 2500, currencySymbol: '$', status: 'abandoned', createdAt: old, updatedAt: old } }];
+    const { page, context } = await openPage(app.browser, seed, { width: w, height: 740 });
+    await loginAsOwner(page);
+    await page.waitForSelector('text=Almacén Uno', { timeout: 20000 });
+    await page.keyboard.press('Escape');
+    await page.locator('button[aria-label="Abrir menú lateral"]').first().click();
+    await page.locator('button:visible', { hasText: 'Catálogo Online' }).first().click();
+    await page.waitForSelector('[aria-label="Carritos para recordar"]', { timeout: 15000 });
+    await audit(page, w + '-aviso-carritos');
+    await page.locator('[aria-label="Carritos para recordar"] button', { hasText: 'Ver y recordar' }).click();
+    await page.waitForSelector('text=Listo para recordar');
+    await audit(page, w + '-carritos');
+    await page.locator('[role=tablist][aria-label="Secciones del catálogo"] button', { hasText: 'Productos' }).click();
+    await page.locator('button', { hasText: 'Flyer con QR' }).click();
+    await page.waitForSelector('img[alt="Vista previa del flyer con QR"]', { timeout: 15000 });
+    await audit(page, w + '-flyer-qr');
+    await context.close();
+  });
+}

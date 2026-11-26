@@ -1,5 +1,12 @@
 import { isNewOrderSoundEnabled, playNewOrderChime, setNewOrderSoundEnabled } from '../utils/newOrderAlerts';
 import { DesignPageEditor } from './DesignPageEditor';
+import { QrFlyerModal } from './QrFlyerModal';
+import {
+  DEFAULT_REMINDER_HOURS,
+  REMINDER_HOUR_OPTIONS,
+  formatHours,
+  getCartReminderInfo,
+} from '../utils/abandonedCarts';
 import { ShippingDetailsBlock } from './ShippingDetailsBlock';
 import { BarcodeScannerModal } from './BarcodeScannerModal';
 import type { CatalogStoreTheme } from '../types';
@@ -756,6 +763,15 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     [settings.slug, config.tenantCode, config.tenantId, tenant?.tenantCode, tenant?.id]
   );
 
+  const [isQrFlyerOpen, setIsQrFlyerOpen] = useState(false);
+  const cartReminderHours = settings.abandonedCartReminderHours || DEFAULT_REMINDER_HOURS;
+  const cartsReadyToRemind = useMemo(() => {
+    const now = Date.now();
+    return abandonedCarts
+      .map((c) => ({ cart: c, info: getCartReminderInfo(c, cartReminderHours, now) }))
+      .filter((x) => x.info.state === 'ready' || x.info.state === 'second')
+      .sort((a, b) => b.info.ageHours - a.info.ageHours);
+  }, [abandonedCarts, cartReminderHours]);
   const publicUrl = useMemo(() => {
     if (typeof window === 'undefined') return `/?catalog=${encodeURIComponent(catalogHandle)}`;
     return `${window.location.origin}/?catalog=${encodeURIComponent(catalogHandle)}`;
@@ -3036,6 +3052,15 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 </>
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => setIsQrFlyerOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white border border-[#0B1933] transition-colors cursor-pointer shrink-0 self-start sm:self-auto whitespace-nowrap"
+              title="Descargá un flyer con el QR de tu tienda para imprimir o compartir"
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>Flyer con QR</span>
+            </button>
           </div>
 
           <div className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -3123,6 +3148,34 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         {/* KPI Row + Sub-navigation */}
         <div className="space-y-2 pt-1">
           {/* Secciones del catálogo */}
+          {!isBasicWebPlan && cartsReadyToRemind.length > 0 && subTab !== 'carritos_abandonados' && (
+            <div
+              className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5"
+              role="status"
+              aria-label="Carritos para recordar"
+            >
+              <div className="text-xs text-amber-950 min-w-0">
+                <span className="font-bold">
+                  🛒 {cartsReadyToRemind.length === 1 ? '1 cliente dejó' : `${cartsReadyToRemind.length} clientes dejaron`} un carrito sin finalizar:
+                </span>{' '}
+                {cartsReadyToRemind
+                  .slice(0, 3)
+                  .map(({ cart }) => `${cart.customerName || 'Visitante'}${cart.customerPhone ? ` (${cart.customerPhone})` : ''}`)
+                  .join(', ')}
+                {cartsReadyToRemind.length > 3 ? ` y ${cartsReadyToRemind.length - 3} más` : ''}. Ya es buen momento para recordárselo por WhatsApp.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSubTab('carritos_abandonados');
+                  void onRefreshAbandonedCarts?.();
+                }}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold cursor-pointer whitespace-nowrap"
+              >
+                Ver y recordar
+              </button>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Secciones del catálogo">
             {CATALOG_TAB_GROUPS.map((g) => {
               const active = catalogGroupOf(subTab) === g.id;
@@ -3242,6 +3295,11 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             >
               <ShoppingCart className="w-3.5 h-3.5 text-amber-600" />
               <span>Carritos</span>
+              {!isBasicWebPlan && cartsReadyToRemind.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded bg-emerald-600 text-white text-[10px] font-bold" title="Listos para recordar">
+                  {cartsReadyToRemind.length} para recordar
+                </span>
+              )}
               {!isBasicWebPlan &&
                 abandonedCarts.filter((c) => c.status === 'abandoned' || c.status === 'reminded').length > 0 && (
                 <span className="px-1.5 py-0.2 rounded bg-amber-600 text-white text-[10px] font-mono tabular-nums">
@@ -5700,6 +5758,31 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
               </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-amber-50/60 border border-amber-200 text-xs">
+              <span className="font-semibold text-slate-700">Avisarme que un carrito está listo para recordar después de</span>
+              <select
+                value={cartReminderHours}
+                onChange={(e) =>
+                  onSaveSettings({
+                    ...settings,
+                    abandonedCartReminderHours: Number(e.target.value),
+                    updatedAt: new Date().toISOString(),
+                  })
+                }
+                aria-label="Horas de espera antes de recordar"
+                className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-900 cursor-pointer"
+              >
+                {REMINDER_HOUR_OPTIONS.map((h) => (
+                  <option key={h} value={h}>
+                    {h} horas{h === DEFAULT_REMINDER_HOURS ? ' (recomendado)' : ''}
+                  </option>
+                ))}
+              </select>
+              <span className="text-slate-500 w-full">
+                Recomendación: primer aviso a las 6 horas, cuando el cliente todavía se acuerda de la compra; un segundo a las 24 horas del primero. No conviene pasar de dos avisos.
+              </span>
+            </div>
+
             {Array.isArray(settings.coupons) && settings.coupons.filter((c) => c.active).length > 0 && (
               <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
                 <span className="font-semibold text-slate-700">
@@ -5723,11 +5806,18 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             )}
 
             {(() => {
-              const list = abandonedCarts.filter((c) =>
-                cartFilterScope === 'pending'
-                  ? c.status === 'abandoned' || c.status === 'reminded'
-                  : true
-              );
+              const nowMs = Date.now();
+              const rank = (c: CatalogAbandonedCart) => {
+                const st = getCartReminderInfo(c, cartReminderHours, nowMs).state;
+                return st === 'ready' || st === 'second' ? 0 : st === 'waiting' ? 1 : 2;
+              };
+              const list = abandonedCarts
+                .filter((c) =>
+                  cartFilterScope === 'pending'
+                    ? c.status === 'abandoned' || c.status === 'reminded'
+                    : true
+                )
+                .sort((a, b) => rank(a) - rank(b) || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
               if (list.length === 0) {
                 return (
                   <div className="border border-dashed border-slate-200 rounded-xl p-8 text-center text-xs text-slate-500">
@@ -5747,6 +5837,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                         : `${formatCurrency(matchedCoupon.value, currency)} OFF`
                       : undefined;
                     const recoverLink = `${publicUrl}${publicUrl.includes('?') ? '&' : '?'}recover_cart=${encodeURIComponent(cart.id)}`;
+                    const reminderInfo = getCartReminderInfo(cart, cartReminderHours);
 
                     const handleSendReminder = async () => {
                       if (!cart.customerPhone?.trim()) {
@@ -5833,6 +5924,26 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                                 ? 'Descartado'
                                 : 'Sin finalizar'}
                             </span>
+                            {reminderInfo.state === 'ready' && (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-600 text-white">
+                                Listo para recordar · hace {formatHours(reminderInfo.ageHours)}
+                              </span>
+                            )}
+                            {reminderInfo.state === 'second' && (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-600 text-white">
+                                Conviene un segundo aviso
+                              </span>
+                            )}
+                            {reminderInfo.state === 'waiting' && (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                                Esperando · recordar en {formatHours(reminderInfo.waitHours)}
+                              </span>
+                            )}
+                            {reminderInfo.state === 'nophone' && (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                                Sin teléfono
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-slate-600 space-y-0.5">
                             {cart.items.map((it, idx) => (
@@ -5860,7 +5971,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white cursor-pointer whitespace-nowrap"
                             >
                               <MessageCircle className="w-3.5 h-3.5" />
-                              <span>Recuperar por WhatsApp</span>
+                              <span>Recordar por WhatsApp</span>
                             </button>
                             {cart.status !== 'recovered' && (
                               <button
@@ -6938,6 +7049,20 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
         })()}
 
       {/* SUB-TAB 3: CONFIGURACIÓN DE TIENDA, WHATSAPP Y RETIRO */}
+      <QrFlyerModal
+        isOpen={isQrFlyerOpen}
+        onClose={() => setIsQrFlyerOpen(false)}
+        url={publicUrl}
+        tenantId={tenant?.id || 'tienda'}
+        storeName={settings.storeName || config.distributorName || 'Mi tienda'}
+        contact={
+          settings.whatsappPhone || config.senderPhone || config.distributorPhone
+            ? `WhatsApp ${settings.whatsappPhone || config.senderPhone || config.distributorPhone}`
+            : ''
+        }
+        logoUrl={config.distributorLogoUrl || tenant?.logoUrl}
+      />
+
       <BarcodeScannerModal
         isOpen={scanTarget !== null}
         onClose={() => setScanTarget(null)}

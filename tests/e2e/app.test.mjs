@@ -295,6 +295,51 @@ describe('Envío a todo el país', () => {
   });
 });
 
+describe('Flyer con QR y recordatorio de carritos', () => {
+  test('flyer con QR: se arma con los datos de la tienda, se edita y se descarga', async () => {
+    const { page, context, pageErrors } = await openPage(app.browser, fixtures.makeSeed());
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page);
+    await page.locator('button', { hasText: 'Flyer con QR' }).click();
+    const dlg = page.locator('[aria-label="Flyer con QR de la tienda"]');
+    await dlg.waitFor({ timeout: 10_000 });
+    await page.waitForFunction(() => document.querySelector('img[alt="Vista previa del flyer con QR"]')?.getAttribute('src')?.startsWith('data:image/png'), null, { timeout: 15_000 });
+    assert.match(await dlg.innerText(), /\?catalog=/);
+    // se puede editar el título y el nombre
+    await dlg.locator('label', { hasText: 'Título superior' }).locator('input').fill('TIENDA ONLINE');
+    await dlg.locator('label', { hasText: 'Nombre de la tienda' }).locator('input').fill('Librería Prueba');
+    await page.waitForTimeout(800);
+    const [download] = await Promise.all([page.waitForEvent('download'), dlg.locator('button', { hasText: 'Descargar flyer' }).click()]);
+    assert.match(download.suggestedFilename(), /^flyer-qr-libreria-prueba-a4\.png$/);
+    const [qrDownload] = await Promise.all([page.waitForEvent('download'), dlg.locator('button', { hasText: 'Descargar solo el QR' }).click()]);
+    assert.match(qrDownload.suggestedFilename(), /^qr-libreria-prueba\.png$/);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  });
+
+  test('carritos: avisa quién dejó un carrito y cuándo conviene recordarlo', async () => {
+    const seed = fixtures.makeSeed();
+    const hAgo = (h) => new Date(Date.now() - h * 3_600_000).toISOString();
+    const mk = (id, name, phone, h) => ({ business_id: 'biz1', id, data: { id, tenantId: 'biz1', customerName: name, customerPhone: phone, items: [{ productId: 'p1', productName: 'Yerba 1kg', unitPrice: 2500, quantity: 1, subtotal: 2500 }], totalAmount: 2500, currencySymbol: '$', status: 'abandoned', createdAt: hAgo(h), updatedAt: hAgo(h) } });
+    seed.tables.catalog_abandoned_carts = [mk('cart-1', 'Lucía Gómez', '1155550001', 8), mk('cart-2', 'Pedro Nuevo', '1155550002', 1)];
+    const { page, context } = await openPage(app.browser, seed);
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page);
+    const strip = page.locator('[aria-label="Carritos para recordar"]');
+    await strip.waitFor({ timeout: 15_000 });
+    const text = await strip.innerText();
+    assert.match(text, /Lucía Gómez/);
+    assert.match(text, /1155550001/);
+    assert.doesNotMatch(text, /Pedro Nuevo/, 'el carrito de hace 1 h todavía no está listo');
+    await strip.locator('button', { hasText: 'Ver y recordar' }).click();
+    await page.waitForSelector('text=Listo para recordar', { timeout: 10_000 });
+    await page.waitForSelector('text=Esperando', { timeout: 5_000 });
+    await context.close();
+  });
+});
+
 describe('App instalable', () => {
   test('la tienda usa su propio manifiesto y el panel el nombre de la empresa', async () => {
     let { page, context } = await openPage(app.browser, fixtures.makeStoreSeed(), { path: '/?catalog=tienda' });

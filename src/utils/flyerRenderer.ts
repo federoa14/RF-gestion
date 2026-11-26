@@ -39,18 +39,18 @@ export interface FlyerOptions {
 
 type Ctx = CanvasRenderingContext2D;
 
-const SANS = '"Plus Jakarta Sans", "Inter", system-ui, sans-serif';
-const SERIF = '"Playfair Display", Georgia, serif';
+export const SANS = '"Plus Jakarta Sans", "Inter", system-ui, sans-serif';
+export const SERIF = '"Playfair Display", Georgia, serif';
 
 function hexToRgb(hex: string): [number, number, number] {
   const h = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#0B1933';
   return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 }
-function rgba(hex: string, a: number): string {
+export function rgba(hex: string, a: number): string {
   const [r, g, b] = hexToRgb(hex);
   return `rgba(${r},${g},${b},${a})`;
 }
-function mix(hex: string, other: string, t: number): string {
+export function mix(hex: string, other: string, t: number): string {
   const [r1, g1, b1] = hexToRgb(hex);
   const [r2, g2, b2] = hexToRgb(other);
   const c = (a: number, b: number) => Math.round(a + (b - a) * t);
@@ -63,11 +63,11 @@ function luminance(hex: string): number {
   });
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
-function onColor(bg: string): string {
+export function onColor(bg: string): string {
   return luminance(bg) > 0.45 ? '#0F172A' : '#FFFFFF';
 }
 
-function rr(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
+export function rr(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   const rad = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + rad, y);
@@ -78,7 +78,7 @@ function rr(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   ctx.closePath();
 }
 
-function wrap(ctx: Ctx, text: string, maxW: number): string[] {
+export function wrap(ctx: Ctx, text: string, maxW: number): string[] {
   const words = text.trim().split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let cur = '';
@@ -96,7 +96,7 @@ function wrap(ctx: Ctx, text: string, maxW: number): string[] {
 }
 
 /** Achica la letra hasta que el texto entre en `maxLines` renglones. */
-function fitText(
+export function fitText(
   ctx: Ctx,
   text: string,
   weight: string,
@@ -117,7 +117,7 @@ function fitText(
   }
 }
 
-function loadImage(src?: string): Promise<HTMLImageElement | null> {
+export function loadImage(src?: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     if (!src) return resolve(null);
     const img = new Image();
@@ -128,7 +128,7 @@ function loadImage(src?: string): Promise<HTMLImageElement | null> {
   });
 }
 
-function drawCover(ctx: Ctx, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+export function drawCover(ctx: Ctx, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
   const ratio = Math.max(w / img.width, h / img.height);
   const dw = img.width * ratio;
   const dh = img.height * ratio;
@@ -148,7 +148,7 @@ function burst(ctx: Ctx, cx: number, cy: number, outer: number, inner: number, p
   ctx.closePath();
 }
 
-async function ensureFonts() {
+export async function ensureFonts() {
   if (typeof document === 'undefined' || !document.fonts) return;
   try {
     await Promise.all([

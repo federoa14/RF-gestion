@@ -885,6 +885,7 @@ export interface OnlineCatalogSettings {
   allowDelivery?: boolean;
   allowNationalShipping?: boolean; // Envío a todo el país (solo Plan 3)
   nationalShippingNote?: string;
+  abandonedCartReminderHours?: number; // Horas de espera antes de sugerir recordar un carrito (por defecto 6)
   deliveryNote?: string;
   pickupAddress?: string;
   pickupHours?: string;
