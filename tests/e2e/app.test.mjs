@@ -1,6 +1,7 @@
 // Pruebas de punta a punta en el navegador (Chromium) con Supabase simulado.
 // Correr con: npm run test:e2e
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { after, before, describe, test } from 'node:test';
 import { fixtures, horizontalOverflow, loginAsOwner, loginAsSuper, openCatalogSection, openPage, startApp, waitForPanel } from './helpers.mjs';
 
@@ -336,6 +337,47 @@ describe('Flyer con QR y recordatorio de carritos', () => {
     await strip.locator('button', { hasText: 'Ver y recordar' }).click();
     await page.waitForSelector('text=Listo para recordar', { timeout: 10_000 });
     await page.waitForSelector('text=Esperando', { timeout: 5_000 });
+    await context.close();
+  });
+});
+
+describe('Logo del comercio', () => {
+  // Un logo redondo (u octogonal, etc.) con fondo transparente se ve con su propia forma:
+  // sin cuadro, borde ni fondo detrás.
+  const logo = 'data:image/png;base64,' + readFileSync(new URL('./assets/logo-circle.png', import.meta.url)).toString('base64');
+  const boxStyle = (img) =>
+    img.evaluate((el) => {
+      const cs = getComputedStyle(el.parentElement);
+      return { bg: cs.backgroundColor, border: cs.borderTopWidth, radius: cs.borderTopLeftRadius, overflow: cs.overflow, fit: getComputedStyle(el).objectFit };
+    });
+
+  test('panel: el logo no queda dentro de un cuadrito', async () => {
+    const seed = fixtures.makeSeed();
+    seed.tables.business_settings[0].config.distributorLogoUrl = logo;
+    const { page, context } = await openPage(app.browser, seed);
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    const st = await boxStyle(page.locator('aside img[alt="Distribuidora Uno"]').first());
+    assert.equal(st.bg, 'rgba(0, 0, 0, 0)');
+    assert.equal(st.border, '0px');
+    assert.equal(st.radius, '0px');
+    assert.equal(st.fit, 'contain');
+    await context.close();
+  });
+
+  test('tienda: el logo del encabezado y de la portada va sin fondo', async () => {
+    const { page, context } = await openPage(app.browser, fixtures.makeStoreSeed({ logoUrl: logo }), { path: '/?catalog=tienda' });
+    await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
+    const imgs = page.locator('img[alt="Tienda Uno"]');
+    assert.ok((await imgs.count()) >= 2);
+    for (let i = 0; i < (await imgs.count()); i++) {
+      const st = await boxStyle(imgs.nth(i));
+      assert.equal(st.bg, 'rgba(0, 0, 0, 0)', `logo ${i}: fondo`);
+      assert.equal(st.border, '0px', `logo ${i}: borde`);
+      // la portada tampoco lo mete en un recuadro blanco
+      const grand = await imgs.nth(i).evaluate((el) => getComputedStyle(el.parentElement.parentElement).backgroundColor);
+      assert.notEqual(grand, 'rgba(255, 255, 255, 0.95)', `logo ${i}: recuadro blanco`);
+    }
     await context.close();
   });
 });

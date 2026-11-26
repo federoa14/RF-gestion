@@ -143,14 +143,11 @@ async function renderClientStatementCanvas(
   const logoImg = config.distributorLogoUrl ? await loadImageSafe(config.distributorLogoUrl) : null;
   if (logoImg) {
     const logoSize = 76;
-    drawRoundedRect(ctx, padX, 34, logoSize, logoSize, 12);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fill();
-    ctx.save();
-    drawRoundedRect(ctx, padX + 4, 38, logoSize - 8, logoSize - 8, 8);
-    ctx.clip();
-    ctx.drawImage(logoImg, padX + 4, 38, logoSize - 8, logoSize - 8);
-    ctx.restore();
+    // Logo con su propia forma, sin cuadro ni fondo detrás
+    const ratio = Math.min(logoSize / logoImg.width, logoSize / logoImg.height);
+    const lw = logoImg.width * ratio;
+    const lh = logoImg.height * ratio;
+    ctx.drawImage(logoImg, padX + (logoSize - lw) / 2, 34 + (logoSize - lh) / 2, lw, lh);
     titleStartX = padX + logoSize + 20;
   }
 

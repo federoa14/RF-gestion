@@ -97,7 +97,8 @@ export const EditBrandModal: React.FC<EditBrandModalProps> = ({
             return;
           }
           ctx.drawImage(img, 0, 0, width, height);
-          const outputType = file.type === 'image/png' || file.type === 'image/webp' ? 'image/png' : 'image/jpeg';
+          // Solo las fotos JPG se guardan como JPG; el resto (PNG, WebP, SVG, GIF) como PNG para no perder la transparencia
+          const outputType = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
           setLogoUrl(canvas.toDataURL(outputType, 0.88));
         } catch {
           setLogoUrl(rawDataUrl);
@@ -174,11 +175,8 @@ export const EditBrandModal: React.FC<EditBrandModalProps> = ({
                   <img
                     src={logoUrl}
                     alt="Logo preview"
-                    className="w-12 h-12 rounded-xl object-cover shadow-md border-2 border-slate-700 bg-white"
+                    className="max-w-[3.5rem] max-h-14 w-auto h-auto object-contain"
                   />
-                  <div className="absolute inset-0 rounded-xl bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-[10px] font-bold">
-                    Logo
-                  </div>
                 </div>
               ) : (
                 <div

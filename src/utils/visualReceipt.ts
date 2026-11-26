@@ -162,13 +162,11 @@ export async function renderVisualReceiptToDataUrl(
     : null;
 
   if (logoImg) {
-    drawRoundedRect(ctx, logoX, 34, 72, 72, 14);
-    ctx.save();
-    ctx.clip();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(logoX, 34, 72, 72);
-    ctx.drawImage(logoImg, logoX, 34, 72, 72);
-    ctx.restore();
+    // Logo con su propia forma, sin cuadro ni fondo detrás
+    const ratio = Math.min(72 / logoImg.width, 72 / logoImg.height);
+    const lw = logoImg.width * ratio;
+    const lh = logoImg.height * ratio;
+    ctx.drawImage(logoImg, logoX + (72 - lw) / 2, 34 + (72 - lh) / 2, lw, lh);
   } else {
     drawRoundedRect(ctx, logoX, 34, 72, 72, 14);
     ctx.fillStyle = '#162E59';

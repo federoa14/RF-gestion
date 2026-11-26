@@ -128,6 +128,14 @@ export function loadImage(src?: string): Promise<HTMLImageElement | null> {
   });
 }
 
+/** Dibuja la imagen entera dentro del recuadro, sin recortarla ni agregarle fondo. */
+export function drawContain(ctx: Ctx, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
+  const ratio = Math.min(w / img.width, h / img.height);
+  const dw = img.width * ratio;
+  const dh = img.height * ratio;
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+
 export function drawCover(ctx: Ctx, img: HTMLImageElement, x: number, y: number, w: number, h: number) {
   const ratio = Math.max(w / img.width, h / img.height);
   const dw = img.width * ratio;
@@ -300,14 +308,8 @@ export async function renderFlyer(o: FlyerOptions): Promise<string> {
   ctx.textBaseline = 'middle';
   let brandX = textX;
   if (logo) {
-    const ls = 64 * u;
-    ctx.save();
-    rr(ctx, brandX, y - ls / 2, ls, ls, 14 * u);
-    ctx.clip();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(brandX, y - ls / 2, ls, ls);
-    drawCover(ctx, logo, brandX, y - ls / 2, ls, ls);
-    ctx.restore();
+    const ls = 72 * u;
+    drawContain(ctx, logo, brandX, y - ls / 2, ls, ls);
     brandX += ls + 16 * u;
   }
   ctx.fillStyle = o.style === 'moderno' ? accent : text;
