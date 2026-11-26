@@ -21,3 +21,8 @@ Foto de perfil, biografía, sitio web, categoría y destacados. La API de Instag
 
 ## Canva
 Carpeta «RF Gestiones» (`FAHb-vAR-tc`): «Diarios (los 3 del día)» (`FAHb-uLcUCc`) y «Corporativos (permanentes)» (`FAHb-h5WfAs`). No hay herramienta para borrar en Canva: lo reemplazado se mueve a una subcarpeta «Archivo (se puede borrar)».
+
+## Estado del perfil (2026-11-26)
+- Aplicado por API: preguntas sugeridas del mensaje directo (ice breakers): «¿Cómo funciona RF Gestiones?», «¿Cómo pruebo los 30 días gratis?», «¿Sirve para mi distribuidora?», «Quiero hablar con una persona». No hay respuesta automática: las elecciones llegan como mensajes al inbox (las responde Federico o, más adelante, Asistencia al Cliente).
+- Pendiente de Federico en la app: foto, biografía, sitio web, categoría y destacados (tarea `c0a1b2d8`).
+- Descartado por riesgo: manejar instagram.com desde un navegador en la nube (Kernel vía Composio). Un inicio de sesión desde un centro de datos puede bloquear o pedir verificación en una cuenta nueva, y automatizar la interfaz web va contra los términos de Instagram.
