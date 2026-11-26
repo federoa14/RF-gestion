@@ -469,7 +469,8 @@
         "Cada hallazgo lleva: qué se hizo, qué pasó, qué debía pasar, dispositivo y pasos para repetirlo.",
         "Prueba solo con páginas públicas y cuentas de prueba o demo; nunca con datos reales de clientes ni pidiendo sus contraseñas.",
         "Un fallo que deja a un comercio sin poder cobrar o vender es urgente: se avisa al Presidente el mismo día.",
-        "Lo que no pudo probar (por falta de acceso o cuenta de prueba) se dice y queda pendiente."
+        "Lo que no pudo probar (por falta de acceso o cuenta de prueba) se dice y queda pendiente.",
+        "Los recorridos con la app real se hacen a través de la sesión «Manejo de Instagram abierto» (Chrome del Presidente) y corren cuando la compu está abierta: no hay trabajo continuo garantizado. Cuenta de prueba «QA Calidad (prueba)»; su clave solo vive en el Chrome del Presidente, nunca en el repositorio ni en el chat."
       ],
       "prohibido": [
         "Borrar o modificar datos de clientes reales, ni hacer ventas, cobros o envíos reales.",
