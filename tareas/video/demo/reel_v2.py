@@ -371,7 +371,7 @@ def nb_line_rect(i, cx=540, cy=900):
     return (cx + 12, yy - 62, 360, 104)
 
 
-SHEET_END = [((70, 440, 320, 104), -14), ((380, 400, 320, 104), 5), ((690, 455, 320, 104), 13)]
+SHEET_END = [((70, 500, 320, 104), -14), ((380, 470, 320, 104), 5), ((690, 515, 320, 104), 13)]
 CARD_SLOT = [(330, 600, 420, 150), (330, 775, 420, 150), (330, 950, 420, 150)]
 
 # barras (escala: 0,0022 px por peso → $ 343.450 = 756 px)
@@ -594,8 +594,8 @@ def _logo():
 # ---------------- escenas ----------------
 STEP = 0.27
 SCENES = [
-    dict(head=[("¿Fiado en ", 0), ("cuaderno?", 1)], sub="¿Anotás el fiado en un cuaderno? Las hojas se pierden.",
-         pause={"cuaderno": 0.9}, hold=1.1),
+    dict(head=[("¿Todavía anotás ", 0), ("lo que te deben?", 1)], sub="¿Todavía anotás lo que te deben en un cuaderno? Las hojas se pierden.",
+         pause={"deben": 0.2, "cuaderno": 0.3}, hold=1.1, lead=0.25),
     dict(head=[("Cada hoja, ", 0), ("una boleta", 1)], sub="Con RF, cada anotación es una boleta con vencimiento.",
          pause={"boleta": 0.4}, hold=1.0),
     dict(head=[("Cuánto tenés ", 0), ("afuera", 1)], sub="Ves cuánto tenés en la calle y cuánto venció.",
@@ -611,7 +611,7 @@ SCENES = [
     dict(head=[("Probalo ", 0), ("30 días gratis", 1)], sub="Probalo treinta días gratis. Link en la bio.",
          pause={"treinta": 0.6, "gratis": 0.3}, hold=1.8, lead=0.6),
 ]
-KEYS = [["cuaderno", "pierden"], ["boleta", "vencimiento"], ["calle", "venció"], ["avisa", "whatsapp", "cobrás"],
+KEYS = [["anotás", "deben", "cuaderno", "pierden"], ["boleta", "vencimiento"], ["calle", "venció"], ["avisa", "whatsapp", "cobrás"],
         ["código", "suma", "solo"], ["link", "pedidos"], ["cobranzas", "mostrador", "tienda", "solo"], ["treinta", "gratis"]]
 
 
@@ -698,11 +698,11 @@ def subtitles(c, s, lt):
 
 # Escena 1 -------------------------------------------------------------
 def s1(c, lt, K, d):
-    kc, kp = K["cuaderno"], K["pierden"]
+    kc, kd, kp = K["anotás"], K["deben"], K["pierden"]
     drop = back((lt - kc) / 0.55)
     cy = lerp(-400, 900, drop) if lt >= kc else -400
     open_p = ease((lt - kc - 0.5) / 0.4)
-    wp = tuple(cl((lt - kc - 0.8 - i * 0.32) / 0.32) for i in range(3))
+    wp = tuple(cl((lt - kd - i * 0.32) / 0.32) for i in range(3))
     torn = tuple(ease((lt - kp - i * 0.1) / 0.65) for i in range(3))
     if lt >= kc:
         notebook(c, 540, cy, open_p, 1.0 - 0.2 * torn[2], wp, tuple(1 if tt > 0 else 0 for tt in torn))
