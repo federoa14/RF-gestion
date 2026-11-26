@@ -16,7 +16,15 @@ Al terminar, el video se entrega a Marketing (tarea «Recibido de Video: …») 
 - **Sin música con derechos**: el video sale sin música y el audio se elige dentro de Instagram/TikTok.
 - No se publica desde acá: publicar es de Marketing.
 
+## Criterios de animación (pedido de Federico, 2026-11-26)
+- Primero el guion visual (una acción por bloque, ver `guiones/`), después la animación.
+- Máximo 4 palabras en pantalla por escena, aparte de los subtítulos (el resto: números e íconos).
+- Las ideas se vuelven acciones y las analogías se dibujan literalmente (el cuaderno, las hojas que vuelan, el eslabón del link).
+- Magnitudes a escala, foco en lo importante (lo demás se apaga) y objetos que se conservan y se transforman entre escenas.
+- Cada acción clave arranca con su palabra del subtítulo; cada escena termina en una imagen clara.
+
 ## Herramientas
+- `demo/reel_v2.py <salida.mp4>`: animación vectorial del guion `guiones/como-funciona-v2.md` (pycairo + letra Caveat de `marca/`, copiarla a `~/.fonts`). Con `--frames <carpeta> fin` saca la imagen final de cada escena y muestra en qué segundo cae cada palabra clave.
 - `demo/capturar.mjs <carpeta>`: graba pantallas de la app real a tamaño celular con el Supabase simulado de `tests/e2e` y un comercio ficticio.
 - `demo/reel_funcionamiento.py <capturas> <salida.mp4>`: reel «Cómo funciona» (celular animado, titulares, cierre).
 - `armar_reel.py <pedido.json>`: reel simple a partir de imágenes de Diseño (ver el encabezado del archivo).
