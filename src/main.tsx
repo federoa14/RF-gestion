@@ -6,6 +6,7 @@ import {AppErrorBoundary} from './components/AppErrorBoundary';
 import {installErrorReporter} from './utils/errorReporter';
 import {isSupabaseConfigured} from './utils/supabaseClient';
 import {restoreSessionUserFromCloud} from './utils/multiTenantStorage';
+import {registerServiceWorker} from './utils/pwa';
 
 const searchParams =
   typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
@@ -16,6 +17,7 @@ const isStandalonePublicRoute = Boolean(
 );
 // Errores de los usuarios: se registran para verlos en el panel de Superadmin
 installErrorReporter(searchParams?.get('catalog')?.trim() ? 'tienda' : 'panel');
+registerServiceWorker();
 
 // Al volver desde el link de "recuperar contraseña" no se entra directo: se muestra el formulario de nueva clave
 const isPasswordRecovery =

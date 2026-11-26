@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useInstallApp } from '../utils/pwa';
 import {
   ShoppingBag,
   ChevronDown,
@@ -132,6 +133,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSubscriptionPayModal,
 }) => {
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const installApp = useInstallApp();
   const pendingBoletas = boletas.filter((b) => b.status === 'pending');
   const alertThresholds = getAlertThresholds(config);
   const graceDays = alertThresholds.overdueGraceDays;
@@ -317,6 +319,23 @@ export const Header: React.FC<HeaderProps> = ({
                       <button type="button" role="menuitem" onClick={() => { setIsAccountMenuOpen(false); onOpenQuickGuide(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-slate-50 cursor-pointer">
                         <HelpCircle className="w-4 h-4 text-slate-500" />
                         ¿Dónde hago cada cosa?
+                      </button>
+                    )}
+                    {installApp.visible && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={async () => {
+                          setIsAccountMenuOpen(false);
+                          const r = await installApp.install();
+                          if (r === 'ios-help') {
+                            window.alert('Para instalar la app en tu iPhone: tocá el botón Compartir y elegí "Agregar a inicio".');
+                          }
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold hover:bg-slate-50 cursor-pointer"
+                      >
+                        <span aria-hidden="true">📲</span>
+                        Instalar app en el celular
                       </button>
                     )}
                     {onLogout && (
