@@ -41,7 +41,7 @@ export function setThemeColor(color: string): void {
 export function applyStorePwa(handle: string, themeColor?: string): void {
   if (typeof document === 'undefined' || !handle) return;
   const h = encodeURIComponent(handle);
-  upsertLink('manifest', `/api/manifest?catalog=${h}`);
+  upsertLink('manifest', `/api/store-manifest?catalog=${h}`);
   upsertLink('apple-touch-icon', `/api/icon?catalog=${h}`);
   if (themeColor) setThemeColor(themeColor);
 }

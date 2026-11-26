@@ -87,3 +87,8 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 - **App instalable (PWA):** la tienda usa un manifiesto propio (`api/manifest.ts`, `api/icon.ts`) con el nombre, color y logo del comercio; el panel arma el suyo en el navegador con el logo de la empresa. Botón "Instalar app" en la tienda y en el menú Mi cuenta; en iPhone muestra cómo agregar a inicio. Service worker mínimo (`public/sw.js`) sin caché.
 - **Fotos en Storage:** bucket público `catalog-images` (script en `supabase/catalog_images_bucket.sql`, ya aplicado en producción); al publicar, las fotos se achican y se suben a la carpeta del comercio, y la tienda guarda solo el link. Si falla la subida, queda la foto achicada incrustada.
 - **Pedidos:** al pasar un pedido a listo / en camino / entregado se ofrece avisar al cliente por WhatsApp (una vez por etapa). Carritos abandonados muestra pendientes, recordados, recuperados y tasa de recupero.
+
+## 2026-11-26 — Funciones /api en Vercel
+- **Hallazgo (logs de Vercel):** las funciones de `api/` fallaban en producción con `ERR_MODULE_NOT_FOUND`: los imports relativos entre archivos deben llevar `.js` (módulos ESM). Esto también rompía la vista previa del link de la tienda (`api/tienda-preview.ts`), que nunca había funcionado en producción.
+- **Regla:** en `api/` importar siempre con extensión `.js` (ej. `./_manifest.js`). `tests/unit/apiFunctions.test.ts` compila y llama las funciones como lo hace Vercel.
+- El manifiesto de la tienda se sirve en `/api/store-manifest` (`/api/manifest` daba 404).

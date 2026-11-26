@@ -1,6 +1,6 @@
-import { buildFallbackIconSvg, decodeImageDataUrl, type StoreManifestData } from './_manifest';
-import { resolveStoreTheme } from '../src/utils/storeTheme';
-import { fetchPublicCatalog } from './_catalogFetch';
+import { buildFallbackIconSvg, decodeImageDataUrl, type StoreManifestData } from './_manifest.js';
+import { resolveStoreTheme } from '../src/utils/storeTheme.js';
+import { fetchPublicCatalog } from './_catalogFetch.js';
 
 /** Ícono de la app instalable de una tienda: el logo del comercio (o su inicial si no cargó logo). */
 export async function GET(request: Request): Promise<Response> {

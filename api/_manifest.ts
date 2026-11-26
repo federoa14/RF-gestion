@@ -1,4 +1,4 @@
-import { resolveStoreTheme } from '../src/utils/storeTheme';
+import { resolveStoreTheme } from '../src/utils/storeTheme.js';
 import type { CatalogStoreTheme } from '../src/types';
 
 // Manifiesto de la app instalable de una tienda: nombre, colores y logo propios del comercio.
