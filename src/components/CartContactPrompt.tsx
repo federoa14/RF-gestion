@@ -4,11 +4,12 @@ import { ShoppingCart } from 'lucide-react';
 interface CartContactPromptProps {
   productName: string;
   onSubmit: (data: { name: string; phone: string }) => void;
-  onCancel: () => void;
+  /** Agrega el producto igual, sin datos, y no vuelve a preguntar en este dispositivo. */
+  onSkip: () => void;
 }
 
 /** Al agregar el primer producto se piden nombre y teléfono: así el carrito queda guardado y el comercio puede recordártelo. */
-export const CartContactPrompt: React.FC<CartContactPromptProps> = ({ productName, onSubmit, onCancel }) => {
+export const CartContactPrompt: React.FC<CartContactPromptProps> = ({ productName, onSubmit, onSkip }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +34,7 @@ export const CartContactPrompt: React.FC<CartContactPromptProps> = ({ productNam
           </div>
           <h2 className="text-base font-extrabold text-slate-900">Guardamos tu carrito</h2>
           <p className="text-xs text-slate-500">
-            Dejanos tu nombre y teléfono para agregar <strong>{productName}</strong>. Así tu carrito queda guardado y, si te queda algo pendiente, te lo recordamos por WhatsApp.
+            Agregás <strong>{productName}</strong> a tu carrito. Si nos dejás tu nombre y teléfono, tu carrito queda guardado y, si te queda algo pendiente, te lo recordamos por WhatsApp.
           </p>
         </div>
         <label className="block space-y-1">
@@ -48,8 +49,8 @@ export const CartContactPrompt: React.FC<CartContactPromptProps> = ({ productNam
         <button type="submit" className="w-full py-3 rounded-xl bg-[#0B1933] hover:bg-[#13264A] text-white text-sm font-bold cursor-pointer">
           Guardar y agregar al carrito
         </button>
-        <button type="button" onClick={onCancel} className="w-full py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-50 cursor-pointer">
-          Ahora no
+        <button type="button" onClick={onSkip} className="w-full py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-50 cursor-pointer">
+          Ahora no, agregar igual
         </button>
         <p className="text-[10px] text-slate-400 text-center">Usamos tus datos solo para tu pedido y para recordarte el carrito.</p>
       </form>

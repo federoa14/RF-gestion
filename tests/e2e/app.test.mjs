@@ -291,12 +291,7 @@ describe('Carrito guardado y stock', () => {
     await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
     const prompt = page.locator('[aria-label="Guardar tu carrito"]');
     await prompt.waitFor({ timeout: 5_000 });
-    // "Ahora no" no agrega nada
-    await prompt.locator('button', { hasText: 'Ahora no' }).click();
-    await prompt.waitFor({ state: 'detached' });
-    assert.match(await page.locator('button', { hasText: 'Mi Carrito' }).first().innerText(), /0/);
-    // sin datos no deja avanzar
-    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    // sin datos no deja guardar
     await prompt.locator('button[type=submit]').click();
     await page.waitForSelector('text=Ingresá tu nombre.', { timeout: 5_000 });
     await prompt.locator('input[autocomplete="given-name"]').fill('Lucía');
@@ -318,13 +313,48 @@ describe('Carrito guardado y stock', () => {
     await context.close();
   });
 
-  test('sin Plan 3 no se piden datos para agregar al carrito', async () => {
-    const { page, context } = await openPage(app.browser, fixtures.makeStoreSeed({ canAccessFullFeatures: false, planTier: 'web' }), { path: '/?catalog=tienda' });
+  test('se pide una sola vez por dispositivo: "ahora no" agrega igual y no insiste', async () => {
+    const { page, context } = await openPage(app.browser, planThreeStore(), { path: '/?catalog=tienda' });
+    await page.locator('[aria-label="Bienvenida a la tienda"] button[type=submit]').click();
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    const prompt = page.locator('[aria-label="Guardar tu carrito"]');
+    await prompt.waitFor({ timeout: 5_000 });
+    await prompt.locator('button', { hasText: 'Ahora no, agregar igual' }).click();
+    await prompt.waitFor({ state: 'detached' });
+    assert.match(await page.locator('button', { hasText: 'Mi Carrito' }).first().innerText(), /1/, 'el producto se agregó igual');
+    await page.reload();
     await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
     await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
-    await page.waitForTimeout(400);
-    assert.equal(await page.locator('[aria-label="Guardar tu carrito"]').count(), 0);
-    assert.match(await page.locator('button', { hasText: 'Mi Carrito' }).first().innerText(), /1/);
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator('[aria-label="Guardar tu carrito"]').count(), 0, 'no vuelve a preguntar en este dispositivo');
+    await context.close();
+  });
+
+  test('vale para todos los planes con tienda (Plan 2 también guarda el carrito)', async () => {
+    const { page, fake, context } = await openPage(app.browser, fixtures.makeStoreSeed({ canAccessFullFeatures: false, planTier: 'web' }), { path: '/?catalog=tienda' });
+    await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    const prompt = page.locator('[aria-label="Guardar tu carrito"]');
+    await prompt.waitFor({ timeout: 5_000 });
+    await prompt.locator('input[autocomplete="given-name"]').fill('Ana');
+    await prompt.locator('input[type=tel]').fill('11 4444 5555');
+    await prompt.locator('button[type=submit]').click();
+    await page.waitForTimeout(2500);
+    assert.match(JSON.stringify(fake.log.filter((l) => l.kind === 'rpc')), /catalog_abandoned_carts/);
+    await context.close();
+  });
+
+  test('Plan 2 ve la pestaña Carritos sin candado', async () => {
+    const seed = fixtures.makeSeed();
+    seed.tables.businesses[0].data.subscription.planTier = 'web';
+    const { page, context } = await openPage(app.browser, seed);
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page, 'Pedidos y ventas');
+    await page.locator('button', { hasText: 'Carritos' }).first().click();
+    await page.waitForSelector('text=Carritos Abandonados para Recuperar por WhatsApp', { timeout: 10_000 });
+    assert.equal(await page.locator('text=Recupero de Carritos Abandonados — Exclusivo Plan 3').count(), 0);
+    assert.equal(await page.locator('[aria-label="Resumen de carritos abandonados"]').count(), 1);
     await context.close();
   });
 
@@ -365,6 +395,8 @@ describe('Envío a todo el país', () => {
       await gate.waitFor({ state: 'detached' });
     }
     await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    const prompt = page.locator('[aria-label="Guardar tu carrito"]');
+    if (await prompt.isVisible().catch(() => false)) await prompt.locator('button', { hasText: 'Ahora no, agregar igual' }).click();
     await page.locator('button', { hasText: 'Mi Carrito' }).first().click();
     await page.locator('button', { hasText: 'Envío a domicilio' }).first().click();
   }
