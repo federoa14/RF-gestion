@@ -305,11 +305,14 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     try {
       const raw = window.localStorage.getItem(`rf_visitor_${tenantId}`);
       if (!raw) return;
-      const saved = JSON.parse(raw) as { name?: string; phone?: string; address?: string };
-      if (saved?.name && saved?.phone) {
+      const saved = JSON.parse(raw) as { name?: string; phone?: string; address?: string; dni?: string; skipped?: boolean };
+      if (saved?.skipped) {
+        setVisitorReady(true);
+      } else if (saved?.name && saved?.phone) {
         setCustomerName((prev) => prev || saved.name!);
         setCustomerPhone((prev) => prev || saved.phone!);
         if (saved.address) setDeliveryAddress((prev) => prev || saved.address!);
+        if (saved.dni) setLoyaltyDniInput((prev) => prev || saved.dni!);
         setVisitorReady(true);
       }
     } catch {
@@ -1443,6 +1446,47 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     });
   };
 
+  // Guarda el pedido "avisame cuando vuelva": con los datos del cliente y su DNI si está registrado
+  const sendStockAlert = async (
+    product: CatalogProduct,
+    variant: CatalogProductVariant | null,
+    name: string,
+    phone: string
+  ): Promise<boolean> => {
+    if (!catalog) return false;
+    setAlertSubmitting(true);
+    setAlertError(null);
+    try {
+      const nowIso = new Date().toISOString();
+      const dni = normalizeDni(loyaltyDniInput || '');
+      const request: CatalogStockAlertRequest = {
+        id: `stk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        tenantId: catalog.tenantId,
+        productId: product.id,
+        productName: product.name,
+        productSku: variant?.sku?.trim() || product.sku?.trim() || undefined,
+        variantId: variant?.id,
+        variantLabel: variant?.label,
+        customerName: name,
+        customerPhone: phone,
+        customerDni: dni.length >= 6 ? dni : undefined,
+        status: 'pending',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      await submitCatalogStockAlertToSupabase(request);
+      setAlertSubmitted(true);
+      setCustomerName((prev) => prev || name);
+      setCustomerPhone((prev) => prev || phone);
+      return true;
+    } catch {
+      setAlertError('No pudimos guardar tu solicitud. Intentá nuevamente en unos segundos.');
+      return false;
+    } finally {
+      setAlertSubmitting(false);
+    }
+  };
+
   const openStockAlertModal = (product: CatalogProduct, variant?: CatalogProductVariant) => {
     setStockAlertProduct(product);
     setStockAlertVariant(variant || null);
@@ -1450,13 +1494,16 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     setAlertCustomerPhone((prev) => prev || customerPhone);
     setAlertSubmitted(false);
     setAlertError(null);
+    // Si ya está registrado, se anota con un solo toque (no se le piden los datos otra vez)
+    if (customerName.trim() && customerPhone.trim()) {
+      void sendStockAlert(product, variant || null, customerName.trim(), customerPhone.trim());
+    }
   };
 
   const handleSubmitStockAlert = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!catalog || !stockAlertProduct) return;
     setAlertError(null);
-
     const cleanName = alertCustomerName.trim();
     const cleanPhone = alertCustomerPhone.trim();
     if (!cleanName) {
@@ -1467,34 +1514,7 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       setAlertError('Ingresá tu teléfono o WhatsApp para enviarte el aviso.');
       return;
     }
-
-    setAlertSubmitting(true);
-    try {
-      const nowIso = new Date().toISOString();
-      const request: CatalogStockAlertRequest = {
-        id: `stk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        tenantId: catalog.tenantId,
-        productId: stockAlertProduct.id,
-        productName: stockAlertProduct.name,
-        productSku:
-          stockAlertVariant?.sku?.trim() || stockAlertProduct.sku?.trim() || undefined,
-        variantId: stockAlertVariant?.id,
-        variantLabel: stockAlertVariant?.label,
-        customerName: cleanName,
-        customerPhone: cleanPhone,
-        status: 'pending',
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      };
-      await submitCatalogStockAlertToSupabase(request);
-      setAlertSubmitted(true);
-      setCustomerName((prev) => prev || cleanName);
-      setCustomerPhone((prev) => prev || cleanPhone);
-    } catch {
-      setAlertError('No pudimos guardar tu solicitud. Intentá nuevamente en unos segundos.');
-    } finally {
-      setAlertSubmitting(false);
-    }
+    await sendStockAlert(stockAlertProduct, stockAlertVariant, cleanName, cleanPhone);
   };
 
   const handleCopyStoreBankField = (field: 'alias' | 'cvu', text?: string) => {
@@ -2330,42 +2350,88 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
   const handleVisitorSubmit = (data: StoreVisitorData) => {
     setCustomerName(data.name);
     setCustomerPhone(data.phone);
-    if (data.address) setDeliveryAddress(data.address);
+    const dni = normalizeDni(data.dni);
+    if (dni) {
+      setLoyaltyDniInput(dni);
+      try {
+        window.sessionStorage.setItem(`public_catalog_dni_${catalogHandle}`, dni);
+      } catch {
+        // ignore
+      }
+    }
     try {
       window.localStorage.setItem(
         `rf_visitor_${catalog.tenantId}`,
-        JSON.stringify({ name: data.name, phone: data.phone, address: data.address })
+        JSON.stringify({ name: data.name, phone: data.phone, dni })
       );
     } catch {
       // ignore
     }
-    if (data.joinClub && isFullWebFeatures && catalog.enablePromoClub !== false) {
-      const nowIso = new Date().toISOString();
+    const nowIso = new Date().toISOString();
+    if (catalog.enablePromoClub !== false) {
       void submitCatalogPromoSubscriberToSupabase({
         id: `prm-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         tenantId: catalog.tenantId,
         name: data.name,
         phone: data.phone,
+        dni: dni || undefined,
         source: 'storefront_form',
         active: true,
         createdAt: nowIso,
         updatedAt: nowIso,
       });
     }
+    // Cuenta de puntos a nombre de ese DNI: desde acá empieza a sumar
+    if (catalog.enableLoyaltyProgram && dni.length >= 6) {
+      void (async () => {
+        const existing = await fetchPublicCatalogLoyaltyAccountFromSupabase(catalog.tenantId, dni);
+        if (existing) return;
+        await upsertCatalogLoyaltyAccountToSupabase({
+          id: `lyl-${catalog.tenantId}-${dni}`,
+          tenantId: catalog.tenantId,
+          dni,
+          customerName: data.name,
+          customerPhone: data.phone,
+          pointsBalance: 0,
+          totalPointsEarned: 0,
+          totalPointsRedeemed: 0,
+          ordersCount: 0,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        });
+      })();
+    }
     setVisitorReady(true);
   };
+
+  // Entrar sin registrarse: no se vuelve a preguntar en este dispositivo
+  const handleVisitorSkip = () => {
+    try {
+      window.localStorage.setItem(`rf_visitor_${catalog.tenantId}`, JSON.stringify({ skipped: true }));
+    } catch {
+      // ignore
+    }
+    setVisitorReady(true);
+  };
+
+  const clubAvailable =
+    isFullWebFeatures && (catalog.enablePromoClub !== false || Boolean(catalog.enableLoyaltyProgram));
 
   return (
     <div
       {...storeThemeRootProps}
       className={`${storeThemeRootProps.className} min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col`}
     >
-      {!visitorReady && (
+      {!visitorReady && clubAvailable && (
         <StoreVisitorGate
           storeName={catalog.storeName}
-          askAddress={catalog.allowDelivery !== false}
-          offerClub={isFullWebFeatures && catalog.enablePromoClub !== false}
+          perks={
+            catalog.enableLoyaltyProgram
+              ? 'Tus compras suman puntos en tu DNI, canjeables por descuentos, y te avisamos de ofertas y de cuando vuelve un producto agotado.'
+              : 'Te avisamos de ofertas y de cuando vuelve un producto agotado.'
+          }
           onSubmit={handleVisitorSubmit}
+          onSkip={handleVisitorSkip}
         />
       )}
       {/* Top Navigation Header */}

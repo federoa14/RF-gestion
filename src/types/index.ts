@@ -703,6 +703,7 @@ export interface CatalogPromoSubscriber {
   tenantId: string;
   name: string;
   phone: string;
+  dni?: string;
   email?: string;
   birthDate?: string;
   preferredCategory?: string;
@@ -866,6 +867,7 @@ export interface CatalogStockAlertRequest {
   variantLabel?: string;
   customerName: string;
   customerPhone: string;
+  customerDni?: string;
   status: 'pending' | 'notified';
   notifiedAt?: string;
   createdAt: string;
@@ -957,6 +959,14 @@ export interface CatalogShippingDetails {
   notes?: string;
 }
 
+// Cómo se pagó un pedido: cuánto en cada medio y cuánto quedó a cuenta (por cobrar)
+export interface CatalogPaymentBreakdown {
+  efectivo: number;
+  transferencia: number;
+  mercadopago: number;
+  aCuenta: number;
+}
+
 export interface CatalogPickupOrder {
   id: string;
   orderNumber: string;
@@ -973,6 +983,9 @@ export interface CatalogPickupOrder {
   preferredPickupWindow?: string;
   preferredPaymentMethod?: CatalogPaymentMethod;
   confirmedPaymentMethod?: CatalogPaymentMethod | 'fiado';
+  paymentBreakdown?: CatalogPaymentBreakdown; // pagos mixtos y saldo a cuenta (ventas de mostrador)
+  cashReceived?: number; // efectivo entregado por el cliente (para calcular el vuelto)
+  saleChannel?: 'mostrador' | 'web';
   mpSubOption?: 'dinero_en_cuenta' | 'tarjetas_todos';
   paymentStatus?: 'pendiente' | 'en_proceso' | 'comprobante_en_revision' | 'acreditado';
   transferReceiptImageUrl?: string;

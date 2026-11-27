@@ -104,3 +104,9 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-26 — Logo con su propia forma
 - **Decisión:** el logo del comercio se muestra tal cual lo subió (círculo, octógono, etc.), sin cuadrito, borde ni fondo detrás y sin recortarlo (`object-contain`): en el panel, el encabezado y la portada de la tienda, los flyers, el flyer con QR y los comprobantes/estados de cuenta. El fondo es el de cada pantalla. Al subirlo, PNG/WebP/SVG/GIF se guardan como PNG para no perder la transparencia (solo JPG queda JPG).
 - **Nota:** si el logo es JPG o PNG con fondo propio, ese fondo se ve (no se puede borrar automáticamente); conviene subir PNG con fondo transparente.
+
+## 2026-11-27 — Cobro mixto, caja del día, tienda de entrada libre y avisos por DNI
+- **Venta de mostrador:** medio de pago Efectivo / Transferencia / Mercado Pago / Mixto / A cuenta. Mixto: montos por medio y el resto queda a cuenta (exige nombre del cliente). Efectivo calcula el vuelto. DNI opcional. El pedido guarda `paymentBreakdown` y `saleChannel: 'mostrador'`; lo que queda a cuenta figura "pendiente".
+- **Caja del día** (Catálogo → Pedidos y ventas → Caja del día): se elige el día y se ve lo vendido, efectivo, transferencia, Mercado Pago, a cuenta, devoluciones (restan) y neto cobrado, con la lista de ventas y botones para cobrar el saldo a cuenta. Muestra lo que entró, no la ganancia (no hay costo por producto).
+- **Tienda:** entrar es libre (se quitó el pedido obligatorio de teléfono). Solo si el comercio es Plan 3 con club/puntos se ofrece "Quiero sumar puntos y recibir ofertas": nombre + DNI + teléfono. Con eso se crea la cuenta de puntos a nombre de ese DNI, se registra en el club y el carrito queda precargado.
+- **Productos agotados:** si el cliente ya está registrado, "Avisar cuando haya stock" se anota con un toque (con su DNI). En Avisos de stock se ve el ranking de lo que más piden reponer (demanda).
