@@ -2,6 +2,8 @@ import { isNewOrderSoundEnabled, playNewOrderChime, setNewOrderSoundEnabled } fr
 import { DesignPageEditor } from './DesignPageEditor';
 import { QrFlyerModal } from './QrFlyerModal';
 import { DailyCashReport } from './DailyCashReport';
+import { LoyaltyClubPanel } from './LoyaltyClubPanel';
+import { giftPoints } from '../utils/loyaltyClub';
 import { getOrderPaymentSplit } from '../utils/salesReport';
 import {
   DEFAULT_REMINDER_HOURS,
@@ -311,6 +313,7 @@ type CatalogSubTabKey =
   | 'gift_cards'
   | 'club_promos'
   | 'clientes_web'
+  | 'club_puntos'
   | 'estadisticas'
   | 'caja'
   | 'configuracion'
@@ -318,7 +321,7 @@ type CatalogSubTabKey =
 const CATALOG_TAB_GROUPS: Array<{ id: 'productos' | 'pedidos' | 'clientes' | 'config'; label: string; tabs: CatalogSubTabKey[] }> = [
   { id: 'productos', label: 'Productos', tabs: ['productos', 'avisos_stock'] },
   { id: 'pedidos', label: 'Pedidos y ventas', tabs: ['pedidos', 'carritos_abandonados', 'caja', 'estadisticas'] },
-  { id: 'clientes', label: 'Clientes y promos', tabs: ['clientes_web', 'club_promos', 'gift_cards'] },
+  { id: 'clientes', label: 'Clientes y promos', tabs: ['clientes_web', 'club_puntos', 'club_promos', 'gift_cards'] },
   { id: 'config', label: 'Configuración', tabs: ['configuracion', 'diseno'] },
 ];
 function catalogGroupOf(tab: CatalogSubTabKey) {
@@ -398,6 +401,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     | 'gift_cards'
     | 'club_promos'
     | 'clientes_web'
+    | 'club_puntos'
     | 'estadisticas'
     | 'caja'
     | 'configuracion'
@@ -3404,6 +3408,28 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             >
               <UserCheck className="w-3.5 h-3.5 text-indigo-700" />
               <span>Clientes Web ({loyaltyAccounts.length})</span>
+              {isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (isBasicWebPlan) {
+                  requestPlanUpgrade(
+                    'full_feature',
+                    'Club de puntos · Exclusivo Plan 3 · Full',
+                    'El club de puntos por DNI está disponible en Plan 3 · Full.'
+                  );
+                  return;
+                }
+                setSubTab('club_puntos');
+                void onRefreshLoyaltyAccounts?.();
+              }}
+              className={`${catalogTabHiddenClass('club_puntos')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'club_puntos' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Award className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Club de puntos</span>
               {isBasicWebPlan && <Lock className="w-3 h-3 text-slate-400" />}
             </button>
             <button
@@ -6447,6 +6473,28 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       )}
 
       {/* SUB-TAB 2D: ESTADÍSTICAS, RANKING DE VENTAS Y PUNTOS POR DNI */}
+      {subTab === 'club_puntos' && !isBasicWebPlan && (
+        <LoyaltyClubPanel
+          accounts={loyaltyAccounts}
+          tiers={settings.loyaltyTiers}
+          coupons={settings.coupons || []}
+          storeName={settings.storeName || config.distributorName || 'Mi tienda'}
+          publicUrl={publicUrl}
+          onGiftPoints={
+            onSaveLoyaltyAccounts
+              ? (acc, pts) => {
+                  const updated = giftPoints(acc, pts);
+                  if (updated === acc) return;
+                  onSaveLoyaltyAccounts(loyaltyAccounts.map((x) => (x.id === acc.id ? updated : x)));
+                  showToast(`Le regalaste ${pts} puntos a ${acc.customerName || `el DNI ${acc.dni}`} (ahora tiene ${updated.pointsBalance}).`);
+                }
+              : undefined
+          }
+          onRefresh={onRefreshLoyaltyAccounts}
+          showToast={showToast}
+        />
+      )}
+
       {subTab === 'caja' && (
         <DailyCashReport orders={orders} currencySymbol={currency} onCollectBalance={handleCollectBalance} />
       )}
@@ -6653,42 +6701,6 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             showToast('Reporte CSV de estadísticas descargado.');
           };
 
-          const handleManualLoyaltyAdjustment = (
-            acc: CatalogLoyaltyAccount,
-            delta: number
-          ) => {
-            if (!onSaveLoyaltyAccounts || !delta) return;
-            const nowIso = new Date().toISOString();
-            const nextBal = Math.max(0, acc.pointsBalance + delta);
-            const appliedDelta = nextBal - acc.pointsBalance;
-            const updated: CatalogLoyaltyAccount = {
-              ...acc,
-              pointsBalance: nextBal,
-              totalPointsEarned:
-                appliedDelta > 0 ? acc.totalPointsEarned + appliedDelta : acc.totalPointsEarned,
-              totalPointsRedeemed:
-                appliedDelta < 0
-                  ? acc.totalPointsRedeemed + Math.abs(appliedDelta)
-                  : acc.totalPointsRedeemed,
-              history: [
-                {
-                  id: `lmov-adj-${Date.now()}`,
-                  date: nowIso,
-                  type: 'manual_adjustment' as const,
-                  pointsDelta: appliedDelta,
-                  note: `Ajuste manual desde panel (${appliedDelta >= 0 ? '+' : ''}${appliedDelta} pts)`,
-                },
-                ...(acc.history || []),
-              ].slice(0, 40),
-              updatedAt: nowIso,
-            };
-            onSaveLoyaltyAccounts(
-              loyaltyAccounts.map((x) => (x.id === acc.id ? updated : x))
-            );
-            showToast(
-              `Puntos de DNI ${acc.dni} actualizados (${nextBal} pts disponibles).`
-            );
-          };
 
           return (
             <div className="space-y-4">
@@ -7024,7 +7036,6 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                           <th className="py-2.5 px-3 text-right">Puntos Disponibles</th>
                           <th className="py-2.5 px-3 text-right">Saldo a Favor</th>
                           <th className="py-2.5 px-3">Nivel Alcanzado</th>
-                          <th className="py-2.5 px-3 text-right">Ajuste Rápido</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -7075,37 +7086,6 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                                   </span>
                                 ) : (
                                   <span className="text-slate-500">—</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3 text-right">
-                                {onSaveLoyaltyAccounts && (
-                                  <div className="inline-flex items-center gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleManualLoyaltyAdjustment(acc, 10)}
-                                      className="px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-mono font-bold text-[11px] cursor-pointer"
-                                      title="Sumar 10 puntos manualmente"
-                                    >
-                                      +10
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleManualLoyaltyAdjustment(acc, 50)}
-                                      className="px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-mono font-bold text-[11px] cursor-pointer"
-                                      title="Sumar 50 puntos manualmente"
-                                    >
-                                      +50
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={acc.pointsBalance <= 0}
-                                      onClick={() => handleManualLoyaltyAdjustment(acc, -10)}
-                                      className="px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 font-mono font-bold text-[11px] cursor-pointer"
-                                      title="Restar 10 puntos manualmente"
-                                    >
-                                      -10
-                                    </button>
-                                  </div>
                                 )}
                               </td>
                             </tr>
