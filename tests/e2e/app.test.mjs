@@ -405,6 +405,62 @@ describe('Venta de mostrador y caja del día', () => {
   });
 });
 
+describe('Club de puntos', () => {
+  const seedClub = () => {
+    const seed = fixtures.makeSeed({ withOrders: false });
+    seed.tables.business_settings[0].catalog_settings = { published: true, enableLoyaltyProgram: true, coupons: [{ id: 'c1', code: 'AMIGOS10', discountType: 'percent', value: 10, active: true }] };
+    const acc = (id, name, dni, phone, pts) => ({ business_id: 'biz1', id, data: { id, tenantId: 'biz1', dni, customerName: name, customerPhone: phone, pointsBalance: pts, totalPointsEarned: pts, totalPointsRedeemed: 0, ordersCount: 2, createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-20T10:00:00.000Z' } });
+    seed.tables.catalog_loyalty_accounts = [acc('l1', 'Lucía Gómez', '30123456', '11 5555 0001', 120), acc('l2', 'Pedro Díaz', '28999111', '', 40)];
+    return seed;
+  };
+
+  test('lista socios con sus puntos, sin poder editar ni restar, y permite escribirles con un cupón', async () => {
+    const { page, context, pageErrors } = await openPage(app.browser, seedClub());
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page, 'Clientes y promos');
+    await page.locator('button', { hasText: 'Club de puntos' }).first().click();
+    const club = page.locator('[aria-label="Club de puntos"]');
+    await club.waitFor({ timeout: 10_000 });
+    const text = await club.innerText();
+    assert.match(text, /Lucía Gómez/);
+    assert.match(text, /30123456/);
+    // más puntos primero
+    assert.ok(text.indexOf('Lucía Gómez') < text.indexOf('Pedro Díaz'));
+    // nada para restar o editar puntos
+    assert.equal(await club.locator('button', { hasText: /^[-−]\d+$/ }).count(), 0);
+    assert.equal(await club.locator('input[type=number]').count(), 0);
+    // sin teléfono no hay WhatsApp
+    assert.equal(await club.locator('button[aria-label*="Pedro Díaz"]').isDisabled(), true);
+    // WhatsApp con el cupón
+    await club.locator('button[aria-label*="Lucía Gómez"]').click();
+    const dlg = page.locator('[aria-label="Escribirle al socio por WhatsApp"]');
+    await dlg.waitFor();
+    assert.match(await dlg.locator('textarea').inputValue(), /AMIGOS10/);
+    assert.match(await dlg.locator('textarea').inputValue(), /120 puntos/);
+    const href = await dlg.locator('a', { hasText: 'Abrir WhatsApp' }).getAttribute('href');
+    assert.match(href, /wa\.me\/\d+/);
+    assert.match(decodeURIComponent(href), /AMIGOS10/);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  });
+
+  test('regalar puntos solo suma, con confirmación', async () => {
+    const { page, context } = await openPage(app.browser, seedClub());
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page, 'Clientes y promos');
+    await page.locator('button', { hasText: 'Club de puntos' }).first().click();
+    const club = page.locator('[aria-label="Club de puntos"]');
+    await club.waitFor();
+    page.once('dialog', (d) => d.accept());
+    await club.locator('[aria-label="Regalar puntos"]').first().locator('button', { hasText: '+50' }).click();
+    await page.waitForSelector('text=Le regalaste 50 puntos', { timeout: 5_000 });
+    assert.match(await club.innerText(), /170/);
+    await context.close();
+  });
+});
+
 describe('Flyer con QR y recordatorio de carritos', () => {
   test('flyer con QR: se arma con los datos de la tienda, se edita y se descarga', async () => {
     const { page, context, pageErrors } = await openPage(app.browser, fixtures.makeSeed());

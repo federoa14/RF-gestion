@@ -166,3 +166,24 @@ for (const w of [360, 320]) {
     await context.close();
   });
 }
+
+for (const w of [360, 320]) {
+  test('movil club de puntos ' + w, async () => {
+    const seed = fixtures.makeSeed();
+    seed.tables.business_settings[0].catalog_settings = { published: true, enableLoyaltyProgram: true };
+    seed.tables.catalog_loyalty_accounts = [{ business_id: 'biz1', id: 'l1', data: { id: 'l1', tenantId: 'biz1', dni: '30123456', customerName: 'Lucía Gómez Fernández', customerPhone: '11 5555 0001', pointsBalance: 120, totalPointsEarned: 120, totalPointsRedeemed: 0, ordersCount: 2, createdAt: '2026-11-01T10:00:00.000Z', updatedAt: '2026-11-20T10:00:00.000Z' } }];
+    const { page, context } = await openPage(app.browser, seed, { width: w, height: 740 });
+    await loginAsOwner(page);
+    await page.waitForSelector('text=Almacén Uno', { timeout: 20000 });
+    await page.keyboard.press('Escape');
+    await page.locator('button[aria-label="Abrir menú lateral"]').first().click();
+    await page.locator('button:visible', { hasText: 'Catálogo Online' }).first().click();
+    await page.locator('[role=tablist][aria-label="Secciones del catálogo"] button', { hasText: 'Clientes y promos' }).click();
+    await page.locator('button', { hasText: 'Club de puntos' }).first().click();
+    await page.waitForSelector('[aria-label="Club de puntos"] >> text=Lucía Gómez Fernández');
+    await audit(page, w + '-club');
+    await page.locator('button[aria-label*="Lucía Gómez"]').click();
+    await audit(page, w + '-club-whatsapp');
+    await context.close();
+  });
+}
