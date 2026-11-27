@@ -2282,6 +2282,17 @@ export default function App() {
     );
   };
 
+  // Al abrir la venta de mostrador se vuelve a leer el catálogo desde la nube: precios y stock siempre al día
+  const openCounterSale = () => {
+    setIsCounterSaleOpen(true);
+    if (selectedTenant) {
+      const tenantId = selectedTenant.id;
+      void syncTenantDataFromSupabase(tenantId).then((updated) => {
+        if (updated) loadDataForTenant(tenantId);
+      });
+    }
+  };
+
   const canCounterSale = Boolean(
     selectedTenant && getTenantEffectiveFeatureAccess(selectedTenant).canAccessWebCatalog
   );
@@ -4312,7 +4323,7 @@ export default function App() {
           activeTab={activeTab}
           setActiveTab={handleSelectTab}
           onOpenNewBoleta={() => setIsNewBoletaOpen(true)}
-          onOpenCounterSale={canCounterSale ? () => setIsCounterSaleOpen(true) : undefined}
+          onOpenCounterSale={canCounterSale ? openCounterSale : undefined}
           onOpenAlertsCenter={() => setIsAlertsCenterOpen(true)}
           onOpenSettings={() => handleSelectTab('administradores')}
           onOpenCriticalBubble={() => setIsCriticalBubbleOpen(true)}

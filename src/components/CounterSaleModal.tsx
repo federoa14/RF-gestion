@@ -77,7 +77,8 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
 
   const fmt = (n: number) => `${currencySymbol} ${Math.round(n).toLocaleString('es-AR')}`;
 
-  const available = useMemo(() => products.filter((p) => p.available !== false), [products]);
+  // Los productos son los del catálogo online (se actualizan solos: precio, stock, altas y bajas)
+  const available = products;
 
   const results = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -146,10 +147,29 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
     setScanMessage(addLine(foundProduct, foundVariant));
   };
 
-  const lines = cart.map((l) => {
-    const qtyOfProduct = cart.filter((x) => x.product.id === l.product.id).reduce((a, x) => a + x.quantity, 0);
+  // Cada renglón se vuelve a leer del catálogo: si cambió el precio o el stock mientras se carga la venta, se ve el dato actual
+  const resolved = cart.map((l) => {
+    const live = products.find((p) => p.id === l.product.id);
+    const liveVariant = l.variant ? live?.variants?.find((v) => v.id === l.variant!.id) : undefined;
+    return {
+      ...l,
+      product: live || l.product,
+      variant: liveVariant || l.variant,
+      gone: !live || Boolean(l.variant && !liveVariant),
+    };
+  });
+  const lines = resolved.map((l) => {
+    const qtyOfProduct = resolved.filter((x) => x.product.id === l.product.id).reduce((a, x) => a + x.quantity, 0);
     const price = getWholesaleUnitPrice(l.product, l.variant, qtyOfProduct);
-    return { ...l, unit: price.effectiveUnitPrice, regular: price.regularUnitPrice, wholesale: price.appliedWholesale };
+    const max = stockOf(l.product, l.variant);
+    return {
+      ...l,
+      unit: price.effectiveUnitPrice,
+      regular: price.regularUnitPrice,
+      wholesale: price.appliedWholesale,
+      overStock: max !== null && l.quantity > max,
+      maxStock: max,
+    };
   });
   const total = lines.reduce((a, l) => a + l.unit * l.quantity, 0);
 
@@ -200,6 +220,16 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
   const handleConfirm = () => {
     if (lines.length === 0) {
       setMessage('Agregá al menos un producto.');
+      return;
+    }
+    const gone = lines.find((l) => l.gone);
+    if (gone) {
+      setMessage(`"${gone.product.name}" ya no está en el catálogo. Sacalo de la venta.`);
+      return;
+    }
+    const over = lines.find((l) => l.overStock);
+    if (over) {
+      setMessage(`Solo quedan ${over.maxStock} de "${over.product.name}" en stock. Ajustá la cantidad.`);
       return;
     }
     if (overpaid) {
@@ -308,6 +338,9 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
             </div>
 
             {message && <p className="text-[11px] font-semibold text-slate-600">{message}</p>}
+            <p className="text-[10px] text-slate-400">
+              Productos, precios y stock: los del catálogo online ({products.length} producto{products.length === 1 ? '' : 's'}). Si los cambiás ahí, se actualizan acá.
+            </p>
 
             {search.trim() && (
               <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-56 overflow-y-auto">
@@ -324,6 +357,9 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
                         <span className="text-xs font-semibold text-slate-800 truncate">
                           {p.name}
                           {p.sku && <span className="ml-1.5 font-mono text-[10px] text-slate-400">{p.sku}</span>}
+                          {p.available === false && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-semibold text-slate-500">Oculto en la tienda</span>
+                          )}
                         </span>
                         <span className="text-xs font-mono text-slate-600 shrink-0">{fmt(p.price)}</span>
                       </button>
@@ -367,6 +403,10 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
                         <div className="text-[11px] text-slate-500 font-mono">
                           {fmt(l.unit)} c/u{l.wholesale ? ' · precio mayorista' : ''}
                         </div>
+                        {l.gone && <div className="text-[11px] font-semibold text-rose-600">Ya no está en el catálogo</div>}
+                        {l.overStock && !l.gone && (
+                          <div className="text-[11px] font-semibold text-rose-600">Solo quedan {l.maxStock} en stock</div>
+                        )}
                       </div>
                       <div className="inline-flex items-center gap-1">
                         <button type="button" onClick={() => changeQty(l.key, -1)} aria-label="Quitar uno" className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 cursor-pointer">
