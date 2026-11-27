@@ -1,9 +1,9 @@
 import type { CatalogAbandonedCart } from '../types';
 
-/** Horas de espera antes de sugerir el primer recordatorio. 6 h es un buen punto: el cliente ya se fue, pero todavía se acuerda de la compra. */
+/** Horas de espera antes de sugerir el primer recordatorio: 24 h (lo que pidió el comercio). Se puede cambiar. */
 export const REMINDER_HOUR_OPTIONS = [2, 6, 12, 24, 48] as const;
-export const DEFAULT_REMINDER_HOURS = 6;
-/** Segundo aviso: a las 24 h del primero. No se sugiere más de 2 para no molestar. */
+export const DEFAULT_REMINDER_HOURS = 24;
+/** Segundo aviso: a las 24 h del primero (o sea, a las 48 h). No se sugiere más de 2 para no molestar. */
 export const SECOND_REMINDER_AFTER_HOURS = 24;
 export const MAX_REMINDERS = 2;
 

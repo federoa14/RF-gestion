@@ -3,6 +3,7 @@ import { DesignPageEditor } from './DesignPageEditor';
 import { QrFlyerModal } from './QrFlyerModal';
 import { DailyCashReport } from './DailyCashReport';
 import { LoyaltyClubPanel } from './LoyaltyClubPanel';
+import { DEFAULT_STOCK_HOLD_MINUTES, STOCK_HOLD_OPTIONS } from '../utils/stockHold';
 import { giftPoints } from '../utils/loyaltyClub';
 import { getOrderPaymentSplit } from '../utils/salesReport';
 import {
@@ -795,6 +796,8 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     showToast(`Cobraste ${currency} ${Math.round(sp.aCuenta).toLocaleString('es-AR')} a ${order.customerName} (${method}).`);
   };
   const cartReminderHours = settings.abandonedCartReminderHours || DEFAULT_REMINDER_HOURS;
+  const stockHoldMinutes =
+    typeof settings.stockHoldMinutes === 'number' ? settings.stockHoldMinutes : DEFAULT_STOCK_HOLD_MINUTES;
   const cartsReadyToRemind = useMemo(() => {
     const now = Date.now();
     return abandonedCarts
@@ -4465,6 +4468,26 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       {/* SUB-TAB 2: PEDIDOS RECIBIDOS (ENVÍOS Y RETIROS) */}
       {subTab === 'pedidos' && (
         <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs" aria-label="Liberar stock de pedidos sin pagar">
+            <span className="font-semibold text-slate-700">Si un pedido con pago online (Mercado Pago o transferencia) no se paga, liberar el stock a los</span>
+            <select
+              value={stockHoldMinutes}
+              onChange={(e) =>
+                onSaveSettings({ ...settings, stockHoldMinutes: Number(e.target.value), updatedAt: new Date().toISOString() })
+              }
+              aria-label="Minutos para liberar el stock de un pedido sin pagar"
+              className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-900 cursor-pointer"
+            >
+              {STOCK_HOLD_OPTIONS.map((m) => (
+                <option key={m} value={m}>
+                  {m === 0 ? 'No liberar nunca' : `${m} minutos${m === DEFAULT_STOCK_HOLD_MINUTES ? ' (recomendado)' : ''}`}
+                </option>
+              ))}
+            </select>
+            <span className="text-slate-500 w-full">
+              El carrito en sí nunca descuenta stock: solo baja cuando el cliente confirma el pedido. Los pedidos que se pagan en el local o al recibir (efectivo o a coordinar) no se liberan solos.
+            </span>
+          </div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-bold text-slate-900">
@@ -5874,7 +5897,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                 ))}
               </select>
               <span className="text-slate-500 w-full">
-                Recomendación: primer aviso a las 6 horas, cuando el cliente todavía se acuerda de la compra; un segundo a las 24 horas del primero. No conviene pasar de dos avisos.
+                Recomendación: primer aviso a las 24 horas, para retomar el carrito del día anterior; un segundo a las 24 horas del primero. No conviene pasar de dos avisos.
               </span>
             </div>
 

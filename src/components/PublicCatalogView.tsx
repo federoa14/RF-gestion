@@ -1,5 +1,6 @@
 import { getStoreThemeRootProps, resolveStoreTheme } from '../utils/storeTheme';
 import { StoreVisitorGate, type StoreVisitorData } from './StoreVisitorGate';
+import { CartContactPrompt } from './CartContactPrompt';
 import { applyStorePwa, useInstallApp } from '../utils/pwa';
 import {
   AR_PROVINCES,
@@ -1382,7 +1383,17 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     flashClockMs,
   ]);
 
+  // Para guardar el carrito (y poder recordarlo) se piden nombre y teléfono al agregar el primer producto
+  const [pendingAdd, setPendingAdd] = useState<{ product: CatalogProduct; variant?: CatalogProductVariant } | null>(null);
   const addToCart = (product: CatalogProduct, variant?: CatalogProductVariant) => {
+    if (isFullWebFeatures && !(customerName.trim() && customerPhone.trim())) {
+      setPendingAdd({ product, variant });
+      return;
+    }
+    addToCartNow(product, variant);
+  };
+
+  const addToCartNow = (product: CatalogProduct, variant?: CatalogProductVariant) => {
     const trackedStock = variant
       ? getVariantStock(variant)
       : typeof product.stockQuantity === 'number'
@@ -2422,6 +2433,26 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       {...storeThemeRootProps}
       className={`${storeThemeRootProps.className} min-h-screen bg-[#F8FAFC] text-slate-900 flex flex-col`}
     >
+      {pendingAdd && (
+        <CartContactPrompt
+          productName={pendingAdd.product.name}
+          onCancel={() => setPendingAdd(null)}
+          onSubmit={({ name, phone }) => {
+            setCustomerName(name);
+            setCustomerPhone(phone);
+            try {
+              const raw = window.localStorage.getItem(`rf_visitor_${catalog.tenantId}`);
+              const prev = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+              window.localStorage.setItem(`rf_visitor_${catalog.tenantId}`, JSON.stringify({ ...prev, skipped: false, name, phone }));
+            } catch {
+              // ignore
+            }
+            const { product, variant } = pendingAdd;
+            setPendingAdd(null);
+            addToCartNow(product, variant);
+          }}
+        />
+      )}
       {!visitorReady && clubAvailable && (
         <StoreVisitorGate
           storeName={catalog.storeName}
