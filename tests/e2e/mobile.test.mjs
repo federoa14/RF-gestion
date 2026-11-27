@@ -79,7 +79,9 @@ for (const w of [360, 320]) {
     await page.waitForSelector('[aria-label="Bienvenida a la tienda"]', { timeout: 20000 });
     await audit(page, w + '-tienda-bienvenida');
     const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
+    await gate.locator('input[type=checkbox]').check();
     await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
+    await gate.locator('input[inputmode="numeric"]').fill('30123456');
     await gate.locator('input[type=tel]').fill('11 5555 1234');
     await gate.locator('button[type=submit]').click();
     await gate.waitFor({ state: 'detached' });
@@ -97,6 +99,8 @@ for (const w of [360, 320]) {
     await audit(page, w + '-panel');
     await page.locator('button', { hasText: /Cobrar/ }).first().click();
     await audit(page, w + '-mostrador');
+    await page.locator('[aria-label="Venta de mostrador"] button[role=radio]', { hasText: 'Mixto' }).click();
+    await audit(page, w + '-mostrador-mixto');
     await context.close();
   });
 }
@@ -107,7 +111,9 @@ for (const w of [360, 320]) {
     const { page, context } = await openPage(app.browser, seed, { width: w, height: 740, path: '/?catalog=tienda' });
     const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
     await gate.waitFor({ timeout: 20000 });
+    await gate.locator('input[type=checkbox]').check();
     await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
+    await gate.locator('input[inputmode="numeric"]').fill('30123456');
     await gate.locator('input[type=tel]').fill('11 5555 1234');
     await gate.locator('button[type=submit]').click();
     await gate.waitFor({ state: 'detached' });
@@ -141,6 +147,22 @@ for (const w of [360, 320]) {
     await page.locator('button', { hasText: 'Flyer con QR' }).click();
     await page.waitForSelector('img[alt="Vista previa del flyer con QR"]', { timeout: 15000 });
     await audit(page, w + '-flyer-qr');
+    await context.close();
+  });
+}
+
+for (const w of [360, 320]) {
+  test('movil caja del dia ' + w, async () => {
+    const { page, context } = await openPage(app.browser, fixtures.makeSeed(), { width: w, height: 740 });
+    await loginAsOwner(page);
+    await page.waitForSelector('text=Almacén Uno', { timeout: 20000 });
+    await page.keyboard.press('Escape');
+    await page.locator('button[aria-label="Abrir menú lateral"]').first().click();
+    await page.locator('button:visible', { hasText: 'Catálogo Online' }).first().click();
+    await page.locator('[role=tablist][aria-label="Secciones del catálogo"] button', { hasText: 'Pedidos y ventas' }).click();
+    await page.locator('button', { hasText: 'Caja del día' }).click();
+    await page.waitForSelector('[aria-label="Caja del día"]');
+    await audit(page, w + '-caja');
     await context.close();
   });
 }

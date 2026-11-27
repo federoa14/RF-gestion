@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Camera, CheckCircle2, Minus, Plus, Search, ShoppingBag, Trash2, X } from 'lucide-react';
 import type {
+  CatalogPaymentBreakdown,
   CatalogPaymentMethod,
   CatalogPickupOrder,
   CatalogPickupOrderItem,
@@ -30,11 +31,17 @@ interface CartLine {
 
 const normCode = (c?: string) => (c || '').trim().toLowerCase().replace(/^0+(?=\d)/, '');
 
-const PAYMENT_OPTIONS: Array<{ id: CatalogPaymentMethod; label: string }> = [
+type PayMode = 'efectivo' | 'transferencia' | 'mercadopago' | 'mixto' | 'cuenta';
+
+const PAY_MODES: Array<{ id: PayMode; label: string }> = [
   { id: 'efectivo', label: 'Efectivo' },
   { id: 'transferencia', label: 'Transferencia' },
-  { id: 'mercadopago_dinero_cuenta', label: 'Mercado Pago' },
+  { id: 'mercadopago', label: 'Mercado Pago' },
+  { id: 'mixto', label: 'Mixto' },
+  { id: 'cuenta', label: 'A cuenta' },
 ];
+
+const money = (v: string) => Math.max(0, Math.round((parseFloat(v.replace(',', '.')) || 0) * 100) / 100);
 
 function stockOf(product: CatalogProduct, variant?: CatalogProductVariant): number | null {
   if (variant) return getVariantStock(variant);
@@ -59,7 +66,12 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
   const [search, setSearch] = useState('');
   const [scanOpen, setScanOpen] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
-  const [payment, setPayment] = useState<CatalogPaymentMethod>('efectivo');
+  const [payMode, setPayMode] = useState<PayMode>('efectivo');
+  const [mixCash, setMixCash] = useState('');
+  const [mixTransfer, setMixTransfer] = useState('');
+  const [mixMp, setMixMp] = useState('');
+  const [cashGiven, setCashGiven] = useState('');
+  const [customerDni, setCustomerDni] = useState('');
   const [customer, setCustomer] = useState('');
   const [message, setMessage] = useState('');
 
@@ -141,6 +153,22 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
   });
   const total = lines.reduce((a, l) => a + l.unit * l.quantity, 0);
 
+  // Cómo se paga: cuánto en cada medio y cuánto queda a cuenta
+  const breakdown: CatalogPaymentBreakdown = (() => {
+    const t = Math.round(total * 100) / 100;
+    if (payMode === 'efectivo') return { efectivo: t, transferencia: 0, mercadopago: 0, aCuenta: 0 };
+    if (payMode === 'transferencia') return { efectivo: 0, transferencia: t, mercadopago: 0, aCuenta: 0 };
+    if (payMode === 'mercadopago') return { efectivo: 0, transferencia: 0, mercadopago: t, aCuenta: 0 };
+    if (payMode === 'cuenta') return { efectivo: 0, transferencia: 0, mercadopago: 0, aCuenta: t };
+    const e = money(mixCash);
+    const tr = money(mixTransfer);
+    const mp = money(mixMp);
+    return { efectivo: e, transferencia: tr, mercadopago: mp, aCuenta: Math.max(0, Math.round((t - e - tr - mp) * 100) / 100) };
+  })();
+  const paidTotal = breakdown.efectivo + breakdown.transferencia + breakdown.mercadopago;
+  const overpaid = payMode === 'mixto' && paidTotal > total + 0.009;
+  const change = payMode === 'efectivo' && cashGiven ? Math.max(0, money(cashGiven) - total) : 0;
+
   const changeQty = (key: string, delta: number) => {
     setCart((prev) =>
       prev
@@ -161,12 +189,25 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
     setCustomer('');
     setMessage('');
     setScanMessage('');
-    setPayment('efectivo');
+    setPayMode('efectivo');
+    setMixCash('');
+    setMixTransfer('');
+    setMixMp('');
+    setCashGiven('');
+    setCustomerDni('');
   };
 
   const handleConfirm = () => {
     if (lines.length === 0) {
       setMessage('Agregá al menos un producto.');
+      return;
+    }
+    if (overpaid) {
+      setMessage('Los montos superan el total de la venta. Revisalos.');
+      return;
+    }
+    if (breakdown.aCuenta > 0 && !customer.trim()) {
+      setMessage('Para dejar saldo a cuenta, escribí el nombre del cliente.');
       return;
     }
     const nowIso = new Date().toISOString();
@@ -186,6 +227,13 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
       quantity: l.quantity,
       subtotal: l.unit * l.quantity,
     }));
+    const paidEntries: Array<[number, CatalogPaymentMethod]> = [
+      [breakdown.efectivo, 'efectivo'],
+      [breakdown.transferencia, 'transferencia'],
+      [breakdown.mercadopago, 'mercadopago_dinero_cuenta'],
+    ];
+    const biggest = [...paidEntries].sort((a, b) => b[0] - a[0])[0];
+    const mainMethod: CatalogPaymentMethod | 'fiado' = biggest[0] > 0 ? biggest[1] : 'fiado';
     const order: CatalogPickupOrder = {
       id: `ord-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       orderNumber: `MOS-${Date.now().toString().slice(-5)}`,
@@ -195,9 +243,13 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
       customerName: customer.trim() || 'Venta de mostrador',
       customerPhone: '',
       deliveryMethod: 'retiro',
-      confirmedPaymentMethod: payment,
-      preferredPaymentMethod: payment,
-      paymentStatus: 'acreditado',
+      customerDni: customerDni.replace(/\D/g, '') || undefined,
+      saleChannel: 'mostrador',
+      paymentBreakdown: breakdown,
+      cashReceived: payMode === 'efectivo' && cashGiven ? money(cashGiven) : undefined,
+      confirmedPaymentMethod: mainMethod,
+      preferredPaymentMethod: mainMethod === 'fiado' ? 'acordar' : mainMethod,
+      paymentStatus: breakdown.aCuenta > 0 ? 'pendiente' : 'acreditado',
       notes: 'Venta de mostrador',
       items,
       subtotalBeforeDiscount: total,
@@ -335,27 +387,84 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Cómo paga</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {PAYMENT_OPTIONS.map((o) => (
-                    <button
-                      key={o.id}
-                      type="button"
-                      aria-pressed={payment === o.id}
-                      onClick={() => setPayment(o.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer ${
-                        payment === o.id ? 'bg-[#0B1933] text-white border-[#0B1933]' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      {o.label}
-                    </button>
+            <div className="space-y-2">
+              <label className="text-[11px] font-bold text-slate-700 block">Cómo paga</label>
+              <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Medio de pago">
+                {PAY_MODES.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={payMode === o.id}
+                    onClick={() => setPayMode(o.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border cursor-pointer ${
+                      payMode === o.id ? 'bg-[#0B1933] text-white border-[#0B1933]' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+
+              {payMode === 'efectivo' && (
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <label className="font-semibold text-slate-700" htmlFor="cash-given">El cliente da</label>
+                  <input
+                    id="cash-given"
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    value={cashGiven}
+                    onChange={(e) => setCashGiven(e.target.value)}
+                    placeholder={String(Math.round(total))}
+                    className="w-28 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-900"
+                  />
+                  {change > 0 && <span className="font-bold text-emerald-700">Vuelto: {fmt(change)}</span>}
+                </div>
+              )}
+
+              {payMode === 'mixto' && (
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  {(
+                    [
+                      ['Efectivo', mixCash, setMixCash],
+                      ['Transferencia', mixTransfer, setMixTransfer],
+                      ['Mercado Pago', mixMp, setMixMp],
+                    ] as const
+                  ).map(([label, value, setter]) => (
+                    <label key={label} className="block space-y-1">
+                      <span className="font-semibold text-slate-700">{label}</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        value={value}
+                        onChange={(e) => setter(e.target.value)}
+                        placeholder="0"
+                        aria-label={`Monto en ${label}`}
+                        className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-900"
+                      />
+                    </label>
                   ))}
                 </div>
-              </div>
+              )}
+
+              {(payMode === 'mixto' || payMode === 'cuenta') && (
+                <p className={`text-[11px] font-semibold ${overpaid ? 'text-rose-600' : 'text-slate-600'}`} role="status">
+                  {overpaid
+                    ? 'Los montos superan el total.'
+                    : breakdown.aCuenta > 0
+                    ? `Queda a cuenta (por cobrar): ${fmt(breakdown.aCuenta)} — hace falta el nombre del cliente.`
+                    : 'Pagado completo.'}
+                </p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Cliente (opcional)</label>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                  Cliente {breakdown.aCuenta > 0 ? '*' : '(opcional)'}
+                </label>
                 <input
                   type="text"
                   value={customer}
@@ -364,6 +473,19 @@ export const CounterSaleModal: React.FC<CounterSaleModalProps> = ({
                   autoComplete="off"
                   placeholder="Nombre del cliente"
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 block mb-1">DNI (opcional, para puntos)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={customerDni}
+                  onChange={(e) => setCustomerDni(e.target.value)}
+                  maxLength={12}
+                  autoComplete="off"
+                  placeholder="Solo números"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono text-slate-900"
                 />
               </div>
             </div>

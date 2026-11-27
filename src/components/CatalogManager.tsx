@@ -1,6 +1,8 @@
 import { isNewOrderSoundEnabled, playNewOrderChime, setNewOrderSoundEnabled } from '../utils/newOrderAlerts';
 import { DesignPageEditor } from './DesignPageEditor';
 import { QrFlyerModal } from './QrFlyerModal';
+import { DailyCashReport } from './DailyCashReport';
+import { getOrderPaymentSplit } from '../utils/salesReport';
 import {
   DEFAULT_REMINDER_HOURS,
   REMINDER_HOUR_OPTIONS,
@@ -310,11 +312,12 @@ type CatalogSubTabKey =
   | 'club_promos'
   | 'clientes_web'
   | 'estadisticas'
+  | 'caja'
   | 'configuracion'
   | 'diseno';
 const CATALOG_TAB_GROUPS: Array<{ id: 'productos' | 'pedidos' | 'clientes' | 'config'; label: string; tabs: CatalogSubTabKey[] }> = [
   { id: 'productos', label: 'Productos', tabs: ['productos', 'avisos_stock'] },
-  { id: 'pedidos', label: 'Pedidos y ventas', tabs: ['pedidos', 'carritos_abandonados', 'estadisticas'] },
+  { id: 'pedidos', label: 'Pedidos y ventas', tabs: ['pedidos', 'carritos_abandonados', 'caja', 'estadisticas'] },
   { id: 'clientes', label: 'Clientes y promos', tabs: ['clientes_web', 'club_promos', 'gift_cards'] },
   { id: 'config', label: 'Configuración', tabs: ['configuracion', 'diseno'] },
 ];
@@ -396,6 +399,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     | 'club_promos'
     | 'clientes_web'
     | 'estadisticas'
+    | 'caja'
     | 'configuracion'
     | 'diseno'
   >(() => focusRequest?.subTab || 'productos');
@@ -764,6 +768,28 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
   );
 
   const [isQrFlyerOpen, setIsQrFlyerOpen] = useState(false);
+  // Cobra el saldo que quedó a cuenta: pasa ese monto al medio elegido y marca el pedido como pagado
+  const handleCollectBalance = (order: CatalogPickupOrder, method: 'efectivo' | 'transferencia') => {
+    const sp = getOrderPaymentSplit(order);
+    if (sp.aCuenta <= 0) return;
+    const nextBreakdown = {
+      efectivo: sp.efectivo + (method === 'efectivo' ? sp.aCuenta : 0),
+      transferencia: sp.transferencia + (method === 'transferencia' ? sp.aCuenta : 0),
+      mercadopago: sp.mercadopago,
+      aCuenta: 0,
+    };
+    const now = new Date().toISOString();
+    const updated: CatalogPickupOrder = {
+      ...order,
+      paymentBreakdown: nextBreakdown,
+      paymentStatus: 'acreditado',
+      confirmedPaymentMethod: method,
+      updatedAt: now,
+    };
+    onSaveOrders(orders.map((o) => (o.id === order.id ? updated : o)));
+    void syncCatalogOrderToSupabase(updated);
+    showToast(`Cobraste ${currency} ${Math.round(sp.aCuenta).toLocaleString('es-AR')} a ${order.customerName} (${method}).`);
+  };
   const cartReminderHours = settings.abandonedCartReminderHours || DEFAULT_REMINDER_HOURS;
   const cartsReadyToRemind = useMemo(() => {
     const now = Date.now();
@@ -3382,6 +3408,16 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => setSubTab('caja')}
+              className={`${catalogTabHiddenClass('caja')} px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                subTab === 'caja' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Caja del día</span>
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setSubTab('estadisticas');
                 if (!isBasicWebPlan) {
@@ -5012,6 +5048,39 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
             </div>
           </div>
 
+          {(() => {
+            const demand = Array.from(pendingAlertsByProductId.entries())
+              .map(([productId, waiting]) => {
+                const sample = stockAlerts.find((a) => a.productId === productId);
+                return { productId, waiting, name: sample?.productName || 'Producto' };
+              })
+              .sort((a, b) => b.waiting - a.waiting)
+              .slice(0, 5);
+            if (demand.length === 0) return null;
+            return (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3" aria-label="Productos más pedidos para reponer">
+                <div className="text-xs font-bold text-amber-950 mb-1.5">
+                  📈 Lo que más te piden que repongas (clientes esperando)
+                </div>
+                <ol className="space-y-1">
+                  {demand.map((d, i) => (
+                    <li key={d.productId} className="flex items-center justify-between gap-2 text-xs text-amber-950">
+                      <span className="truncate">
+                        {i + 1}. {d.name}
+                      </span>
+                      <span className="shrink-0 px-2 py-0.5 rounded-md bg-amber-600 text-white font-bold tabular-nums">
+                        {d.waiting} {d.waiting === 1 ? 'persona' : 'personas'}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                <p className="text-[11px] text-amber-900/80 mt-1.5">
+                  Son ventas que ya tenés pedidas: conviene reponer primero lo que está arriba.
+                </p>
+              </div>
+            );
+          })()}
+
           {sortedStockAlerts.length === 0 ? (
             <div className="border border-dashed border-slate-200 rounded-xl p-8 text-center space-y-1.5">
               <Bell className="w-7 h-7 text-slate-300 mx-auto" />
@@ -6378,6 +6447,10 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       )}
 
       {/* SUB-TAB 2D: ESTADÍSTICAS, RANKING DE VENTAS Y PUNTOS POR DNI */}
+      {subTab === 'caja' && (
+        <DailyCashReport orders={orders} currencySymbol={currency} onCollectBalance={handleCollectBalance} />
+      )}
+
       {subTab === 'estadisticas' &&
         (() => {
           const nowDate = new Date();

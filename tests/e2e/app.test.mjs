@@ -211,32 +211,15 @@ describe('Tienda pública', () => {
 });
 
 describe('Bienvenida de la tienda', () => {
-  test('pide nombre y teléfono, los recuerda y no vuelve a pedirlos', async () => {
-    const { page, context, pageErrors } = await openPage(app.browser, fixtures.makeStoreSeed({ canAccessFullFeatures: true, enablePromoClub: true }), {
-      path: '/?catalog=tienda',
-    });
+  const clubSeed = () => fixtures.makeStoreSeed({ canAccessFullFeatures: true, enablePromoClub: true, enableLoyaltyProgram: true });
+
+  test('entrar es libre: sin registrarse no se pide nada y no se vuelve a preguntar', async () => {
+    const { page, context, pageErrors } = await openPage(app.browser, clubSeed(), { path: '/?catalog=tienda' });
     const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
     await gate.waitFor({ timeout: 20_000 });
-    // sin datos no deja entrar
-    await gate.locator('button[type=submit]').click();
-    await page.waitForSelector('text=Ingresá tu nombre.', { timeout: 5_000 });
-    await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
-    await gate.locator('button[type=submit]').click();
-    await page.waitForSelector('text=teléfono', { timeout: 5_000 });
-    assert.equal(await gate.count(), 1);
-    await gate.locator('input[type=tel]').fill('11 5555 1234');
-    await gate.locator('input[type=checkbox]').check();
+    assert.equal(await gate.locator('input[type=tel]').count(), 0, 'no pide teléfono para entrar');
     await gate.locator('button[type=submit]').click();
     await gate.waitFor({ state: 'detached', timeout: 5_000 });
-    // el carrito ya trae los datos
-    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
-    await page.waitForTimeout(300);
-    await page.locator('button', { hasText: 'Mi Carrito' }).first().click();
-    await page.waitForTimeout(600);
-    const values = await page.evaluate(() => [...document.querySelectorAll('input')].map((i) => i.value));
-    assert.ok(values.includes('Lucía'), 'nombre precargado en el carrito');
-    assert.ok(values.includes('11 5555 1234'), 'teléfono precargado en el carrito');
-    // al volver a entrar no lo pide de nuevo
     await page.reload();
     await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
     await page.waitForTimeout(800);
@@ -244,16 +227,72 @@ describe('Bienvenida de la tienda', () => {
     assert.deepEqual(pageErrors, []);
     await context.close();
   });
+
+  test('quien se suma al club deja nombre, DNI y teléfono: quedan registrados y precargan el carrito', async () => {
+    const { page, fake, context, pageErrors } = await openPage(app.browser, clubSeed(), { path: '/?catalog=tienda' });
+    const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
+    await gate.waitFor({ timeout: 20_000 });
+    await gate.locator('input[type=checkbox]').check();
+    await gate.locator('button[type=submit]').click();
+    await page.waitForSelector('text=Ingresá tu nombre.', { timeout: 5_000 });
+    await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
+    await gate.locator('button[type=submit]').click();
+    await page.waitForSelector('text=DNI', { timeout: 5_000 });
+    assert.equal(await gate.count(), 1);
+    await gate.locator('input[inputmode="numeric"]').fill('30123456');
+    await gate.locator('input[type=tel]').fill('11 5555 1234');
+    await gate.locator('button[type=submit]').click();
+    await gate.waitFor({ state: 'detached', timeout: 5_000 });
+    await page.waitForTimeout(1500);
+    const sent = JSON.stringify(fake.log.filter((l) => l.kind === 'rpc'));
+    assert.match(sent, /"dni":"30123456"/);
+    assert.match(sent, /catalog_loyalty_accounts/);
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    await page.waitForTimeout(300);
+    await page.locator('button', { hasText: 'Mi Carrito' }).first().click();
+    await page.waitForTimeout(600);
+    const values = await page.evaluate(() => [...document.querySelectorAll('input')].map((i) => i.value));
+    assert.ok(values.includes('Lucía'), 'nombre precargado en el carrito');
+    assert.ok(values.includes('11 5555 1234'), 'teléfono precargado en el carrito');
+    assert.ok(values.includes('30123456'), 'DNI precargado para los puntos');
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  });
+
+  test('producto agotado: si ya está registrado, "avisame" se anota con un toque', async () => {
+    const seed = fixtures.makeStoreSeed({ canAccessFullFeatures: true, enablePromoClub: true });
+    seed.catalog.products = [{ ...seed.catalog.products[0], stockQuantity: 0 }, seed.catalog.products[1]];
+    const { page, fake, context } = await openPage(app.browser, seed, { path: '/?catalog=tienda' });
+    const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
+    await gate.waitFor({ timeout: 20_000 });
+    await gate.locator('input[type=checkbox]').check();
+    await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
+    await gate.locator('input[inputmode="numeric"]').fill('30123456');
+    await gate.locator('input[type=tel]').fill('11 5555 1234');
+    await gate.locator('button[type=submit]').click();
+    await gate.waitFor({ state: 'detached' });
+    await page.locator('button', { hasText: 'Avisar cuando haya stock' }).first().click();
+    await page.waitForTimeout(1500);
+    const sent = JSON.stringify(fake.log.filter((l) => l.kind === 'rpc'));
+    assert.match(sent, /catalog_stock_alerts/);
+    assert.match(sent, /"customerDni":"30123456"/);
+    assert.match(sent, /"customerName":"Lucía"/);
+    await context.close();
+  });
 });
 
 describe('Envío a todo el país', () => {
   async function enterStore(page) {
+    await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
     const gate = page.locator('[aria-label="Bienvenida a la tienda"]');
-    await gate.waitFor({ timeout: 20_000 });
-    await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
-    await gate.locator('input[type=tel]').fill('11 5555 1234');
-    await gate.locator('button[type=submit]').click();
-    await gate.waitFor({ state: 'detached' });
+    if (await gate.isVisible().catch(() => false)) {
+      await gate.locator('input[type=checkbox]').check();
+      await gate.locator('input[autocomplete="given-name"]').fill('Lucía');
+      await gate.locator('input[inputmode="numeric"]').fill('30123456');
+      await gate.locator('input[type=tel]').fill('11 5555 1234');
+      await gate.locator('button[type=submit]').click();
+      await gate.waitFor({ state: 'detached' });
+    }
     await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
     await page.locator('button', { hasText: 'Mi Carrito' }).first().click();
     await page.locator('button', { hasText: 'Envío a domicilio' }).first().click();
@@ -292,6 +331,76 @@ describe('Envío a todo el país', () => {
     const { page, context } = await openPage(app.browser, seed, { path: '/?catalog=tienda' });
     await enterStore(page);
     assert.equal(await page.locator('text=A todo el país').count(), 0);
+    await context.close();
+  });
+});
+
+describe('Venta de mostrador y caja del día', () => {
+  const seedWithProduct = () => {
+    const seed = fixtures.makeSeed({ withOrders: false });
+    const now = new Date().toISOString();
+    seed.tables.catalog_products = [{ business_id: 'biz1', id: 'p1', data: { id: 'p1', name: 'Yerba 1kg', description: '', price: 2500, category: 'Almacén', available: true, sku: '7790001', stockQuantity: 10, createdAt: now, updatedAt: now } }];
+    return seed;
+  };
+
+  test('pago mixto con saldo a cuenta: queda registrado en la caja del día y se puede cobrar después', async () => {
+    const { page, context, pageErrors } = await openPage(app.browser, seedWithProduct());
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await page.locator('button', { hasText: 'Cobrar / Venta' }).click();
+    const dlg = page.locator('[aria-label="Venta de mostrador"]');
+    await dlg.locator('input[placeholder^="O buscá a mano"]').fill('Yerba');
+    await dlg.locator('button', { hasText: 'Yerba 1kg' }).first().click();
+    await dlg.locator('button[role=radio]', { hasText: 'Mixto' }).click();
+    await dlg.locator('input[aria-label="Monto en Efectivo"]').fill('1000');
+    await dlg.locator('input[aria-label="Monto en Transferencia"]').fill('1000');
+    // sin nombre no deja saldo a cuenta
+    await dlg.locator('button', { hasText: /^Cobrar$/ }).last().click();
+    await page.waitForSelector('text=escribí el nombre del cliente', { timeout: 5_000 });
+    await dlg.locator('input[placeholder="Nombre del cliente"]').fill('Doña Rosa');
+    await dlg.locator('button', { hasText: /^Cobrar$/ }).last().click();
+    await dlg.waitFor({ state: 'detached', timeout: 5_000 });
+    // caja del día
+    await openCatalogSection(page, 'Pedidos y ventas');
+    await page.locator('button', { hasText: 'Caja del día' }).click();
+    const caja = page.locator('[aria-label="Caja del día"]');
+    await caja.waitFor({ timeout: 10_000 });
+    const text = await caja.innerText();
+    assert.match(text, /Efectivo\s*\$\s*1\.000/);
+    assert.match(text, /Transferencia\s*\$\s*1\.000/);
+    assert.match(text, /A cuenta \(por cobrar\)\s*\$\s*500/);
+    assert.match(text, /Doña Rosa/);
+    // cuando el cliente paga el saldo
+    await caja.locator('button', { hasText: 'Cobró en efectivo' }).click();
+    await page.waitForTimeout(500);
+    const after = await caja.innerText();
+    assert.match(after, /Efectivo\s*\$\s*1\.500/);
+    assert.match(after, /A cuenta \(por cobrar\)\s*\$\s*0/);
+    assert.equal(await caja.locator('button', { hasText: 'Cobró en efectivo' }).count(), 0);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  });
+
+  test('efectivo: calcula el vuelto, y la caja se puede mirar por día', async () => {
+    const { page, context } = await openPage(app.browser, seedWithProduct());
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await page.locator('button', { hasText: 'Cobrar / Venta' }).click();
+    const dlg = page.locator('[aria-label="Venta de mostrador"]');
+    await dlg.locator('input[placeholder^="O buscá a mano"]').fill('Yerba');
+    await dlg.locator('button', { hasText: 'Yerba 1kg' }).first().click();
+    await dlg.locator('input#cash-given').fill('3000');
+    await page.waitForSelector('text=Vuelto: $ 500', { timeout: 5_000 });
+    await dlg.locator('button', { hasText: /^Cobrar$/ }).last().click();
+    await dlg.waitFor({ state: 'detached' });
+    await openCatalogSection(page, 'Pedidos y ventas');
+    await page.locator('button', { hasText: 'Caja del día' }).click();
+    const caja = page.locator('[aria-label="Caja del día"]');
+    assert.match(await caja.innerText(), /Efectivo\s*\$\s*2\.500/);
+    // ayer no hubo ventas
+    await caja.locator('button', { hasText: 'Ayer' }).click();
+    await page.waitForSelector('text=No hay ventas registradas en este día.', { timeout: 5_000 });
+    assert.match(await caja.innerText(), /Efectivo\s*\$\s*0/);
     await context.close();
   });
 });
