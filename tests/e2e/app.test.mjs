@@ -281,6 +281,77 @@ describe('Bienvenida de la tienda', () => {
   });
 });
 
+describe('Carrito guardado y stock', () => {
+  const planThreeStore = () => fixtures.makeStoreSeed({ canAccessFullFeatures: true, enablePromoClub: true, paymentMethods: { efectivo: true } });
+
+  test('al agregar el primer producto pide nombre y teléfono para guardar el carrito', async () => {
+    const { page, fake, context, pageErrors } = await openPage(app.browser, planThreeStore(), { path: '/?catalog=tienda' });
+    // entra libre, sin registrarse
+    await page.locator('[aria-label="Bienvenida a la tienda"] button[type=submit]').click();
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    const prompt = page.locator('[aria-label="Guardar tu carrito"]');
+    await prompt.waitFor({ timeout: 5_000 });
+    // "Ahora no" no agrega nada
+    await prompt.locator('button', { hasText: 'Ahora no' }).click();
+    await prompt.waitFor({ state: 'detached' });
+    assert.match(await page.locator('button', { hasText: 'Mi Carrito' }).first().innerText(), /0/);
+    // sin datos no deja avanzar
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    await prompt.locator('button[type=submit]').click();
+    await page.waitForSelector('text=Ingresá tu nombre.', { timeout: 5_000 });
+    await prompt.locator('input[autocomplete="given-name"]').fill('Lucía');
+    await prompt.locator('button[type=submit]').click();
+    await page.waitForSelector('text=teléfono', { timeout: 5_000 });
+    await prompt.locator('input[type=tel]').fill('11 5555 1234');
+    await prompt.locator('button[type=submit]').click();
+    await prompt.waitFor({ state: 'detached' });
+    assert.match(await page.locator('button', { hasText: 'Mi Carrito' }).first().innerText(), /1/);
+    await page.waitForTimeout(2500);
+    const sent = JSON.stringify(fake.log.filter((l) => l.kind === 'rpc'));
+    assert.match(sent, /catalog_abandoned_carts/);
+    assert.match(sent, /"customerPhone":"11 5555 1234"/);
+    // segundo producto: ya no vuelve a pedir
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    await page.waitForTimeout(400);
+    assert.equal(await page.locator('[aria-label="Guardar tu carrito"]').count(), 0);
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  });
+
+  test('sin Plan 3 no se piden datos para agregar al carrito', async () => {
+    const { page, context } = await openPage(app.browser, fixtures.makeStoreSeed({ canAccessFullFeatures: false, planTier: 'web' }), { path: '/?catalog=tienda' });
+    await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
+    await page.locator('button', { hasText: 'Agregar al carrito' }).first().click();
+    await page.waitForTimeout(400);
+    assert.equal(await page.locator('[aria-label="Guardar tu carrito"]').count(), 0);
+    assert.match(await page.locator('button', { hasText: 'Mi Carrito' }).first().innerText(), /1/);
+    await context.close();
+  });
+
+  test('pedido con pago online sin pagar: a los 25 min se cancela y el stock vuelve al catálogo', async () => {
+    const seed = fixtures.makeSeed({ withOrders: false });
+    const now = new Date().toISOString();
+    const minAgo = (m) => new Date(Date.now() - m * 60_000).toISOString();
+    seed.tables.catalog_products = [{ business_id: 'biz1', id: 'p1', data: { id: 'p1', name: 'Yerba 1kg', description: '', price: 2500, category: 'Almacén', available: true, stockQuantity: 3, createdAt: now, updatedAt: now } }];
+    const item = { productId: 'p1', productName: 'Yerba 1kg', quantity: 2, unitPrice: 2500, subtotal: 5000 };
+    seed.tables.catalog_orders = [
+      fixtures.mkOrder(1, { id: 'hold', orderNumber: 'PED-HOLD', preferredPaymentMethod: 'link_pago', paymentStatus: 'pendiente', status: 'pendiente_retiro', stockDeducted: true, items: [item], totalAmount: 5000, createdAt: minAgo(30) }),
+      fixtures.mkOrder(2, { id: 'cash', orderNumber: 'PED-CASH', preferredPaymentMethod: 'efectivo', paymentStatus: 'pendiente', status: 'pendiente_retiro', stockDeducted: true, items: [item], totalAmount: 5000, createdAt: minAgo(300) }),
+    ];
+    const { page, fake, context } = await openPage(app.browser, seed);
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await page.waitForSelector('text=se canceló y el stock volvió al catálogo', { timeout: 15_000 });
+    await page.waitForTimeout(2500);
+    const status = (id) => fake.db.catalog_orders.find((o) => o.id === id)?.data?.status;
+    assert.equal(status('hold'), 'cancelado');
+    assert.equal(status('cash'), 'pendiente_retiro', 'el pedido en efectivo es una reserva válida');
+    const stock = fake.db.catalog_products.find((p) => p.id === 'p1')?.data?.stockQuantity;
+    assert.equal(stock, 5, 'el stock de las 2 unidades volvió');
+    await context.close();
+  });
+});
+
 describe('Envío a todo el país', () => {
   async function enterStore(page) {
     await page.waitForSelector('text=Yerba 1kg', { timeout: 20_000 });
@@ -508,7 +579,7 @@ describe('Flyer con QR y recordatorio de carritos', () => {
     const seed = fixtures.makeSeed();
     const hAgo = (h) => new Date(Date.now() - h * 3_600_000).toISOString();
     const mk = (id, name, phone, h) => ({ business_id: 'biz1', id, data: { id, tenantId: 'biz1', customerName: name, customerPhone: phone, items: [{ productId: 'p1', productName: 'Yerba 1kg', unitPrice: 2500, quantity: 1, subtotal: 2500 }], totalAmount: 2500, currencySymbol: '$', status: 'abandoned', createdAt: hAgo(h), updatedAt: hAgo(h) } });
-    seed.tables.catalog_abandoned_carts = [mk('cart-1', 'Lucía Gómez', '1155550001', 8), mk('cart-2', 'Pedro Nuevo', '1155550002', 1)];
+    seed.tables.catalog_abandoned_carts = [mk('cart-1', 'Lucía Gómez', '1155550001', 30), mk('cart-2', 'Pedro Nuevo', '1155550002', 1)];
     const { page, context } = await openPage(app.browser, seed);
     await loginAsOwner(page);
     await waitForPanel(page);
@@ -518,7 +589,7 @@ describe('Flyer con QR y recordatorio de carritos', () => {
     const text = await strip.innerText();
     assert.match(text, /Lucía Gómez/);
     assert.match(text, /1155550001/);
-    assert.doesNotMatch(text, /Pedro Nuevo/, 'el carrito de hace 1 h todavía no está listo');
+    assert.doesNotMatch(text, /Pedro Nuevo/, 'el carrito de hace 1 h todavía no está listo (se recuerda a las 24 h)');
     await strip.locator('button', { hasText: 'Ver y recordar' }).click();
     await page.waitForSelector('text=Listo para recordar', { timeout: 10_000 });
     await page.waitForSelector('text=Esperando', { timeout: 5_000 });

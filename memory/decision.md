@@ -118,3 +118,8 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-27 — El catálogo online rige la venta de mostrador
 - **Decisión (del usuario):** los productos del catálogo online son los que rigen en la venta al público, incluida la de mostrador; tienen que estar siempre actualizados.
 - **Cómo se cumple:** "Cobrar / Venta" usa la misma lista de productos del catálogo (incluidos los ocultos en la tienda, marcados como tales), vuelve a leerla de la nube al abrirse, relee precio y stock de cada renglón mientras se arma la venta y revalida al cobrar (producto borrado o stock insuficiente bloquea). Al cobrar se descuenta el stock del catálogo y la tienda pública se republica.
+
+## 2026-11-27 — Carrito guardado, recordatorio a las 24 h y stock de pedidos sin pagar
+- **Datos del carrito (Plan 3):** entrar a la tienda es libre; al agregar el **primer producto** se piden nombre y teléfono (obligatorios) para guardar el carrito y poder recordarlo. "Ahora no" no agrega el producto. Los planes sin carritos guardados no piden nada. (El usuario pidió "nombre y teléfono al entrar"; se aplicó en el momento de agregar al carrito para no trabar la entrada, que el usuario no quería.)
+- **Recordatorio:** el primer aviso por WhatsApp se sugiere a las **24 h** (antes 6 h); segundo a las 24 h del primero; configurable (2/6/12/24/48 h).
+- **Stock:** el carrito nunca descuenta stock; baja al confirmar el pedido. Un pedido de la tienda con pago online (Mercado Pago o transferencia sin comprobante) que sigue sin pagar a los **25 min** (configurable: 15/25/30/60 o nunca, en Pedidos recibidos) se cancela solo y el stock vuelve al catálogo; efectivo y "a coordinar" son reservas válidas y no se liberan. Corre mientras el panel está abierto.

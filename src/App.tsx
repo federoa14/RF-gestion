@@ -83,6 +83,7 @@ import {
 import { getPanelThemeRootProps, resolveStoreTheme } from './utils/storeTheme';
 import { slimCatalogSnapshotImages } from './utils/imageShrink';
 import { applyPanelPwa } from './utils/pwa';
+import { DEFAULT_STOCK_HOLD_MINUTES, isStockHoldExpired } from './utils/stockHold';
 import { TermsAcceptanceGate } from './components/TermsAcceptanceGate';
 import { CounterSaleModal } from './components/CounterSaleModal';
 import type { CatalogStoreTheme } from './types';
@@ -524,6 +525,16 @@ export default function App() {
       themeColor: theme,
     });
   }, [currentUser?.role, selectedTenant?.id, config.distributorName, config.distributorLogoUrl, config.panelTheme]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Pedidos de la tienda con pago online sin acreditar: pasado el tiempo configurado (25 min por defecto)
+  // se cancelan solos y el stock vuelve al catálogo. Corre mientras el panel está abierto.
+  const releaseExpiredHoldsRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    const run = () => releaseExpiredHoldsRef.current();
+    run();
+    const id = window.setInterval(run, 60_000);
+    return () => window.clearInterval(id);
+  }, [selectedTenant?.id, catalogOrders, catalogSettings.stockHoldMinutes]);
 
   // Si cambia a un rubro distinto de Distribuidora/Mayorista mientras estaba en Rendición, volver a Boletas
   useEffect(() => {
@@ -2267,6 +2278,45 @@ export default function App() {
     setAllTenants(freshTenants);
     saveTenants(freshTenants);
     setSelectedTenant(updatedTenant);
+  };
+
+  releaseExpiredHoldsRef.current = () => {
+    if (!selectedTenant || currentUser?.role === 'superadmin') return;
+    const minutes =
+      typeof catalogSettings.stockHoldMinutes === 'number' ? catalogSettings.stockHoldMinutes : DEFAULT_STOCK_HOLD_MINUTES;
+    const expired = catalogOrders.filter((o) => isStockHoldExpired(o, minutes) && !o.loyaltyPointsSettled);
+    if (expired.length === 0) return;
+    const nowIso = new Date().toISOString();
+    const expiredIds = new Set(expired.map((o) => o.id));
+    let products = catalogProducts;
+    let stockChanged = false;
+    for (const o of expired) {
+      const r = applyOrderStockDeltaToProducts(products, o.items, 'restore');
+      if (r.changed) {
+        products = r.updatedProducts;
+        stockChanged = true;
+      }
+    }
+    if (stockChanged) handleSaveCatalogProducts(products);
+    handleSaveCatalogOrders(
+      catalogOrders.map((o) =>
+        expiredIds.has(o.id)
+          ? {
+              ...o,
+              status: 'cancelado' as const,
+              stockDeducted: false,
+              stockRestoredAt: nowIso,
+              notes: [o.notes, `Cancelado solo: el pago online no se acreditó en ${minutes} min y se liberó el stock.`].filter(Boolean).join(' · '),
+              updatedAt: nowIso,
+            }
+          : o
+      )
+    );
+    showToast(
+      expired.length === 1
+        ? `El pedido #${expired[0].orderNumber} no se pagó en ${minutes} min: se canceló y el stock volvió al catálogo.`
+        : `${expired.length} pedidos sin pagar se cancelaron y el stock volvió al catálogo.`
+    );
   };
 
   const handleConfirmCounterSale = (order: CatalogPickupOrder) => {

@@ -130,7 +130,7 @@ for (const w of [360, 320]) {
 for (const w of [360, 320]) {
   test('movil flyer QR y carritos ' + w, async () => {
     const seed = fixtures.makeSeed();
-    const old = new Date(Date.now() - 8 * 3_600_000).toISOString();
+    const old = new Date(Date.now() - 30 * 3_600_000).toISOString();
     seed.tables.catalog_abandoned_carts = [{ business_id: 'biz1', id: 'c1', data: { id: 'c1', tenantId: 'biz1', customerName: 'Lucía Gómez', customerPhone: '1155550001', items: [{ productId: 'p1', productName: 'Yerba 1kg', unitPrice: 2500, quantity: 1, subtotal: 2500 }], totalAmount: 2500, currencySymbol: '$', status: 'abandoned', createdAt: old, updatedAt: old } }];
     const { page, context } = await openPage(app.browser, seed, { width: w, height: 740 });
     await loginAsOwner(page);
