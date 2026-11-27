@@ -403,6 +403,26 @@ describe('Venta de mostrador y caja del día', () => {
     assert.match(await caja.innerText(), /Efectivo\s*\$\s*0/);
     await context.close();
   });
+  test('mostrador usa los productos del catálogo online, con su stock actual', async () => {
+    const seed = seedWithProduct();
+    const now = new Date().toISOString();
+    seed.tables.catalog_products.push({ business_id: 'biz1', id: 'p2', data: { id: 'p2', name: 'Fideos 500g', description: '', price: 900, category: 'Almacén', available: false, sku: '7790002', stockQuantity: 1, createdAt: now, updatedAt: now } });
+    const { page, context } = await openPage(app.browser, seed);
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await page.locator('button', { hasText: 'Cobrar / Venta' }).click();
+    const dlg = page.locator('[aria-label="Venta de mostrador"]');
+    assert.match(await dlg.innerText(), /los del catálogo online \(2 productos\)/);
+    // el producto oculto en la tienda también está en el catálogo: se puede vender en el mostrador
+    await dlg.locator('input[placeholder^="O buscá a mano"]').fill('Fideos');
+    await page.waitForSelector('text=Oculto en la tienda', { timeout: 5_000 });
+    await dlg.locator('button', { hasText: 'Fideos 500g' }).first().click();
+    // y respeta el stock del catálogo: queda 1, no deja sumar otro
+    await dlg.locator('button[aria-label="Sumar uno"]').click();
+    assert.match(await dlg.innerText(), /Fideos 500g/);
+    assert.equal((await dlg.locator('span.w-7').first().innerText()).trim(), '1', 'no pasa del stock del catálogo');
+    await context.close();
+  });
 });
 
 describe('Club de puntos', () => {

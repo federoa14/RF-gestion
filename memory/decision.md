@@ -114,3 +114,7 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-27 — Club de puntos de solo lectura
 - **Decisión:** nueva pestaña "Club de puntos" (Catálogo → Clientes y promos, Plan 3): lista de socios con sus puntos (más puntos primero), buscador por nombre/DNI/teléfono, ícono de WhatsApp con mensaje y cupón de regalo, y regalo de puntos (+10/+50/+100, solo suma, con confirmación y registro en el historial). El comercio **no puede restar ni editar** puntos: se quitó el "Ajuste rápido" (+10/+50/−10) de Estadísticas.
 - **Idea futura (NO se hace ahora):** puntos compartidos entre comercios amigos: quien use el sistema suma puntos y los canjea en cualquier comercio adherido; cada comercio y cada cliente tendría que aceptar sumarse (consentimiento, y revisar privacidad: datos de clientes entre comercios).
+
+## 2026-11-27 — El catálogo online rige la venta de mostrador
+- **Decisión (del usuario):** los productos del catálogo online son los que rigen en la venta al público, incluida la de mostrador; tienen que estar siempre actualizados.
+- **Cómo se cumple:** "Cobrar / Venta" usa la misma lista de productos del catálogo (incluidos los ocultos en la tienda, marcados como tales), vuelve a leerla de la nube al abrirse, relee precio y stock de cada renglón mientras se arma la venta y revalida al cobrar (producto borrado o stock insuficiente bloquea). Al cobrar se descuenta el stock del catálogo y la tienda pública se republica.
