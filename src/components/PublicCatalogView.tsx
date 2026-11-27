@@ -691,11 +691,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
               window.history.replaceState({}, '', cleanUrl);
             }
 
-            // #1 Verificar si abrió un link de recupero de carrito (?recover_cart=...) solo si tiene funciones Full
-            const resFullWeb =
-              res.canAccessFullFeatures !== false && res.planTier !== 'web';
+            // #1 Verificar si abrió un link de recupero de carrito (?recover_cart=...) (todos los planes con tienda)
             const recoverCartId = (params.get('recover_cart') || '').trim();
-            if (resFullWeb && recoverCartId) {
+            if (recoverCartId) {
               const recovered = await fetchPublicAbandonedCartByIdFromSupabase(
                 recoverCartId,
                 res.tenantId
@@ -1303,9 +1301,9 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     }
   };
 
-  // #1 Auto Abandoned Cart capture whenever user has items + any contact info (phone/name/DNI) — solo Plan Full
+  // #1 Auto Abandoned Cart capture whenever user has items + any contact info (phone/name/DNI) — todos los planes con tienda
   useEffect(() => {
-    if (!isFullWebFeatures || !catalog?.tenantId || submittedOrder || cartItems.length === 0) return;
+    if (!catalog?.tenantId || submittedOrder || cartItems.length === 0) return;
     const contactPhone = (
       customerPhone ||
       loyaltyAccount?.customerPhone ||
@@ -1383,10 +1381,18 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
     flashClockMs,
   ]);
 
-  // Para guardar el carrito (y poder recordarlo) se piden nombre y teléfono al agregar el primer producto
+  // Para guardar el carrito (y poder recordarlo) se piden nombre y teléfono al agregar el primer producto,
+  // una sola vez por dispositivo: si el cliente prefiere no darlos, se agrega igual y no se le vuelve a insistir.
   const [pendingAdd, setPendingAdd] = useState<{ product: CatalogProduct; variant?: CatalogProductVariant } | null>(null);
+  const contactAskedKey = catalog ? `rf_contact_asked_${catalog.tenantId}` : '';
   const addToCart = (product: CatalogProduct, variant?: CatalogProductVariant) => {
-    if (isFullWebFeatures && !(customerName.trim() && customerPhone.trim())) {
+    let alreadyAsked = false;
+    try {
+      alreadyAsked = Boolean(contactAskedKey && window.localStorage.getItem(contactAskedKey));
+    } catch {
+      alreadyAsked = false;
+    }
+    if (!alreadyAsked && !(customerName.trim() && customerPhone.trim())) {
       setPendingAdd({ product, variant });
       return;
     }
@@ -2147,8 +2153,8 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
         }
       }
 
-      // #1 Mark abandoned cart session as recovered and rotate session ID (solo Plan Full)
-      if (isFullWebFeatures) {
+      // #1 Mark abandoned cart session as recovered and rotate session ID
+      {
         void upsertPublicAbandonedCartToSupabase({
           id: abandonedCartId,
           tenantId: catalog.tenantId,
@@ -2436,11 +2442,21 @@ export const PublicCatalogView: React.FC<PublicCatalogViewProps> = ({
       {pendingAdd && (
         <CartContactPrompt
           productName={pendingAdd.product.name}
-          onCancel={() => setPendingAdd(null)}
+          onSkip={() => {
+            try {
+              window.localStorage.setItem(contactAskedKey, '1');
+            } catch {
+              // ignore
+            }
+            const { product, variant } = pendingAdd;
+            setPendingAdd(null);
+            addToCartNow(product, variant);
+          }}
           onSubmit={({ name, phone }) => {
             setCustomerName(name);
             setCustomerPhone(phone);
             try {
+              window.localStorage.setItem(contactAskedKey, '1');
               const raw = window.localStorage.getItem(`rf_visitor_${catalog.tenantId}`);
               const prev = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
               window.localStorage.setItem(`rf_visitor_${catalog.tenantId}`, JSON.stringify({ ...prev, skipped: false, name, phone }));

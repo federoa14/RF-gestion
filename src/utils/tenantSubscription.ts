@@ -105,10 +105,11 @@ export function getSubscriptionPlanDefinitions(
         'Página Web / Catálogo Online básico con link y QR propio',
         'Pagos en la tienda (Efectivo, Transferencia / Alias y Mercado Pago)',
         'Manejo de stock por producto y variante · Hasta 5 rubros y 50 prendas/objetos',
+        'Carritos guardados con recordatorio por WhatsApp y stock que se libera solo en pedidos sin pagar',
       ],
       excludedFeatures: [
         'Sin burbujas ni banners de ofertas, Outlet ni Ofertas Relámpago',
-        'Sin seguimiento de clientes (Avisos de Stock, Carritos Abandonados, Clientes Web)',
+        'Sin seguimiento de clientes (Avisos de Stock, Clientes Web)',
         'Sin SuperClub / Puntos por DNI ni cupones o descuentos',
         'Tope de 5 rubros y 50 prendas/objetos (ampliable al instante a Plan 3 · Full)',
       ],
@@ -127,7 +128,7 @@ export function getSubscriptionPlanDefinitions(
       includedFeatures: [
         'Todo lo de Plan 1 y Plan 2 (Gestión + Página Web)',
         'Programa de Puntos por DNI, Favoritos, Recompra 1-clic y Analítica Web',
-        'Recupero automático de Carritos Abandonados + Ofertas Relámpago / Outlet',
+        'Ofertas Relámpago / Outlet y descuentos por cupón',
         'Gift Cards Digitales con QR + Cambios/Devoluciones con Saldo a Favor por DNI',
         'Club Promos, Estudio de Flyers, WhatsApp Automático y Radar Clientes Fríos',
       ],
