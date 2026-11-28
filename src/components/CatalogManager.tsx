@@ -3,6 +3,12 @@ import { DesignPageEditor } from './DesignPageEditor';
 import { QrFlyerModal } from './QrFlyerModal';
 import { DailyCashReport } from './DailyCashReport';
 import { LoyaltyClubPanel } from './LoyaltyClubPanel';
+import {
+  downloadCatalogXlsxTemplate,
+  isExcelFile,
+  isLegacyExcelFile,
+  xlsxFileToDelimitedText,
+} from '../utils/catalogXlsx';
 import { DEFAULT_STOCK_HOLD_MINUTES, STOCK_HOLD_OPTIONS } from '../utils/stockHold';
 import { giftPoints } from '../utils/loyaltyClub';
 import { getOrderPaymentSplit } from '../utils/salesReport';
@@ -2650,10 +2656,29 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
     [csvRawInput, activeRubroFilters]
   );
 
-  const handleCsvFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCsvFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    // Archivo de Excel (.xlsx): se lee la primera hoja y se muestra la vista previa
+    if (isExcelFile(file)) {
+      try {
+        const text = await xlsxFileToDelimitedText(file);
+        if (!text.trim()) {
+          showToast('El Excel está vacío: la primera hoja no tiene filas.');
+          return;
+        }
+        setCsvRawInput(text);
+        showToast(`Excel leído: ${file.name}. Revisá la vista previa antes de importar.`);
+      } catch {
+        showToast('No se pudo leer el Excel. Probá guardarlo de nuevo como .xlsx.');
+      }
+      return;
+    }
+    if (isLegacyExcelFile(file)) {
+      showToast('Ese es un Excel viejo (.xls). Abrilo y guardalo como "Libro de Excel (.xlsx)" y subilo de nuevo.');
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       setCsvRawInput(String(reader.result || ''));
@@ -2662,6 +2687,19 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
       showToast('No se pudo leer el archivo seleccionado.');
     };
     reader.readAsText(file, 'utf-8');
+  };
+
+  const handleDownloadXlsxTemplate = async () => {
+    try {
+      await downloadCatalogXlsxTemplate(
+        activeRubroFilters[0] || 'General',
+        activeCatalogRubro,
+        `plantilla_catalogo_${activeCatalogRubro}.xlsx`
+      );
+      showToast('Plantilla de Excel descargada: completala y subila acá.');
+    } catch {
+      showToast('No se pudo armar la plantilla de Excel. Probá con la plantilla CSV.');
+    }
   };
 
   const handleDownloadCsvTemplate = () => {
@@ -3737,7 +3775,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-800 cursor-pointer whitespace-nowrap"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>Importar Excel / CSV</span>
+                  <span>Cargar productos desde Excel</span>
                 </button>
               </div>
             </div>
@@ -9585,7 +9623,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     Carga Masiva de Productos desde Excel / CSV
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Rubro activo: <strong>{rubroPreset.shortLabel}</strong> · Subí un archivo CSV o pegá filas directo desde Excel / Google Sheets.
+                    Rubro activo: <strong>{rubroPreset.shortLabel}</strong> · Subí tu archivo de Excel (.xlsx) o CSV, o pegá filas directo desde Excel / Google Sheets.
                   </p>
                 </div>
               </div>
@@ -9615,12 +9653,20 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 hover:bg-slate-100 text-slate-800 cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Descargar plantilla Excel/CSV</span>
+                    <span>Plantilla CSV</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadXlsxTemplate()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-900 cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Plantilla Excel (.xlsx)</span>
                   </button>
                   <input
                     ref={csvFileInputRef}
                     type="file"
-                    accept=".csv,.tsv,.txt"
+                    accept=".xlsx,.csv,.tsv,.txt"
                     onChange={handleCsvFileSelected}
                     className="hidden"
                   />
@@ -9630,7 +9676,7 @@ export const CatalogManager: React.FC<CatalogManagerProps> = ({
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#0B1933] hover:bg-[#13264A] text-white cursor-pointer"
                   >
                     <Upload className="w-3.5 h-3.5" />
-                    <span>Subir archivo .CSV</span>
+                    <span>Subir Excel (.xlsx) o CSV</span>
                   </button>
                 </div>
               </div>

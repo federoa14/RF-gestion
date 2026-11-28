@@ -1,7 +1,10 @@
 // Pruebas de punta a punta en el navegador (Chromium) con Supabase simulado.
 // Correr con: npm run test:e2e
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import writeExcelFile from 'write-excel-file/node';
 import { after, before, describe, test } from 'node:test';
 import { fixtures, horizontalOverflow, loginAsOwner, loginAsSuper, openCatalogSection, openPage, startApp, waitForPanel } from './helpers.mjs';
 
@@ -277,6 +280,56 @@ describe('Bienvenida de la tienda', () => {
     assert.match(sent, /catalog_stock_alerts/);
     assert.match(sent, /"customerDni":"30123456"/);
     assert.match(sent, /"customerName":"Lucía"/);
+    await context.close();
+  });
+});
+
+describe('Carga de productos desde Excel', () => {
+  test('sube un archivo .xlsx, muestra la vista previa y agrega todos los productos', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rf-xlsx-'));
+    const file = join(dir, 'productos.xlsx');
+    await writeExcelFile([
+      ['nombre', 'precio', 'categoria', 'subfiltros', 'sku', 'stock', 'unidad'],
+      ['Biblia Reina Valera', 18500.5, 'Libros', 'Biblias|Regalo', '7790001', 12, 'Unidad'],
+      ['Cuaderno A4', 3200, 'Librería', '', 'CUA-1', 40, 'Unidad'],
+      ['Lapicera azul', 450, 'Librería', 'Útiles', 'LAP-1', 100, 'Unidad'],
+    ]).toFile(file);
+    const { page, fake, context, pageErrors } = await openPage(app.browser, fixtures.makeSeed({ withOrders: false }));
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page, 'Productos');
+    await page.locator('button', { hasText: 'Cargar productos desde Excel' }).click();
+    const dlg = page.locator('div.fixed', { hasText: 'Carga Masiva de Productos desde Excel / CSV' });
+    await dlg.waitFor({ timeout: 10_000 });
+    const [tpl] = await Promise.all([page.waitForEvent('download'), dlg.locator('button', { hasText: 'Plantilla Excel (.xlsx)' }).click()]);
+    assert.match(tpl.suggestedFilename(), /^plantilla_catalogo_.*\.xlsx$/);
+    await dlg.locator('input[type=file]').setInputFiles(file);
+    await page.waitForSelector('text=Importar 3 producto(s)', { timeout: 15_000 });
+    assert.match(await dlg.innerText(), /Biblia Reina Valera/);
+    await dlg.locator('button', { hasText: 'Importar 3 producto(s)' }).click();
+    await page.waitForTimeout(2500);
+    const names = (fake.db.catalog_products || []).map((p) => p.data?.name);
+    assert.ok(names.includes('Biblia Reina Valera') && names.includes('Cuaderno A4') && names.includes('Lapicera azul'), `productos cargados: ${names.join(', ')}`);
+    const biblia = fake.db.catalog_products.find((p) => p.data?.name === 'Biblia Reina Valera').data;
+    assert.equal(biblia.price, 18500.5);
+    assert.equal(biblia.stockQuantity, 12);
+    assert.equal(biblia.sku, '7790001');
+    assert.deepEqual(pageErrors, []);
+    await context.close();
+  });
+
+  test('un Excel viejo (.xls) avisa cómo guardarlo', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rf-xls-'));
+    const file = join(dir, 'viejo.xls');
+    (await import('node:fs')).writeFileSync(file, 'no importa');
+    const { page, context } = await openPage(app.browser, fixtures.makeSeed({ withOrders: false }));
+    await loginAsOwner(page);
+    await waitForPanel(page);
+    await openCatalogSection(page, 'Productos');
+    await page.locator('button', { hasText: 'Cargar productos desde Excel' }).click();
+    await page.locator('div.fixed input[type=file]').setInputFiles(file);
+    await page.waitForSelector('text=.xlsx', { timeout: 5_000 });
+    await page.waitForSelector('text=Excel viejo', { timeout: 5_000 });
     await context.close();
   });
 });

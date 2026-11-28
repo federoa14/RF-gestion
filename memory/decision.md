@@ -127,3 +127,7 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-27 — Carrito guardado y recordatorios para todos los planes con tienda
 - **Decisión (del usuario):** el carrito guardado, el recordatorio por WhatsApp y la liberación de stock **no son solo Plan 3**: valen para Plan 2 también (Plan 1 no tiene tienda). Se destrabó la pestaña Carritos para Plan 2 y se actualizaron las listas de funciones de los planes.
 - **Cuándo se piden los datos (criterio de marketing, elegido por Claude):** al **agregar el primer producto** al carrito, que es el momento de mayor intención y el menos invasivo (pedirlos al entrar baja la conversión), **una sola vez por dispositivo**. "Ahora no, agregar igual" agrega el producto y no se vuelve a preguntar. Si el cliente ya se registró en el club (Plan 3), no se le pide de nuevo.
+
+## 2026-11-28 — Carga de productos desde Excel (.xlsx)
+- **Decisión:** en Catálogo → Productos, el botón "Cargar productos desde Excel" acepta archivos `.xlsx` (primera hoja), además de CSV y filas pegadas. Muestra vista previa con errores por fila y deja elegir qué hacer si el SKU o nombre ya existe. Hay plantilla en Excel (.xlsx) y en CSV. Los `.xls` viejos piden guardarlos como `.xlsx`.
+- **Técnica:** `src/utils/catalogXlsx.ts` convierte la hoja al mismo texto de la carga por CSV (`catalogCsv.ts`); librerías `read-excel-file` y `write-excel-file`.
