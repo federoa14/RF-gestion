@@ -14,7 +14,7 @@ export const DEFAULT_PLAN_PRICES: PlatformPlanPrices = {
 };
 
 export const PLAN_WEB_MAX_RUBROS = 5;
-export const PLAN_WEB_MAX_PRODUCTS = 50;
+export const PLAN_WEB_MAX_PRODUCTS = 100;
 
 export interface SubscriptionPlanDefinition {
   tier: SubscriptionPlanTier;
@@ -96,7 +96,7 @@ export function getSubscriptionPlanDefinitions(
       name: 'Plan 2 · Página Web Básica',
       shortName: 'Página Web Básica',
       tagline:
-        'Página web básica con pagos en tienda y manejo de stock (hasta 5 rubros y 50 prendas/objetos).',
+        'Página web básica con pagos en tienda y manejo de stock (hasta 5 rubros y 100 prendas/objetos).',
       monthlyPrice: prices.web,
       includesWebCatalog: true,
       includesFullSuite: false,
@@ -104,14 +104,14 @@ export function getSubscriptionPlanDefinitions(
         'Todo lo incluido en Plan 1 · Básico (Sin Web)',
         'Página Web / Catálogo Online básico con link y QR propio',
         'Pagos en la tienda (Efectivo, Transferencia / Alias y Mercado Pago)',
-        'Manejo de stock por producto y variante · Hasta 5 rubros y 50 prendas/objetos',
+        'Manejo de stock por producto y variante · Hasta 5 rubros y 100 prendas/objetos',
         'Carritos guardados con recordatorio por WhatsApp y stock que se libera solo en pedidos sin pagar',
       ],
       excludedFeatures: [
         'Sin burbujas ni banners de ofertas, Outlet ni Ofertas Relámpago',
         'Sin seguimiento de clientes (Avisos de Stock, Clientes Web)',
         'Sin SuperClub / Puntos por DNI ni cupones o descuentos',
-        'Tope de 5 rubros y 50 prendas/objetos (ampliable al instante a Plan 3 · Full)',
+        'Tope de 5 rubros y 100 prendas/objetos (ampliable al instante a Plan 3 · Full)',
       ],
     },
     {

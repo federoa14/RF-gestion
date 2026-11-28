@@ -47,9 +47,9 @@ test('una prueba sin plan asignado también cuenta como Plan 2', () => {
   assert.equal(access.canAccessFullFeatures, false);
 });
 
-test('los límites del Plan 2 se mantienen: 5 rubros y 50 artículos', () => {
+test('los límites del Plan 2 se mantienen: 5 rubros y 100 artículos', () => {
   assert.equal(PLAN_WEB_MAX_RUBROS, 5);
-  assert.equal(PLAN_WEB_MAX_PRODUCTS, 50);
+  assert.equal(PLAN_WEB_MAX_PRODUCTS, 100);
 });
 
 test('al vencer la prueba se pide elegir plan (queda en trial_expired)', () => {

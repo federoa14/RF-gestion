@@ -80,7 +80,7 @@ export const PLATFORM_TERMS_SECTIONS: TermsClauseSection[] = [
     number: '8',
     title: 'Planes y Cambios entre Planes',
     paragraphs: [
-      'El servicio cuenta con tres planes: Plan 1 · Básico (gestión interna sin página web), Plan 2 · Página Web Básica (gestión + catálogo web con pagos en tienda y stock, hasta 5 rubros y 50 prendas/objetos) y Plan 3 · Full (rubros y artículos ilimitados, promociones, fidelización por DNI, Gift Cards, automatizaciones y diseño personalizado de la tienda y del panel).',
+      'El servicio cuenta con tres planes: Plan 1 · Básico (gestión interna sin página web), Plan 2 · Página Web Básica (gestión + catálogo web con pagos en tienda y stock, hasta 5 rubros y 100 prendas/objetos) y Plan 3 · Full (rubros y artículos ilimitados, promociones, fidelización por DNI, Gift Cards, automatizaciones y diseño personalizado de la tienda y del panel).',
       'Subas de plan: habilitan de inmediato las funciones del nuevo plan y actualizan el abono al valor de ese plan. Bajas de plan: el Comercio puede volver a un plan inferior; sus datos no se borran, pero se desactivan de inmediato las herramientas exclusivas del plan anterior y rigen los topes del plan elegido.',
     ],
   },
@@ -172,7 +172,7 @@ export function getPlanTransitionImpactSummary(
         toTier === 'basico'
           ? 'Opera exclusivamente con panel de gestión interna (sin catálogo web público).'
           : toTier === 'web'
-          ? 'Habilita catálogo online básico con pagos en tienda y stock (tope de 5 rubros y 50 artículos).'
+          ? 'Habilita catálogo online básico con pagos en tienda y stock (tope de 5 rubros y 100 artículos).'
           : 'Habilita rubros/artículos ilimitados, SuperClub, puntos por DNI, ofertas y automatizaciones.',
       ],
     };
@@ -196,9 +196,9 @@ export function getPlanTransitionImpactSummary(
       'Conservás el 100% de tus boletas, clientes, productos y configuraciones actuales.',
     ];
     if (toTier === 'web') {
-      bullets.push('Se habilita tu Página Web Básica con pagos en tienda y stock (hasta 5 rubros y 50 prendas).');
+      bullets.push('Se habilita tu Página Web Básica con pagos en tienda y stock (hasta 5 rubros y 100 prendas).');
     } else if (toTier === 'full') {
-      bullets.push('Se eliminan los topes de 5 rubros / 50 prendas y se desbloquean ofertas, seguimiento web, SuperClub, puntos por DNI, Gift Cards y automatización.');
+      bullets.push('Se eliminan los topes de 5 rubros / 100 prendas y se desbloquean ofertas, seguimiento web, SuperClub, puntos por DNI, Gift Cards y automatización.');
     }
     return {
       direction: 'upgrade',
@@ -224,7 +224,7 @@ export function getPlanTransitionImpactSummary(
       'Al volver a Plan 2 (Web Básica) se desactivan burbujas de ofertas, Outlet, seguimiento de clientes web, SuperClub, puntos por DNI y descuentos.'
     );
     bullets.push(
-      'Aplicarán los topes de hasta 5 rubros y 50 prendas/objetos para nuevas altas en catálogo (lo ya cargado permanece guardado).'
+      'Aplicarán los topes de hasta 5 rubros y 100 prendas/objetos para nuevas altas en catálogo (lo ya cargado permanece guardado).'
     );
   }
 

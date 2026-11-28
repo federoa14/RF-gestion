@@ -131,3 +131,6 @@ Formato: `## AAAA-MM-DD — Título` · **Decisión** · **Motivo** · **Alterna
 ## 2026-11-28 — Carga de productos desde Excel (.xlsx)
 - **Decisión:** en Catálogo → Productos, el botón "Cargar productos desde Excel" acepta archivos `.xlsx` (primera hoja), además de CSV y filas pegadas. Muestra vista previa con errores por fila y deja elegir qué hacer si el SKU o nombre ya existe. Hay plantilla en Excel (.xlsx) y en CSV. Los `.xls` viejos piden guardarlos como `.xlsx`.
 - **Técnica:** `src/utils/catalogXlsx.ts` convierte la hoja al mismo texto de la carga por CSV (`catalogCsv.ts`); librerías `read-excel-file` y `write-excel-file`.
+
+## 2026-11-28 — Topes del Plan 2: 100 productos y 5 rubros
+- **Decisión:** el Plan 2 (Página Web Básica) sube de 50 a **100 productos**; los rubros siguen en **5**. Constante `PLAN_WEB_MAX_PRODUCTS` en `src/utils/tenantSubscription.ts`; textos de planes, términos y prueba gratis actualizados. No se subió `TERMS_VERSION` (no se vuelve a pedir aceptación por este cambio).
